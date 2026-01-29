@@ -1,0 +1,68 @@
+{
+  "expo": {
+    "name": "Travony",
+    "slug": "trav-ride",
+    "owner": "travoney_1",
+    "version": "3.3.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": "travony",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.travony.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#00B14F",
+        "foregroundImage": "./assets/images/android-icon-foreground.png",
+        "backgroundImage": "./assets/images/android-icon-background.png",
+        "monochromeImage": "./assets/images/android-icon-monochrome.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "predictiveBackGestureEnabled": false,
+      "package": "com.travony.app",
+      "versionCode": 33,
+      "config": {
+        "googleMaps": {
+          "apiKey": "${GOOGLE_API_KEY}"
+        }
+      }
+    },
+    "web": {
+      "output": "single",
+      "favicon": "./assets/images/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/images/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#00B14F",
+          "dark": {
+            "backgroundColor": "#1A1A1A"
+          }
+        }
+      ],
+      "expo-web-browser",
+      [
+        "@stripe/stripe-react-native",
+        {
+          "merchantIdentifier": "merchant.com.travony",
+          "enableGooglePay": true
+        }
+      ]
+    ],
+    "experiments": {
+      "reactCompiler": false
+    },
+    "extra": {
+      "eas": {
+        "projectId": "366f0f57-2f25-4053-a69b-1905365f8013"
+      }
+    }
+  }
+}
