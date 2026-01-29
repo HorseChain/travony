@@ -17,9 +17,6 @@ jobs:
   build-rider:
     if: ${{ github.event.inputs.app_variant == 'rider' || github.event.inputs.app_variant == 'both' }}
     runs-on: ubuntu-latest
-    env:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,7 +40,7 @@ jobs:
         run: npm ci
 
       - name: Setup Expo CLI
-        run: npm install -g expo-cli
+        run: npm install -g expo-cli @expo/ngrok
 
       - name: Copy rider app config
         run: cp app.rider.json app.json
@@ -51,17 +48,41 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Fix Google API Key placeholder
+      - name: Fix Google Maps API key in manifest
         run: |
-          sed -i 's/\${GOOGLE_API_KEY\}/'$GOOGLE_API_KEY'/g' android/app/src/main/AndroidManifest.xml
-          grep -i "geo.API_KEY" android/app/src/main/AndroidManifest.xml || true
+          sed -i 's/\${GOOGLE_API_KEY}/${{ secrets.GOOGLE_API_KEY }}/g' android/app/src/main/AndroidManifest.xml
 
-      - name: Build Debug AAB with Gradle
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.RIDER_KEYSTORE_BASE64 }}" | base64 -d > android/app/rider-keystore.jks
+
+      - name: Create signing config
+        run: |
+          cat >> android/app/build.gradle << 'EOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("rider-keystore.jks")
+                      storePassword "${{ secrets.RIDER_KEYSTORE_PASSWORD }}"
+                      keyAlias "${{ secrets.RIDER_KEY_ALIAS }}"
+                      keyPassword "${{ secrets.RIDER_KEY_PASSWORD }}"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+
+      - name: Build signed AAB with Gradle
         working-directory: android
-        run: ./gradlew bundleDebug --stacktrace
+        run: ./gradlew bundleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
 
       - name: Rename output
-        run: mv android/app/build/outputs/bundle/debug/app-debug.aab t-ride.aab
+        run: mv android/app/build/outputs/bundle/release/app-release.aab t-ride.aab
 
       - name: Upload T Ride AAB
         uses: actions/upload-artifact@v4
@@ -73,9 +94,6 @@ jobs:
   build-driver:
     if: ${{ github.event.inputs.app_variant == 'driver' || github.event.inputs.app_variant == 'both' }}
     runs-on: ubuntu-latest
-    env:
-      GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -99,7 +117,7 @@ jobs:
         run: npm ci
 
       - name: Setup Expo CLI
-        run: npm install -g expo-cli
+        run: npm install -g expo-cli @expo/ngrok
 
       - name: Copy driver app config
         run: cp app.driver.json app.json
@@ -107,17 +125,41 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Fix Google API Key placeholder
+      - name: Fix Google Maps API key in manifest
         run: |
-          sed -i 's/\${GOOGLE_API_KEY\}/'$GOOGLE_API_KEY'/g' android/app/src/main/AndroidManifest.xml
-          grep -i "geo.API_KEY" android/app/src/main/AndroidManifest.xml || true
+          sed -i 's/\${GOOGLE_API_KEY}/${{ secrets.GOOGLE_API_KEY }}/g' android/app/src/main/AndroidManifest.xml
 
-      - name: Build Debug AAB with Gradle
+      - name: Decode keystore
+        run: |
+          echo "${{ secrets.DRIVER_KEYSTORE_BASE64 }}" | base64 -d > android/app/driver-keystore.jks
+
+      - name: Create signing config
+        run: |
+          cat >> android/app/build.gradle << 'EOF'
+
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("driver-keystore.jks")
+                      storePassword "${{ secrets.DRIVER_KEYSTORE_PASSWORD }}"
+                      keyAlias "${{ secrets.DRIVER_KEY_ALIAS }}"
+                      keyPassword "${{ secrets.DRIVER_KEY_PASSWORD }}"
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          EOF
+
+      - name: Build signed AAB with Gradle
         working-directory: android
-        run: ./gradlew bundleDebug --stacktrace
+        run: ./gradlew bundleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
 
       - name: Rename output
-        run: mv android/app/build/outputs/bundle/debug/app-debug.aab t-driver.aab
+        run: mv android/app/build/outputs/bundle/release/app-release.aab t-driver.aab
 
       - name: Upload T Driver AAB
         uses: actions/upload-artifact@v4
