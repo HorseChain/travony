@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -42,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Setup Expo CLI
-        run: npm install -g expo-cli @expo/ngrok
+        run: npm install -g expo-cli
 
       - name: Copy rider app config
         run: cp app.rider.json app.json
@@ -50,12 +51,12 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Build AAB with Gradle
+      - name: Build Debug AAB with Gradle
         working-directory: android
-        run: ./gradlew bundleRelease
+        run: ./gradlew bundleDebug --stacktrace
 
       - name: Rename output
-        run: mv android/app/build/outputs/bundle/release/app-release.aab t-ride.aab
+        run: mv android/app/build/outputs/bundle/debug/app-debug.aab t-ride.aab
 
       - name: Upload T Ride AAB
         uses: actions/upload-artifact@v4
@@ -69,6 +70,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+      GRADLE_OPTS: -Dorg.gradle.jvmargs="-Xmx4g -XX:MaxMetaspaceSize=512m"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -92,7 +94,7 @@ jobs:
         run: npm ci
 
       - name: Setup Expo CLI
-        run: npm install -g expo-cli @expo/ngrok
+        run: npm install -g expo-cli
 
       - name: Copy driver app config
         run: cp app.driver.json app.json
@@ -100,12 +102,12 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
 
-      - name: Build AAB with Gradle
+      - name: Build Debug AAB with Gradle
         working-directory: android
-        run: ./gradlew bundleRelease
+        run: ./gradlew bundleDebug --stacktrace
 
       - name: Rename output
-        run: mv android/app/build/outputs/bundle/release/app-release.aab t-driver.aab
+        run: mv android/app/build/outputs/bundle/debug/app-debug.aab t-driver.aab
 
       - name: Upload T Driver AAB
         uses: actions/upload-artifact@v4
