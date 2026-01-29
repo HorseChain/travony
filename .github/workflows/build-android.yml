@@ -1,0 +1,63 @@
+name: Build Android AAB
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_variant:
+        description: 'Which app to build'
+        required: true
+        default: 'rider'
+        type: choice
+        options:
+          - rider
+          - driver
+          - both
+
+jobs:
+  build-rider:
+    if: ${{ github.event.inputs.app_variant == 'rider' || github.event.inputs.app_variant == 'both' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - run: eas build --platform android --profile production-rider-aab --non-interactive --local --output t-ride.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t-ride-aab
+          path: t-ride.aab
+
+  build-driver:
+    if: ${{ github.event.inputs.app_variant == 'driver' || github.event.inputs.app_variant == 'both' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - run: eas build --platform android --profile production-driver-aab --non-interactive --local --output t-driver.aab
+      - uses: actions/upload-artifact@v4
+        with:
+          name: t-driver-aab
+          path: t-driver.aab
