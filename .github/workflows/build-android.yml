@@ -18,46 +18,94 @@ jobs:
     if: ${{ github.event.inputs.app_variant == 'rider' || github.event.inputs.app_variant == 'both' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-      - run: npm ci
-      - run: eas build --platform android --profile production-rider-aab --non-interactive --local --output t-ride.aab
-      - uses: actions/upload-artifact@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo CLI
+        run: npm install -g expo-cli @expo/ngrok
+
+      - name: Copy rider app config
+        run: cp app.rider.json app.json
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build AAB with Gradle
+        working-directory: android
+        run: ./gradlew bundleRelease
+
+      - name: Rename output
+        run: mv android/app/build/outputs/bundle/release/app-release.aab t-ride.aab
+
+      - name: Upload T Ride AAB
+        uses: actions/upload-artifact@v4
         with:
           name: t-ride-aab
           path: t-ride.aab
+          retention-days: 30
 
   build-driver:
     if: ${{ github.event.inputs.app_variant == 'driver' || github.event.inputs.app_variant == 'both' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
-      - uses: actions/setup-java@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
-      - uses: expo/expo-github-action@v8
-        with:
-          eas-version: latest
-          token: ${{ secrets.EXPO_TOKEN }}
-      - run: npm ci
-      - run: eas build --platform android --profile production-driver-aab --non-interactive --local --output t-driver.aab
-      - uses: actions/upload-artifact@v4
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Expo CLI
+        run: npm install -g expo-cli @expo/ngrok
+
+      - name: Copy driver app config
+        run: cp app.driver.json app.json
+
+      - name: Generate Android project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build AAB with Gradle
+        working-directory: android
+        run: ./gradlew bundleRelease
+
+      - name: Rename output
+        run: mv android/app/build/outputs/bundle/release/app-release.aab t-driver.aab
+
+      - name: Upload T Driver AAB
+        uses: actions/upload-artifact@v4
         with:
           name: t-driver-aab
           path: t-driver.aab
+          retention-days: 30
