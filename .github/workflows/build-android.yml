@@ -51,6 +51,11 @@ jobs:
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
 
+      - name: Fix Google API Key placeholder
+        run: |
+          sed -i 's/\${GOOGLE_API_KEY\}/'$GOOGLE_API_KEY'/g' android/app/src/main/AndroidManifest.xml
+          grep -i "geo.API_KEY" android/app/src/main/AndroidManifest.xml || true
+
       - name: Build Debug AAB with Gradle
         working-directory: android
         run: ./gradlew bundleDebug --stacktrace
@@ -101,6 +106,11 @@ jobs:
 
       - name: Generate Android project
         run: npx expo prebuild --platform android --clean
+
+      - name: Fix Google API Key placeholder
+        run: |
+          sed -i 's/\${GOOGLE_API_KEY\}/'$GOOGLE_API_KEY'/g' android/app/src/main/AndroidManifest.xml
+          grep -i "geo.API_KEY" android/app/src/main/AndroidManifest.xml || true
 
       - name: Build Debug AAB with Gradle
         working-directory: android
