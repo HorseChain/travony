@@ -1,0 +1,84 @@
+{
+  "cli": {
+    "version": ">= 3.0.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal"
+    },
+    "preview-rider": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      }
+    },
+    "preview-driver": {
+      "extends": "preview",
+      "env": {
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      }
+    },
+    "production-rider": {
+      "distribution": "store",
+      "env": {
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production-rider-aab": {
+      "distribution": "store",
+      "env": {
+        "APP_VARIANT": "rider",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "resourceClass": "large"
+    },
+    "production-driver": {
+      "distribution": "store",
+      "env": {
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      },
+      "android": {
+        "buildType": "apk"
+      }
+    },
+    "production-driver-aab": {
+      "distribution": "store",
+      "env": {
+        "APP_VARIANT": "driver",
+        "EXPO_PUBLIC_DOMAIN": "Travony.replit.app"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "resourceClass": "large"
+    }
+  },
+  "submit": {
+    "production-rider": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "production"
+      }
+    },
+    "production-driver": {
+      "android": {
+        "serviceAccountKeyPath": "./google-play-service-account.json",
+        "track": "production"
+      }
+    }
+  }
+}
