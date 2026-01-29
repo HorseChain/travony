@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Deletion Request - Travony</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+        .header {
+            background: linear-gradient(135deg, #00B14F 0%, #009940 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        .header p {
+            opacity: 0.9;
+        }
+        .content {
+            background: white;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-top: -20px;
+        }
+        h2 {
+            color: #00B14F;
+            margin: 30px 0 15px;
+            font-size: 1.3rem;
+        }
+        h2:first-child {
+            margin-top: 0;
+        }
+        p, li {
+            margin-bottom: 12px;
+            color: #555;
+        }
+        ul {
+            padding-left: 25px;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+        }
+        input, textarea, select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-family: inherit;
+        }
+        input:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: #00B14F;
+            box-shadow: 0 0 0 3px rgba(0, 177, 79, 0.1);
+        }
+        textarea {
+            min-height: 120px;
+            resize: vertical;
+        }
+        .submit-btn {
+            background: linear-gradient(135deg, #00B14F 0%, #009940 100%);
+            color: white;
+            padding: 14px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0, 177, 79, 0.3);
+        }
+        .info-box {
+            background: #e8f5e9;
+            border-left: 4px solid #00B14F;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .warning-box {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+            padding: 15px 20px;
+            margin: 20px 0;
+            border-radius: 0 8px 8px 0;
+        }
+        .footer {
+            text-align: center;
+            padding: 30px;
+            color: #666;
+        }
+        a {
+            color: #00B14F;
+        }
+        .success-message {
+            display: none;
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Data Deletion Request</h1>
+        <p>Travony Ride-Hailing Platform</p>
+    </div>
+    
+    <div class="container">
+        <div class="content">
+            <div class="success-message" id="successMessage">
+                Your data deletion request has been submitted successfully. We will process your request within 30 days.
+            </div>
+
+            <h2>Request Deletion of Your Personal Data</h2>
+            <p>In accordance with data protection regulations, you have the right to request the deletion of your personal data from our systems. Please complete the form below to submit your request.</p>
+
+            <div class="info-box">
+                <strong>What happens when you request data deletion:</strong>
+                <ul style="margin-top: 10px;">
+                    <li>Your account will be permanently deactivated</li>
+                    <li>Your personal information will be deleted from our active systems</li>
+                    <li>Your ride history and payment records will be anonymized</li>
+                    <li>Processing typically takes up to 30 days</li>
+                </ul>
+            </div>
+
+            <div class="warning-box">
+                <strong>Important:</strong> Some data may be retained for legal compliance, fraud prevention, or dispute resolution purposes as required by law.
+            </div>
+
+            <form id="deletionForm">
+                <div class="form-group">
+                    <label for="email">Email Address (registered with Travony)</label>
+                    <input type="email" id="email" name="email" required placeholder="your@email.com">
+                </div>
+
+                <div class="form-group">
+                    <label for="phone">Phone Number (registered with Travony)</label>
+                    <input type="tel" id="phone" name="phone" required placeholder="+1 234 567 8900">
+                </div>
+
+                <div class="form-group">
+                    <label for="userType">Account Type</label>
+                    <select id="userType" name="userType" required>
+                        <option value="">Select your account type</option>
+                        <option value="rider">Rider</option>
+                        <option value="driver">Driver</option>
+                        <option value="both">Both Rider and Driver</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="reason">Reason for Deletion (Optional)</label>
+                    <textarea id="reason" name="reason" placeholder="Please let us know why you're leaving..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="confirm" required>
+                        I understand that this action is permanent and cannot be undone. All my data will be deleted.
+                    </label>
+                </div>
+
+                <button type="submit" class="submit-btn">Submit Deletion Request</button>
+            </form>
+
+            <h2>Alternative Methods</h2>
+            <p>You can also request data deletion through:</p>
+            <ul>
+                <li><strong>In-App:</strong> Go to Settings &gt; Account &gt; Delete Account</li>
+                <li><strong>Email:</strong> Send a request to privacy@travony.com</li>
+                <li><strong>Support:</strong> Contact us at <a href="/support">/support</a></li>
+            </ul>
+
+            <h2>Data We Delete</h2>
+            <ul>
+                <li>Account information (name, email, phone)</li>
+                <li>Profile photos and preferences</li>
+                <li>Payment methods (card details are handled by our payment processor)</li>
+                <li>Location history</li>
+                <li>In-app messages</li>
+            </ul>
+
+            <h2>Data We May Retain</h2>
+            <ul>
+                <li>Transaction records (for tax/legal purposes, anonymized)</li>
+                <li>Safety incident reports</li>
+                <li>Data required for legal proceedings</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>&copy; 2026 Travony. All rights reserved.</p>
+        <p><a href="/">Home</a> | <a href="/privacy">Privacy Policy</a> | <a href="/terms">Terms of Service</a></p>
+    </div>
+
+    <script>
+        document.getElementById('deletionForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            document.getElementById('successMessage').style.display = 'block';
+            this.reset();
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        });
+    </script>
+</body>
+</html>
