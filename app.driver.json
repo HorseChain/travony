@@ -29,7 +29,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.driver",
-      "versionCode": 33,
+      "versionCode": 34,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"
