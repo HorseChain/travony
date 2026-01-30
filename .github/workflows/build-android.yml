@@ -12,6 +12,17 @@ on:
           - rider
           - driver
           - both
+      publish_track:
+        description: 'Publish to Google Play track'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - internal
+          - alpha
+          - beta
+          - production
 
 jobs:
   build-rider:
@@ -91,6 +102,15 @@ jobs:
           path: t-ride.aab
           retention-days: 30
 
+      - name: Publish to Google Play
+        if: ${{ github.event.inputs.publish_track != 'none' }}
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+        run: |
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | base64 -d > service-account.json
+          export GOOGLE_PLAY_SERVICE_ACCOUNT_JSON=$(cat service-account.json)
+          node scripts/publish-to-play-store.js rider t-ride.aab ${{ github.event.inputs.publish_track }}
+
   build-driver:
     if: ${{ github.event.inputs.app_variant == 'driver' || github.event.inputs.app_variant == 'both' }}
     runs-on: ubuntu-latest
@@ -167,3 +187,12 @@ jobs:
           name: t-driver-aab
           path: t-driver.aab
           retention-days: 30
+
+      - name: Publish to Google Play
+        if: ${{ github.event.inputs.publish_track != 'none' }}
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+        run: |
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | base64 -d > service-account.json
+          export GOOGLE_PLAY_SERVICE_ACCOUNT_JSON=$(cat service-account.json)
+          node scripts/publish-to-play-store.js driver t-driver.aab ${{ github.event.inputs.publish_track }}
