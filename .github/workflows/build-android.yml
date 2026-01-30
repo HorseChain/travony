@@ -92,14 +92,27 @@ jobs:
         working-directory: android
         run: ./gradlew bundleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
 
-      - name: Rename output
-        run: mv android/app/build/outputs/bundle/release/app-release.aab t-ride.aab
+      - name: Build signed APK with Gradle
+        working-directory: android
+        run: ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
+
+      - name: Rename outputs
+        run: |
+          mv android/app/build/outputs/bundle/release/app-release.aab t-ride.aab
+          mv android/app/build/outputs/apk/release/app-release.apk t-ride.apk
 
       - name: Upload T Ride AAB
         uses: actions/upload-artifact@v4
         with:
           name: t-ride-aab
           path: t-ride.aab
+          retention-days: 30
+
+      - name: Upload T Ride APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-ride-apk
+          path: t-ride.apk
           retention-days: 30
 
       - name: Publish to Google Play
@@ -179,14 +192,27 @@ jobs:
         working-directory: android
         run: ./gradlew bundleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
 
-      - name: Rename output
-        run: mv android/app/build/outputs/bundle/release/app-release.aab t-driver.aab
+      - name: Build signed APK with Gradle
+        working-directory: android
+        run: ./gradlew assembleRelease -Dorg.gradle.jvmargs="-Xmx4096m"
+
+      - name: Rename outputs
+        run: |
+          mv android/app/build/outputs/bundle/release/app-release.aab t-driver.aab
+          mv android/app/build/outputs/apk/release/app-release.apk t-driver.apk
 
       - name: Upload T Driver AAB
         uses: actions/upload-artifact@v4
         with:
           name: t-driver-aab
           path: t-driver.aab
+          retention-days: 30
+
+      - name: Upload T Driver APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-driver-apk
+          path: t-driver.apk
           retention-days: 30
 
       - name: Publish to Google Play
