@@ -65,10 +65,17 @@ export default function DriverHomeScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  const { data: driverData } = useQuery({
+  const { data: driverData } = useQuery<{ id: string; is_online: boolean }>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
   });
+
+  // Sync online status from server on load
+  useEffect(() => {
+    if (driverData?.is_online !== undefined && driverData.is_online !== isOnline) {
+      setIsOnline(driverData.is_online);
+    }
+  }, [driverData?.is_online]);
 
   const { data: pendingRides } = useQuery<RideRequest[]>({
     queryKey: ["/api/drivers/pending-rides"],
