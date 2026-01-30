@@ -3,8 +3,8 @@ const fs = require('fs');
 const path = require('path');
 
 const PACKAGE_NAMES = {
-  rider: 'com.travoney.ride',
-  driver: 'com.travoney.driver'
+  rider: 'com.travony.rider',
+  driver: 'com.travony.driver'
 };
 
 async function publishToPlayStore(appVariant, aabPath, track = 'internal') {
