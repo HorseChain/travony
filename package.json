@@ -18,7 +18,9 @@
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
+    "@octokit/rest": "^22.0.1",
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@react-native-community/netinfo": "^11.5.2",
     "@react-native-community/slider": "5.0.1",
     "@react-navigation/bottom-tabs": "^7.4.0",
     "@react-navigation/elements": "^2.6.3",
@@ -52,6 +54,7 @@
     "express": "^4.21.2",
     "googleapis": "^171.0.0",
     "http-proxy-middleware": "^3.0.5",
+    "libsodium-wrappers": "^0.8.2",
     "nodemailer": "^7.0.11",
     "openai": "^6.16.0",
     "p-limit": "^7.2.0",

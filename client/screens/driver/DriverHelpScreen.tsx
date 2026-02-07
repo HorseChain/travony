@@ -31,44 +31,52 @@ export default function DriverHelpScreen() {
   const faqs: FAQ[] = [
     {
       question: "How do I receive ride requests?",
-      answer: "Make sure you're online and in an active service area. Ride requests will appear automatically when customers nearby request a ride. Accept quickly to secure the trip!",
+      answer: "Make sure you're online and in an active service area. Ride requests will appear automatically when customers nearby request a ride. Our Intent-Based Mobility system matches you with riders whose direction and preferences align with yours, leading to better trips and fewer cancellations.",
     },
     {
       question: "When do I get paid?",
-      answer: "Earnings from completed rides are added to your wallet immediately. You can withdraw to your bank account anytime when your balance exceeds AED 50. Payouts are processed within 2-3 business days.",
+      answer: "Earnings from completed rides are added to your wallet immediately. You can withdraw to your bank account or as USDT cryptocurrency anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut.",
     },
     {
       question: "What if a customer cancels?",
-      answer: "If a customer cancels after you've arrived at the pickup location, you may receive a cancellation fee. The fee depends on wait time and distance traveled.",
+      answer: "If a customer cancels after you've arrived at the pickup location, you will receive a cancellation fee. The fee depends on your wait time and distance traveled. Our Trust-First framework ensures fair protection for drivers against cancellations that aren't your fault.",
     },
     {
       question: "How are fares calculated?",
-      answer: "Fares include a base fare, distance-based charge, and time-based charge. During high demand, dynamic pricing may apply (capped at 1.5x). You receive 90% of each fare.",
+      answer: "Fares include a base fare, distance-based charge, and time-based charge. During high demand, dynamic pricing may apply (capped based on the city's launch phase). You receive 90% of each fare - Travony only takes a flat 10% platform fee. You always see the full earnings breakdown before accepting a ride.",
     },
     {
       question: "How do I update my vehicle information?",
-      answer: "Go to Profile > Vehicle Details to update your vehicle information. Make sure to keep your documents current for uninterrupted service.",
+      answer: "Go to Profile > Vehicle Details to update your vehicle information. Our AI Vehicle Verification system will review your photos and can provide instant approval. Make sure to keep your documents current for uninterrupted service.",
     },
     {
       question: "What if I have an issue during a ride?",
-      answer: "For emergencies, contact local authorities immediately. For ride-related issues, you can report them through the app after completing the ride or contact our support team.",
+      answer: "For emergencies, contact local authorities immediately (999 for Police, 998 for Ambulance). For ride-related issues, you can report them through the app after completing the ride or email driver-support@travony.com.",
+    },
+    {
+      question: "What is 'Pay Me to Go Home' mode?",
+      answer: "When heading home, activate 'Going Home' mode. The system will only send you ride requests from passengers going in your direction. You earn an additional 80% of the direction premium that riders pay for the 'Faster Pickup' option. This feature has built-in protections against misuse.",
+    },
+    {
+      question: "What is Ghost Mode?",
+      answer: "Ghost Mode lets you accept and complete rides even without internet. It uses Bluetooth mesh networking to connect with nearby riders. Fares are pre-calculated from cached pricing. Once you're back online, rides automatically sync for payment processing. This is especially useful in areas with unreliable connectivity.",
+    },
+    {
+      question: "What is the Ride Truth Engine?",
+      answer: "The Ride Truth Engine is a crowd-sourced reliability scoring system. Both riders and drivers can log their experiences on any platform. Scores are based on price accuracy, pickup reliability, cancellation rates, route integrity, and support quality. Your participation is voluntary and all data is anonymous.",
+    },
+    {
+      question: "How does driver trust protection work?",
+      answer: "New drivers receive Trust Protection during their first rides. This includes guaranteed minimum earnings, priority in matching, and protection against unfair ratings. As you complete more rides, you can progress to City Champion status for additional benefits and recognition.",
     },
   ];
 
   const handleEmailSupport = () => {
-    Linking.openURL("mailto:driver-support@travony.com?subject=Driver Support Request");
+    Linking.openURL("mailto:driver-support@travony.com?subject=T Driver Support Request");
   };
 
-  const handleCallSupport = () => {
-    if (Platform.OS === "web") {
-      window.alert("Phone: +971 4 XXX XXXX");
-    } else {
-      Linking.openURL("tel:+97142345678");
-    }
-  };
-
-  const handleWhatsApp = () => {
-    Linking.openURL("https://wa.me/971501234567?text=Hi, I need help with my Travony driver account");
+  const handleWebsite = () => {
+    Linking.openURL("https://travony.replit.app/support");
   };
 
   const supportOptions: SupportOption[] = [
@@ -79,16 +87,10 @@ export default function DriverHelpScreen() {
       onPress: handleEmailSupport,
     },
     {
-      icon: "call-outline",
-      label: "Call Us",
-      subtitle: "Available 24/7",
-      onPress: handleCallSupport,
-    },
-    {
-      icon: "logo-whatsapp",
-      label: "WhatsApp",
-      subtitle: "Quick responses",
-      onPress: handleWhatsApp,
+      icon: "globe-outline",
+      label: "Support Center",
+      subtitle: "travony.replit.app/support",
+      onPress: handleWebsite,
     },
   ];
 
@@ -154,6 +156,17 @@ export default function DriverHelpScreen() {
           <View style={styles.supportGrid}>
             {supportOptions.map(renderSupportOption)}
           </View>
+          <View style={[styles.responseTimeCard, { backgroundColor: theme.backgroundElevated }]}>
+            <View style={[styles.supportIcon, { backgroundColor: Colors.travonyGreen + "20" }]}>
+              <Ionicons name="time-outline" size={24} color={Colors.travonyGreen} />
+            </View>
+            <View style={styles.supportContent}>
+              <ThemedText style={styles.supportLabel}>Response Time</ThemedText>
+              <ThemedText style={[styles.supportSubtitle, { color: theme.textSecondary }]}>
+                Within 24 hours
+              </ThemedText>
+            </View>
+          </View>
         </View>
 
         <View style={styles.section}>
@@ -171,7 +184,7 @@ export default function DriverHelpScreen() {
             </ThemedText>
           </View>
           <ThemedText style={[styles.emergencyText, { color: theme.textSecondary }]}>
-            For life-threatening emergencies, please call 999 (Police) or 998 (Ambulance) immediately.
+            For life-threatening emergencies, please call 999 (Police) or 998 (Ambulance) immediately. For non-emergency ride issues, email driver-support@travony.com.
           </ThemedText>
         </View>
       </ScrollView>
@@ -201,6 +214,13 @@ const styles = StyleSheet.create({
     alignItems: "center",
     padding: Spacing.md,
     borderRadius: BorderRadius.xl,
+  },
+  responseTimeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    marginTop: Spacing.md,
   },
   supportIcon: {
     width: 48,

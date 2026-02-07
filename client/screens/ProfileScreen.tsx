@@ -137,6 +137,20 @@ export default function ProfileScreen() {
 
       <Card style={styles.menuCard}>
         <MenuItem
+          icon="shield-checkmark-outline"
+          title="Ride Truth Engine"
+          onPress={() => navigation.navigate("RideTruth")}
+        />
+        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+        <MenuItem
+          icon="radio-outline"
+          title="Ghost Mode"
+          onPress={() => navigation.navigate("GhostMode")}
+        />
+      </Card>
+
+      <Card style={styles.menuCard}>
+        <MenuItem
           icon="document-text-outline"
           title="Terms of Service"
           onPress={() => Alert.alert("Terms of Service", "Terms and conditions content here.")}

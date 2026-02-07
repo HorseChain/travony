@@ -179,6 +179,12 @@ export const rides = pgTable("rides", {
   tipAmount: decimal("tip_amount", { precision: 10, scale: 2 }).default("0.00"),
   shareToken: text("share_token"),
   carbonFootprintKg: decimal("carbon_footprint_kg", { precision: 6, scale: 3 }),
+  originalGuaranteedFare: decimal("original_guaranteed_fare", { precision: 10, scale: 2 }),
+  rematchCount: integer("rematch_count").default(0),
+  rematchFromRideId: varchar("rematch_from_ride_id"),
+  isRematchInProgress: boolean("is_rematch_in_progress").default(false),
+  isGhostRide: boolean("is_ghost_ride").default(false),
+  ghostRideLocalId: text("ghost_ride_local_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -914,3 +920,198 @@ export const platformLedger = pgTable("platform_ledger", {
 });
 
 export type PlatformLedger = typeof platformLedger.$inferSelect;
+
+export const truthSignalStatusEnum = pgEnum("truth_signal_status", ["extracted", "unknown", "invalid"]);
+export const truthConsentStatusEnum = pgEnum("truth_consent_status", ["granted", "revoked"]);
+export const ghostRideStatusEnum = pgEnum("ghost_ride_status", ["broadcasting", "accepted", "in_progress", "completed", "expired", "synced"]);
+export const syncStatusEnum = pgEnum("sync_status", ["pending", "syncing", "synced", "failed"]);
+
+export const truthProviders = pgTable("truth_providers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  slug: text("slug").notNull().unique(),
+  deepLinkScheme: text("deep_link_scheme"),
+  androidPackage: text("android_package"),
+  iosUrlScheme: text("ios_url_scheme"),
+  iconUrl: text("icon_url"),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TruthProvider = typeof truthProviders.$inferSelect;
+
+export const truthConsent = pgTable("truth_consent", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  screenshotCapture: boolean("screenshot_capture").default(false),
+  notificationParsing: boolean("notification_parsing").default(false),
+  gpsTracking: boolean("gps_tracking").default(false),
+  postRideConfirmation: boolean("post_ride_confirmation").default(true),
+  status: truthConsentStatusEnum("status").default("granted").notNull(),
+  grantedAt: timestamp("granted_at").defaultNow().notNull(),
+  revokedAt: timestamp("revoked_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type TruthConsent = typeof truthConsent.$inferSelect;
+
+export const truthRides = pgTable("truth_rides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  providerId: varchar("provider_id").references(() => truthProviders.id).notNull(),
+  cityName: text("city_name"),
+  routeType: text("route_type"),
+  timeBlock: text("time_block"),
+  rideDate: timestamp("ride_date").notNull(),
+  quotedPrice: decimal("quoted_price", { precision: 10, scale: 2 }),
+  finalPrice: decimal("final_price", { precision: 10, scale: 2 }),
+  quotedEtaMinutes: decimal("quoted_eta_minutes", { precision: 6, scale: 2 }),
+  actualPickupMinutes: decimal("actual_pickup_minutes", { precision: 6, scale: 2 }),
+  driverCancelled: boolean("driver_cancelled"),
+  cancellationCount: integer("cancellation_count").default(0),
+  expectedDistanceKm: decimal("expected_distance_km", { precision: 8, scale: 2 }),
+  actualDistanceKm: decimal("actual_distance_km", { precision: 8, scale: 2 }),
+  expectedDurationMin: decimal("expected_duration_min", { precision: 6, scale: 2 }),
+  actualDurationMin: decimal("actual_duration_min", { precision: 6, scale: 2 }),
+  supportResolved: boolean("support_resolved"),
+  supportOutcome: text("support_outcome"),
+  screenshotUrl: text("screenshot_url"),
+  gpsTraceJson: text("gps_trace_json"),
+  notificationData: text("notification_data"),
+  proofOfRide: boolean("proof_of_ride").default(false),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }),
+  dropoffLat: decimal("dropoff_lat", { precision: 10, scale: 8 }),
+  dropoffLng: decimal("dropoff_lng", { precision: 11, scale: 8 }),
+  isFromTravony: boolean("is_from_travony").default(false),
+  travonyRideId: varchar("travony_ride_id").references(() => rides.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TruthRide = typeof truthRides.$inferSelect;
+
+export const truthSignals = pgTable("truth_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truthRideId: varchar("truth_ride_id").references(() => truthRides.id).notNull(),
+  signalType: text("signal_type").notNull(),
+  rawValue: text("raw_value"),
+  normalizedScore: decimal("normalized_score", { precision: 5, scale: 2 }),
+  status: truthSignalStatusEnum("status").default("extracted").notNull(),
+  extractionMethod: text("extraction_method"),
+  confidence: decimal("confidence", { precision: 3, scale: 2 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TruthSignal = typeof truthSignals.$inferSelect;
+
+export const truthScores = pgTable("truth_scores", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truthRideId: varchar("truth_ride_id").references(() => truthRides.id).notNull(),
+  priceIntegrityScore: decimal("price_integrity_score", { precision: 5, scale: 2 }),
+  pickupReliabilityScore: decimal("pickup_reliability_score", { precision: 5, scale: 2 }),
+  cancellationScore: decimal("cancellation_score", { precision: 5, scale: 2 }),
+  routeIntegrityScore: decimal("route_integrity_score", { precision: 5, scale: 2 }),
+  supportResolutionScore: decimal("support_resolution_score", { precision: 5, scale: 2 }),
+  totalScore: decimal("total_score", { precision: 5, scale: 2 }).notNull(),
+  explanation: text("explanation").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type TruthScore = typeof truthScores.$inferSelect;
+
+export const truthAggregations = pgTable("truth_aggregations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  providerId: varchar("provider_id").references(() => truthProviders.id).notNull(),
+  cityName: text("city_name").notNull(),
+  timeBlock: text("time_block"),
+  routeType: text("route_type"),
+  avgScore: decimal("avg_score", { precision: 5, scale: 2 }).notNull(),
+  sampleCount: integer("sample_count").notNull(),
+  priceAvg: decimal("price_avg", { precision: 5, scale: 2 }),
+  pickupAvg: decimal("pickup_avg", { precision: 5, scale: 2 }),
+  cancellationAvg: decimal("cancellation_avg", { precision: 5, scale: 2 }),
+  routeAvg: decimal("route_avg", { precision: 5, scale: 2 }),
+  supportAvg: decimal("support_avg", { precision: 5, scale: 2 }),
+  confidence: decimal("confidence", { precision: 3, scale: 2 }),
+  lastUpdated: timestamp("last_updated").defaultNow().notNull(),
+});
+
+export type TruthAggregation = typeof truthAggregations.$inferSelect;
+
+export const ghostRides = pgTable("ghost_rides", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  localId: text("local_id").notNull(),
+  riderId: varchar("rider_id").references(() => users.id),
+  driverId: varchar("driver_id").references(() => drivers.id),
+  riderPeerId: text("rider_peer_id").notNull(),
+  driverPeerId: text("driver_peer_id"),
+  pickupAddress: text("pickup_address"),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }).notNull(),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }).notNull(),
+  dropoffAddress: text("dropoff_address"),
+  dropoffLat: decimal("dropoff_lat", { precision: 10, scale: 8 }),
+  dropoffLng: decimal("dropoff_lng", { precision: 11, scale: 8 }),
+  estimatedFare: decimal("estimated_fare", { precision: 10, scale: 2 }),
+  agreedFare: decimal("agreed_fare", { precision: 10, scale: 2 }),
+  currency: currencyEnum("currency").default("AED"),
+  vehicleType: vehicleTypeEnum("vehicle_type"),
+  cityName: text("city_name"),
+  status: ghostRideStatusEnum("status").default("broadcasting").notNull(),
+  gpsTraceJson: text("gps_trace_json"),
+  chatMessagesJson: text("chat_messages_json"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  syncStatus: syncStatusEnum("sync_status").default("pending").notNull(),
+  syncedRideId: varchar("synced_ride_id").references(() => rides.id),
+  syncedAt: timestamp("synced_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type GhostRide = typeof ghostRides.$inferSelect;
+
+export const ghostMessages = pgTable("ghost_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ghostRideId: varchar("ghost_ride_id").references(() => ghostRides.id).notNull(),
+  localId: text("local_id").notNull(),
+  senderPeerId: text("sender_peer_id").notNull(),
+  senderRole: text("sender_role").notNull(),
+  content: text("content").notNull(),
+  messageType: text("message_type").default("text"),
+  sentAt: timestamp("sent_at").notNull(),
+  syncStatus: syncStatusEnum("sync_status").default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type GhostMessage = typeof ghostMessages.$inferSelect;
+
+export const offlineSyncQueue = pgTable("offline_sync_queue", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  entityType: text("entity_type").notNull(),
+  entityLocalId: text("entity_local_id").notNull(),
+  payload: text("payload").notNull(),
+  syncStatus: syncStatusEnum("sync_status").default("pending").notNull(),
+  retryCount: integer("retry_count").default(0),
+  lastError: text("last_error"),
+  queuedAt: timestamp("queued_at").defaultNow().notNull(),
+  syncedAt: timestamp("synced_at"),
+});
+
+export type OfflineSyncQueue = typeof offlineSyncQueue.$inferSelect;
+
+export const cachedPricing = pgTable("cached_pricing", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  cityName: text("city_name").notNull(),
+  regionCode: text("region_code").notNull(),
+  vehicleType: vehicleTypeEnum("vehicle_type").notNull(),
+  baseFare: decimal("base_fare", { precision: 10, scale: 2 }).notNull(),
+  perKmRate: decimal("per_km_rate", { precision: 10, scale: 4 }).notNull(),
+  perMinRate: decimal("per_min_rate", { precision: 10, scale: 4 }).notNull(),
+  minimumFare: decimal("minimum_fare", { precision: 10, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").default("AED").notNull(),
+  validFrom: timestamp("valid_from").defaultNow().notNull(),
+  validUntil: timestamp("valid_until"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type CachedPricing = typeof cachedPricing.$inferSelect;

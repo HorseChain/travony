@@ -75,6 +75,41 @@ Travony uses Intent-Based Mobility to match drivers and riders based on intent a
 - Eligibility decay based on cancellation/late arrival rates
 - Suspicion detection with restrictions (guarantee ineligibility, reduced payouts, manual review)
 
+### Trust-First Framework
+
+The platform operates on trust-first principles ensuring transparency and fairness for both riders and drivers.
+
+**Auto-Rematch System** (`server/rematchService.ts`):
+- When a driver cancels, system automatically finds a new driver within 10km radius
+- Original guaranteed fare is preserved for the rider
+- Maximum 3 rematch attempts before issuing rider compensation credit
+- Driver receives accountability record for cancellation
+
+**Rider Compensation Credits** (`server/accountabilityService.ts`):
+- Automatic credits for trust violations (late ETA, driver cancellations, price discrepancies)
+- Credits tracked in wallet with clear descriptions
+- Proactive compensation preserves rider trust
+
+**Driver Pay Transparency** (API: `/api/driver/pay-formula`):
+- Complete earnings breakdown shown before ride acceptance
+- Flat 10% platform commission, 90% driver share
+- PMGTH bonus: 80% of direction premium goes to driver
+- Tips: 100% go to driver with no platform cut
+- Weekly payouts guaranteed via bank transfer or USDT
+
+**Incentive Policy** (`server/incentivePolicy.ts`):
+- Phase-based incentive management tied to city launch mode
+- **Seeding Phase**: Signup bonuses active (50 after 10 rides), referral bonuses (25), weather/emergency boosts only, no surge pricing
+- **Growth Phase**: Signup bonuses auto-disabled, referrals active (15), surge pricing enabled (max 1.5x), peak hour boosts
+- **Mature Phase**: All bonuses disabled, full dynamic pricing (max 2.0x surge)
+- Weather boost (20-30%) and emergency boost (30-50%) always active in all phases
+
+**Trust Guarantees**:
+- Guaranteed earnings shown BEFORE driver accepts
+- Fare cannot decrease after acceptance
+- No hidden fees or deductions
+- Fair cancellation protection for non-driver-fault
+
 ## External Dependencies
 
 ### Maps & Location

@@ -1,0 +1,273 @@
+FEATURE SPECIFICATION
+Pay Me to Go Home (PMGTH)
+
+Version 1.0 – Production-Ready
+
+1. FEATURE OBJECTIVE
+
+Enable drivers to:
+
+End their shift without dead miles
+
+Only accept rides toward a chosen destination
+
+Earn a small premium for directional efficiency
+
+Enable riders to:
+
+Get faster, more reliable pickups
+
+Pay a fair, transparent premium
+
+Avoid surge confusion
+
+2. DRIVER EXPERIENCE (UX FLOW)
+2.1 Activation
+
+Driver taps “Going Home” button.
+
+Driver inputs:
+
+Destination (lat/lng or saved “Home”)
+
+Time window (15–120 minutes, default 45)
+
+Max detour tolerance (default ±15%)
+
+No other inputs.
+
+2.2 Active State
+
+While active:
+
+Driver only receives direction-compatible ride offers
+
+Driver sees:
+
+“Direction Match”
+
+Estimated arrival at destination after ride
+
+Guaranteed net earnings (incl. premium)
+
+Driver can cancel mode anytime.
+
+2.3 Exit Conditions
+
+Mode auto-deactivates when:
+
+Destination reached
+
+Time window expires
+
+Driver toggles off
+
+No penalties. No cooldowns.
+
+3. RIDER EXPERIENCE (UX FLOW)
+3.1 Availability Detection
+
+When rider requests trip:
+System checks:
+
+Nearby drivers in PMGTH mode
+
+Directional compatibility
+
+If available:
+Show rider option:
+
+“Faster pickup with driver already heading your way (+X%)”
+
+This is optional, not forced.
+
+3.2 Pricing
+
+Rider sees:
+
+Base fare
+
+Directional premium (small, fixed % or flat)
+
+Total price (locked)
+
+No surge language.
+
+4. MATCHING LOGIC (CORE ALGORITHM)
+4.1 Direction Compatibility Test
+
+A ride is compatible if:
+
+Angle between:
+
+Driver → Home vector
+
+Driver → Pickup → Dropoff path
+is ≤ θ (default 30°)
+
+AND
+
+Additional travel time ≤ detour tolerance %
+
+4.2 Scoring Function
+
+Eligible rides are ranked by:
+
+score =
+  w1 * directional_alignment
++ w2 * pickup_proximity
++ w3 * rider_commitment_score
++ w4 * fare_efficiency
+
+
+Highest score shown first.
+
+5. PRICING MODEL (IMPORTANT)
+5.1 Premium Calculation
+
+Premium is paid by rider and split:
+
+70–85% → Driver
+
+Remainder → Platform (risk buffer)
+
+Premium size:
+
+Flat amount OR
+
+% of base fare
+
+Capped (to avoid abuse)
+
+Example:
+
++5–12% typical
+
+Never > X local currency
+
+5.2 Driver Guarantee
+
+Driver is guaranteed:
+
+Full base fare
+
+Full premium
+
+No clawbacks
+
+6. SAFETY & ABUSE PREVENTION
+6.1 Driver Abuse Controls
+
+Max PMGTH usage per day (soft limit)
+
+Cooldown after repeated no-matches
+
+Detour manipulation detection
+
+6.2 Rider Abuse Controls
+
+Commitment hold (small)
+
+Cancellation penalty applies as normal
+
+Premium non-refundable if pickup started
+
+7. EDGE CASE HANDLING
+Scenario	Behavior
+No compatible rides	Driver free to go offline
+Traffic spike	Driver protected (time not penalized)
+Rider cancels late	Driver keeps premium
+Destination reached early	Mode auto-ends
+8. DATA & METRICS (MUST TRACK)
+Driver Metrics
+
+Dead miles reduced
+
+End-of-shift acceptance rate
+
+Session length increase
+
+Driver NPS
+
+Rider Metrics
+
+Pickup ETA improvement
+
+Cancellation rate
+
+Premium opt-in rate
+
+Repeat usage
+
+9. ROLLOUT STRATEGY
+Phase 1 – Shadow Mode
+
+Feature runs silently
+
+Premium invisible
+
+Validate routing logic
+
+Phase 2 – Driver Visible
+
+Drivers see mode
+
+Riders opt-in quietly
+
+Phase 3 – Full Launch
+
+Explicit rider messaging
+
+Default suggestion at peak hours
+
+10. SYSTEM REQUIREMENTS
+
+Real-time routing engine
+
+Vector math for directionality
+
+Latency < standard dispatch
+
+City-specific tuning parameters
+
+11. ONE-PARAGRAPH AGENT PROMPT (COPY THIS)
+
+Build a production-ready “Pay Me to Go Home” feature that allows drivers to set a destination and time window, receive only direction-compatible rides, earn a transparent rider-funded premium, and exit shifts without dead miles. Implement directional matching, capped premium pricing, abuse protection, clean driver/rider UX, and phased rollout support.
+
+12. WHY THIS FEATURE WORKS (FOR YOU)
+
+Drivers feel it immediately
+
+Riders understand it instantly
+
+No regulatory friction
+
+No crypto dependency
+
+No cultural learning curve
+
+Impossible to fake without full commitment
+
+This is a single feature that:
+
+Increases supply
+
+Reduces cancellations
+
+Builds driver loyalty
+
+Improves rider trust
+
+Done well, this becomes your signature.
+
+If you want next, I can:
+
+Write exact UI copy
+
+Tune parameters for Mexico City
+
+Design A/B experiments
+
+Help agent optimize matching weights
+
+Say what you want next.

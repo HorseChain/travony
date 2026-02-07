@@ -1,0 +1,226 @@
+Below is a **curated, execution-grade list of 10 cities / countries** optimized for a **remote-first, driver-led, trust-based rollout** like Travoney.
+This is not popularity-based; it is **market-friction + demand + digital-operability based**.
+
+Mexico City is already locked, so it is excluded.
+
+---
+
+# TRAVONEY – PRIORITY CITY / COUNTRY EXPANSION LIST (V1)
+
+## Tier 1 — Highest Probability of Fast City Wins (Start Here)
+
+These cities have **high ride demand, weak trust in incumbents, strong WhatsApp culture, and manageable regulation**.
+
+---
+
+### 1. **Bogotá, Colombia**
+
+**Why**
+
+* Extremely high daily ride demand
+* Ongoing Uber/driver conflicts
+* Drivers already organized digitally
+* Price transparency is a major pain point
+
+**Best Angle**
+“Fair prices. No sudden deactivations.”
+
+---
+
+### 2. **Istanbul, Turkey**
+
+**Why**
+
+* Chronic taxi shortages
+* High rider frustration
+* Massive tourism traffic
+* Strong local vehicle differentiation
+
+**Best Angle**
+“Reliable rides when taxis say no.”
+
+---
+
+### 3. **Nairobi, Kenya**
+
+**Why**
+
+* Ride-hailing adoption is strong
+* Driver dissatisfaction with commissions
+* WhatsApp-first driver culture
+* Less regulatory friction than EU/US
+
+**Best Angle**
+“More earnings. More respect.”
+
+---
+
+### 4. **Manila, Philippines**
+
+**Why**
+
+* Dense urban traffic
+* Daily ride dependence
+* Price sensitivity
+* English + Tagalog ease for ops
+
+**Best Angle**
+“Know your price before you ride.”
+
+---
+
+## Tier 2 — Strong Demand, Slightly More Complexity
+
+These are excellent once your systems are stable.
+
+---
+
+### 5. **Casablanca, Morocco**
+
+**Why**
+
+* Fragmented taxi ecosystem
+* Tourists + locals both struggle
+* Language barrier solved by your translation feature
+* Weak global competitor dominance
+
+**Best Angle**
+“No language barriers. No confusion.”
+
+---
+
+### 6. **Cairo, Egypt**
+
+**Why**
+
+* Massive population density
+* High taxi mistrust
+* Strong need for emergency & safety features
+* Drivers actively seek alternatives
+
+**Best Angle**
+“Clear rules. Safer rides.”
+
+---
+
+### 7. **Lima, Peru**
+
+**Why**
+
+* Ride-hailing demand is high
+* Price disputes are common
+* Driver communities already online
+* Good expansion bridge after Colombia
+
+**Best Angle**
+“Upfront pricing that doesn’t change.”
+
+---
+
+## Tier 3 — Strategic Long-Term Winners (Prepare Early)
+
+These require more discipline but pay off big.
+
+---
+
+### 8. **Johannesburg, South Africa**
+
+**Why**
+
+* High ride demand
+* Safety concerns make emergency systems valuable
+* Drivers are highly vocal and organized
+
+**Best Angle**
+“Safety and fairness built in.”
+
+---
+
+### 9. **Bucharest, Romania**
+
+**Why**
+
+* EU market entry without Western EU saturation
+* Strong digital adoption
+* Less brand loyalty to incumbents
+
+**Best Angle**
+“Modern mobility without hidden rules.”
+
+---
+
+### 10. **Bangkok, Thailand**
+
+**Why**
+
+* Massive tourist + local demand
+* Language translation is a killer feature
+* Motorbike + car flexibility
+* Strong opportunity if done city-first
+
+**Best Angle**
+“Move freely, even if you don’t speak the language.”
+
+---
+
+## How to Feed This to the Machine (Important)
+
+For each city, your AI agent should prepare:
+
+1. **City Configuration**
+
+   * Currency
+   * Language(s)
+   * Vehicle types
+   * Emergency rules
+   * Pricing logic
+
+2. **Driver Onboarding Rules**
+
+   * Required documents
+   * Local compliance rules
+   * First-ride protections
+
+3. **City Champion Parameters**
+
+   * Incentives
+   * Referral rates
+   * Group moderation rules
+
+4. **Bot Language Packs**
+
+   * Neutral, respectful tone
+   * Simple grammar
+   * No slang
+
+---
+
+## Recommended Rollout Order (Disciplined)
+
+1. Mexico City ✅
+2. Bogotá
+3. Istanbul
+4. Nairobi
+5. Manila
+6. Casablanca
+7. Cairo
+8. Lima
+9. Johannesburg
+10. Bucharest / Bangkok (based on ops maturity)
+
+---
+
+## Final Executive Note
+
+> **You are building a city-winning machine, not launching countries.**
+> Each city is a test case.
+> Each success funds the next.
+
+If you want, next I can:
+
+* Convert this list into a **machine-readable config (JSON/YAML)**
+* Rank them by **regulatory risk**
+* Create a **90-day rollout calendar**
+* Design **city-specific messaging prompts for bots**
+
+Tell me which one you want next, and I will deliver it in execution-ready form.

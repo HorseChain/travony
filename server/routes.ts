@@ -38,7 +38,7 @@ import {
   getRideMessages, 
   getSupportedLanguages 
 } from "./translationService";
-import { sendOtp, sendOtpSms, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
+import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
 import { getUncachableStripeClient, getStripePublishableKey, isStripeConfigured } from "./stripeClient";
 import {
   initializeMexicoCityLaunch,
@@ -72,15 +72,23 @@ import * as pmgthService from "./pmgthService";
 import * as pmgthPayment from "./pmgthPaymentService";
 import * as guaranteeService from "./guaranteeService";
 import * as accountabilityService from "./accountabilityService";
+import * as rematchService from "./rematchService";
+import * as incentivePolicy from "./incentivePolicy";
 import * as walletService from "./walletService";
 import * as intentEngine from "./intentEngine";
 import * as cityBrain from "./cityBrain";
 import * as antiGamingService from "./antiGamingService";
 import { verifyVehicleImage, verifyMultipleVehicleImages, getVehicleCategoryInfo } from "./vehicleVerification";
+import * as truthEngine from "./truthEngine";
+import * as truthScoring from "./truthScoring";
+import * as truthAggregation from "./truthAggregation";
+import * as truthRecommendation from "./truthRecommendation";
+import * as truthFraud from "./truthFraud";
+import * as ghostRideService from "./ghostRideService";
 import type { Ride } from "@shared/schema";
-import { rides, payments } from "@shared/schema";
+import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte } from "drizzle-orm";
+import { eq, and, gte, desc, count } from "drizzle-orm";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -96,6 +104,27 @@ function verifyPassword(password: string, stored: string): boolean {
   const newHashBuffer = Buffer.from(newHash, "hex");
   if (hashBuffer.length !== newHashBuffer.length) return false;
   return timingSafeEqual(hashBuffer, newHashBuffer);
+}
+
+function getDeclineMessage(declineCode: string): string {
+  const declineMessages: Record<string, string> = {
+    "insufficient_funds": "Your card has insufficient funds. Please use another payment method.",
+    "lost_card": "This card has been reported lost. Please use another card.",
+    "stolen_card": "This card has been reported stolen. Please use another card.",
+    "expired_card": "Your card has expired. Please update your card details.",
+    "incorrect_cvc": "The security code (CVC) is incorrect. Please try again.",
+    "processing_error": "Payment processing error. Please try again.",
+    "incorrect_number": "The card number is incorrect. Please check and try again.",
+    "card_velocity_exceeded": "You've exceeded the daily transaction limit on your card.",
+    "do_not_honor": "Your bank declined the transaction. Please contact your bank.",
+    "generic_decline": "Your card was declined. Please try another payment method.",
+    "fraudulent": "This transaction was flagged as suspicious. Please contact your bank.",
+    "card_not_supported": "This card type is not supported. Please use a different card.",
+    "currency_not_supported": "Your card does not support this currency.",
+    "duplicate_transaction": "This looks like a duplicate transaction. Please wait a moment.",
+    "try_again_later": "Temporary error. Please try again in a few minutes.",
+  };
+  return declineMessages[declineCode] || `Payment declined (${declineCode}). Please try another method.`;
 }
 
 async function createSession(userId: string, role: string): Promise<string> {
@@ -292,15 +321,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid phone number is required" });
       }
 
-      // Generate 6-digit OTP
-      const otp = Math.floor(100000 + Math.random() * 900000).toString();
-      const expiresAt = new Date(Date.now() + 5 * 60 * 1000); // 5 minutes
+      // Try Twilio Verify first (works globally, best for production)
+      if (isVerifyConfigured()) {
+        console.log(`Using Twilio Verify for ${phone}`);
+        const verifyResult = await sendVerifyOtp(phone);
+        
+        if (verifyResult.success) {
+          // Store a flag that this phone is using Verify (for verification step)
+          otpStore.set(phone, { otp: 'VERIFY', expiresAt: new Date(Date.now() + 10 * 60 * 1000), attempts: 0 });
+          
+          return res.json({ 
+            success: true, 
+            message: "Verification code sent via SMS",
+            channel: 'verify'
+          });
+        }
+        console.log(`Verify failed for ${phone}, falling back to direct SMS`);
+      }
 
-      // Store OTP
+      // Fallback: Generate our own OTP and send via SMS
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
       otpStore.set(phone, { otp, expiresAt, attempts: 0 });
 
-      // Send OTP via WhatsApp (preferred) or SMS fallback
-      const otpResult = await sendOtp(phone, otp, true);
+      const otpResult = await sendOtp(phone, otp, false); // SMS only, no WhatsApp sandbox
       
       if (!otpResult.success) {
         console.error(`Failed to send OTP to ${phone}:`, otpResult.error);
@@ -315,7 +359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({ 
         success: true, 
-        message: otpResult.channel === 'whatsapp' ? "Verification code sent via WhatsApp" : "Verification code sent via SMS",
+        message: "Verification code sent via SMS",
         channel: otpResult.channel
       });
     } catch (error: any) {
@@ -349,7 +393,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(429).json({ message: "Too many attempts. Please request a new code." });
       }
 
-      if (storedOtp.otp !== otp) {
+      // Check if using Twilio Verify or local OTP
+      if (storedOtp.otp === 'VERIFY') {
+        // Use Twilio Verify API to check
+        const verifyResult = await checkVerifyOtp(phone, otp);
+        if (!verifyResult.success) {
+          return res.status(400).json({ message: verifyResult.error || "Invalid verification code" });
+        }
+      } else if (storedOtp.otp !== otp) {
         return res.status(400).json({ message: "Invalid verification code" });
       }
 
@@ -603,6 +654,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Cannot create ride for another user" });
       }
       
+      // Payment validation - ensure rider can pay for the ride
+      const customerId = req.body.customerId || req.userId;
+      const riderUser = await storage.getUser(customerId);
+      if (!riderUser) {
+        return res.status(404).json({ 
+          code: "USER_NOT_FOUND",
+          message: "User account not found" 
+        });
+      }
+
+      const paymentMethod = req.body.paymentMethod;
+      const estimatedFareAmount = parseFloat(req.body.estimatedFare || "0");
+      
+      // LIVE MODE: Require valid payment method (no free rides)
+      if (!paymentMethod) {
+        return res.status(400).json({
+          code: "PAYMENT_METHOD_REQUIRED",
+          message: "Please select a payment method before booking.",
+        });
+      }
+      
+      if (paymentMethod === "wallet") {
+        const walletBalance = parseFloat(riderUser.walletBalance || "0");
+        if (walletBalance < estimatedFareAmount) {
+          return res.status(400).json({ 
+            code: "INSUFFICIENT_WALLET_BALANCE",
+            message: `Insufficient wallet balance. You have AED ${walletBalance.toFixed(2)} but need AED ${estimatedFareAmount.toFixed(2)}. Please top up your wallet first.`,
+            walletBalance,
+            requiredAmount: estimatedFareAmount,
+          });
+        }
+      } else if (paymentMethod === "card") {
+        const configured = await isStripeConfigured();
+        if (!configured) {
+          return res.status(503).json({ 
+            code: "STRIPE_NOT_CONFIGURED",
+            message: "Card payments are temporarily unavailable. Please use wallet." 
+          });
+        }
+        const savedCard = await storage.getDefaultPaymentMethod(customerId);
+        if (!savedCard?.stripePaymentMethodId) {
+          return res.status(400).json({ 
+            code: "NO_SAVED_CARD",
+            message: "No saved card found. Please add a card in Payment Settings first.",
+          });
+        }
+      } else if (paymentMethod === "cash") {
+        // Cash payments disabled for live mode - requires real payment
+        return res.status(400).json({
+          code: "CASH_DISABLED",
+          message: "Cash payments are not available. Please use wallet or card.",
+        });
+      } else {
+        return res.status(400).json({
+          code: "INVALID_PAYMENT_METHOD",
+          message: "Invalid payment method. Please use wallet or card.",
+        });
+      }
+      
       // Validate and normalize serviceTypeId
       if (req.body.serviceTypeId) {
         const validServiceTypes = ["st-economy", "st-comfort", "st-premium", "st-xl"];
@@ -637,7 +747,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const rideId = uuidv4();
-      const customerId = req.body.customerId || req.userId;
+      // customerId already declared above for payment validation
       const estimatedFare = parseFloat(req.body.estimatedFare || "0");
       const feeBreakdown = calculateFeeBreakdown(estimatedFare);
       
@@ -662,6 +772,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
             matchType: bestMatch.alignment.matchType,
             aiMatchScore: (bestMatch.alignment.confidence * 100).toFixed(2),
           };
+        } else {
+          // Fallback: Find nearest online approved driver within 50km (for early launch)
+          const pickupLat = parseFloat(req.body.pickupLat);
+          const pickupLng = parseFloat(req.body.pickupLng);
+          const onlineDrivers = await db.select().from(drivers)
+            .where(and(eq(drivers.isOnline, true), eq(drivers.status, 'approved')));
+          
+          let nearestDriver: any = null;
+          let nearestDistance = 50; // Max 50km
+          
+          for (const driver of onlineDrivers) {
+            const driverLat = parseFloat(driver.currentLat || "0");
+            const driverLng = parseFloat(driver.currentLng || "0");
+            if (driverLat === 0 && driverLng === 0) continue;
+            
+            // Haversine distance calculation
+            const R = 6371;
+            const dLat = (pickupLat - driverLat) * Math.PI / 180;
+            const dLon = (pickupLng - driverLng) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            const distance = R * c;
+            
+            if (distance < nearestDistance) {
+              nearestDistance = distance;
+              nearestDriver = driver;
+            }
+          }
+          
+          if (nearestDriver) {
+            intentData = {
+              driverId: nearestDriver.id,
+              matchType: "proximity_fallback",
+              aiMatchScore: "0",
+            };
+            console.log(`Fallback match: Driver ${nearestDriver.id} at ${nearestDistance.toFixed(1)}km`);
+          }
         }
       }
       
@@ -762,11 +911,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? (Date.now() - acceptedAt.getTime()) / 60000 
           : 0;
 
-        if (isDriver && existingRide.customerId) {
-          accountabilityService.processDriverCancellation(
+        if (isDriver && existingRide.customerId && existingRide.driverId) {
+          // Auto-rematch: find new driver for rider at same guaranteed price
+          rematchService.initiateRematch(
             existingRide.id,
+            existingRide.driverId,
             minutesAfterAccept
-          ).catch(console.error);
+          ).then(result => {
+            if (result.success) {
+              console.log(`Auto-rematch successful for ride ${existingRide.id} -> ${result.newRideId}`);
+            } else {
+              console.log(`Auto-rematch failed for ride ${existingRide.id}: ${result.message}`);
+              // Credit already issued by rematch service if it failed
+            }
+          }).catch(console.error);
         } else if (isCustomer && existingRide.driverId) {
           accountabilityService.processRiderLateCancellation(
             existingRide.id,
@@ -942,6 +1100,139 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(ride);
     } catch (error: any) {
       console.error("PATCH /api/rides/:id ERROR:", error.message, error.stack);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Get rematch status for a ride
+  app.get("/api/rides/:id/rematch-status", async (req, res) => {
+    try {
+      const status = await rematchService.getRematchStatus(req.params.id);
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Driver pay formula transparency endpoint
+  app.get("/api/driver/pay-formula", async (req, res) => {
+    try {
+      const regionCode = (req.query.region as string) || "AE";
+      
+      // Get regional pricing config - use default if not available
+      const regionConfig = { currencyCode: regionCode === "PK" ? "PKR" : regionCode === "BD" ? "BDT" : "AED" };
+      const serviceTypes = await storage.getServiceTypes();
+      
+      const payFormula = {
+        platformCommission: "10%",
+        commissionDescription: "Flat 10% platform fee on all rides",
+        driverShare: "90%",
+        driverShareDescription: "You keep 90% of the fare",
+        
+        fareCalculation: {
+          description: "Your guaranteed earnings are calculated before you accept",
+          formula: "Driver Earnings = (Base Fare + Distance × Per-km Rate + Time × Per-minute Rate) × 0.90",
+          components: [
+            { name: "Base Fare", description: "Fixed starting amount per vehicle type" },
+            { name: "Distance Rate", description: "Per kilometer charge based on route" },
+            { name: "Time Rate", description: "Per minute charge for trip duration" },
+            { name: "Surge Multiplier", description: "Applied during high demand (you see this before accepting)" }
+          ]
+        },
+        
+        guarantees: [
+          "Guaranteed earnings shown BEFORE you accept",
+          "Fare cannot decrease after acceptance",
+          "Cancellation by rider after 5 min = driver compensation",
+          "No hidden fees or deductions",
+          "Weekly payouts guaranteed"
+        ],
+        
+        bonuses: {
+          pmgth: {
+            name: "Pay Me to Go Home",
+            description: "80% of direction premium goes to you",
+            example: "If rider pays 20 AED premium, you get 16 AED extra"
+          },
+          tips: {
+            name: "Tips",
+            description: "100% of tips go directly to you",
+            example: "No platform cut on rider tips"
+          }
+        },
+        
+        vehicleRates: serviceTypes.map(st => ({
+          type: st.type,
+          name: st.name,
+          baseFare: st.baseFare,
+          perKmRate: st.perKmRate,
+          perMinuteRate: st.perMinuteRate,
+          currency: regionConfig?.currencyCode || "AED"
+        })),
+        
+        payoutSchedule: {
+          frequency: "Weekly",
+          processingTime: "1-3 business days",
+          methods: ["Bank Transfer", "USDT Crypto"]
+        },
+        
+        trustPromises: [
+          "No earnings ambiguity - you know exactly what you'll earn",
+          "No clawbacks or retroactive adjustments",
+          "Transparent pricing visible to both driver and rider",
+          "Fair cancellation protection for non-driver-fault"
+        ]
+      };
+      
+      res.json(payFormula);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Incentive policy for a city
+  app.get("/api/incentives/:cityId", async (req, res) => {
+    try {
+      const policy = await incentivePolicy.getIncentivePolicy(req.params.cityId);
+      res.json(policy);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Incentive policy explanation (human-readable)
+  app.get("/api/incentives/:cityId/explain", async (req, res) => {
+    try {
+      const explanation = await incentivePolicy.getPolicyExplanation(req.params.cityId);
+      res.json(explanation);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Check signup bonus eligibility
+  app.get("/api/incentives/:cityId/signup-bonus", async (req, res) => {
+    try {
+      const bonus = await incentivePolicy.shouldOfferSignupBonus(req.params.cityId);
+      res.json(bonus);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Calculate boost multiplier for current conditions
+  app.post("/api/incentives/:cityId/boost", async (req, res) => {
+    try {
+      const { isRaining, isEmergency, isPeakHour, currentDemand, currentSupply } = req.body;
+      const boost = await incentivePolicy.calculateBoostMultiplier(req.params.cityId, {
+        isRaining: Boolean(isRaining),
+        isEmergency: Boolean(isEmergency),
+        isPeakHour: Boolean(isPeakHour),
+        currentDemand: Number(currentDemand) || 0,
+        currentSupply: Number(currentSupply) || 0
+      });
+      res.json(boost);
+    } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });
@@ -1756,6 +2047,88 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Temporary debug endpoint to check and approve driver
+  app.get("/api/debug/driver-status/:phone", async (req, res) => {
+    try {
+      const { phone } = req.params;
+      const user = await storage.getUserByPhone(phone);
+      if (!user) {
+        return res.json({ error: "User not found", phone });
+      }
+      const driver = await storage.getDriverByUserId(user.id);
+      if (!driver) {
+        return res.json({ error: "Driver record not found", phone, userId: user.id });
+      }
+      res.json({
+        userId: user.id,
+        driverId: driver.id,
+        phone: user.phone,
+        role: user.role,
+        driverStatus: driver.status,
+        isOnline: driver.isOnline,
+        name: user.name
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Approve a driver by phone number (DEBUG ONLY)
+  app.post("/api/debug/approve-driver/:phone", async (req, res) => {
+    try {
+      const { phone } = req.params;
+      const user = await storage.getUserByPhone(phone);
+      if (!user) {
+        return res.status(404).json({ error: "User not found" });
+      }
+      const driver = await storage.getDriverByUserId(user.id);
+      if (!driver) {
+        return res.status(404).json({ error: "Driver not found" });
+      }
+      const updated = await storage.updateDriver(driver.id, { status: "approved", isOnline: true });
+      res.json({ success: true, driver: updated });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Assign pending rides to a driver (DEBUG ONLY)
+  app.post("/api/debug/assign-rides/:driverId", async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const pendingRides = await storage.getPendingRides();
+      const unassigned = pendingRides.filter(r => !r.driverId);
+      let assigned = 0;
+      for (const ride of unassigned.slice(0, 10)) {
+        await storage.updateRide(ride.id, { driverId });
+        assigned++;
+      }
+      res.json({ success: true, assigned, total: unassigned.length });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Temporary debug endpoint to test pending rides
+  app.get("/api/debug/pending-rides/:driverId", async (req, res) => {
+    try {
+      const { driverId } = req.params;
+      const allRides = await storage.getPendingRides();
+      const driverRides = allRides.filter(ride => ride.driverId === driverId);
+      // Show unique driver IDs in all pending rides
+      const uniqueDriverIds = [...new Set(allRides.map(r => r.driverId || 'null'))];
+      res.json({
+        total: allRides.length,
+        forDriver: driverRides.length,
+        driverId,
+        uniqueDriverIdsInRides: uniqueDriverIds,
+        sampleRides: allRides.slice(0, 5).map(r => ({ id: r.id, driverId: r.driverId, pickup: r.pickupAddress?.substring(0, 30) }))
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   app.get("/api/drivers/pending-rides", requireAuth, async (req: any, res) => {
     try {
       // Verify user is an approved driver
@@ -1766,16 +2139,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const allRides = await storage.getPendingRides();
       
+      console.log(`[PENDING-RIDES] Driver ${driver.id} requesting rides. Total pending: ${allRides.length}`);
+      console.log(`[PENDING-RIDES] Sample ride driverIds: ${allRides.slice(0,3).map(r => r.driverId).join(', ')}`);
+      
+      // Filter to only show rides assigned to this driver
+      // When a ride is matched to a driver, the driver_id is set
+      const driverRides = allRides.filter(ride => ride.driverId === driver.id);
+      
+      console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length}`);
+      
       // Check if driver has an active PMGTH (Going Home) session
       const pmgthSession = await pmgthService.getActivePmgthSession(driver.id);
       
-      let ridesToShow = allRides;
+      let ridesToShow = driverRides;
       let pmgthCompatibilityMap: Map<string, { premiumAmount: number; premiumPercent: number; directionScore: number }> = new Map();
       
       // If driver has active PMGTH session, ONLY show direction-compatible rides
       if (pmgthSession) {
         // Only include rides that have valid coordinates for compatibility checking
-        const ridesWithCoords = allRides.filter(r => 
+        const ridesWithCoords = driverRides.filter(r => 
           r.pickupLat && r.pickupLng && r.dropoffLat && r.dropoffLng
         );
         
@@ -1801,8 +2183,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         });
         
-        // Filter to only show compatible rides
-        ridesToShow = allRides.filter(ride => compatibleRideIds.has(ride.id));
+        // Filter to only show compatible rides from driver's assigned rides
+        ridesToShow = driverRides.filter(ride => compatibleRideIds.has(ride.id));
       }
       
       // Enrich rides with customer info and PMGTH premium
@@ -2302,7 +2684,90 @@ export async function registerRoutes(app: Express): Promise<Server> {
           completedAt: new Date(),
         });
       } else if (paymentMethod === 'card') {
-        return res.status(503).json({ message: "Card payments not configured. Please use wallet or cash." });
+        const configured = await isStripeConfigured();
+        if (!configured) {
+          return res.status(503).json({ 
+            code: "STRIPE_NOT_CONFIGURED",
+            message: "Card payments temporarily unavailable. Please use wallet or cash." 
+          });
+        }
+        
+        const savedPaymentMethod = await storage.getDefaultPaymentMethod(ride.customerId);
+        if (!savedPaymentMethod?.stripePaymentMethodId) {
+          return res.status(400).json({ 
+            code: "NO_PAYMENT_METHOD",
+            message: "No saved card found. Please add a card or use wallet/cash." 
+          });
+        }
+
+        try {
+          const stripe = await getUncachableStripeClient();
+          const amountInCents = Math.round(fare * 100);
+          
+          let stripeCustomerId = user.stripeCustomerId;
+          if (!stripeCustomerId) {
+            const customer = await stripe.customers.create({
+              email: user.email || undefined,
+              phone: user.phone || undefined,
+              name: user.name || undefined,
+              metadata: { userId: user.id },
+            });
+            stripeCustomerId = customer.id;
+            await storage.updateUser(user.id, { stripeCustomerId });
+          }
+
+          await stripe.paymentMethods.attach(savedPaymentMethod.stripePaymentMethodId, {
+            customer: stripeCustomerId,
+          }).catch(() => {});
+
+          const paymentIntent = await stripe.paymentIntents.create({
+            amount: amountInCents,
+            currency: (ride.currency || "AED").toLowerCase(),
+            customer: stripeCustomerId,
+            payment_method: savedPaymentMethod.stripePaymentMethodId,
+            off_session: true,
+            confirm: true,
+            metadata: {
+              rideId: ride.id,
+              userId: ride.customerId,
+              driverId: ride.driverId || "",
+              type: "ride_payment",
+            },
+          });
+
+          if (paymentIntent.status !== 'succeeded') {
+            return res.status(402).json({ 
+              code: "PAYMENT_FAILED",
+              message: "Card payment failed. Please try another payment method.",
+              stripeStatus: paymentIntent.status,
+            });
+          }
+
+          await storage.createWalletTransaction({
+            id: uuidv4(),
+            userId: ride.customerId,
+            rideId: ride.id,
+            type: 'ride_payment',
+            amount: fare.toFixed(2),
+            status: 'completed',
+            description: `Card payment for ride to ${ride.dropoffAddress}`,
+            completedAt: new Date(),
+            stripePaymentIntentId: paymentIntent.id,
+          });
+        } catch (stripeError: any) {
+          console.error("Stripe payment error:", stripeError);
+          
+          const errorCode = stripeError.code || "PAYMENT_ERROR";
+          const errorMessage = stripeError.decline_code 
+            ? getDeclineMessage(stripeError.decline_code)
+            : stripeError.message || "Payment failed";
+          
+          return res.status(402).json({ 
+            code: errorCode,
+            declineCode: stripeError.decline_code,
+            message: errorMessage,
+          });
+        }
       }
 
       const payment = await storage.createPayment({
@@ -2315,8 +2780,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       if (ride.driverId && paymentStatus === 'completed') {
-        const driverShare = fare * 0.80;
+        const driverShare = fare * 0.90;
+        const platformFee = fare * 0.10;
+        
         await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+        
+        // Update driver's total earnings
+        const currentDriver = await storage.getDriver(ride.driverId);
+        if (currentDriver) {
+          const currentEarnings = parseFloat(currentDriver.totalEarnings || "0");
+          await storage.updateDriver(ride.driverId, {
+            totalEarnings: (currentEarnings + driverShare).toFixed(2),
+            totalTrips: (currentDriver.totalTrips || 0) + 1,
+          });
+        }
         
         await storage.createWalletTransaction({
           id: uuidv4(),
@@ -2325,18 +2802,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
           type: 'ride_payment',
           amount: driverShare.toFixed(2),
           status: 'completed',
-          description: `Earnings from ride`,
+          description: `Earnings from ride to ${ride.dropoffAddress}`,
           completedAt: new Date(),
         });
 
+        // Record platform fee collection
         await storage.createWalletTransaction({
           id: uuidv4(),
           rideId: ride.id,
           type: 'platform_fee',
-          amount: (fare * 0.20).toFixed(2),
+          amount: platformFee.toFixed(2),
           status: 'completed',
-          description: `Platform fee`,
+          description: `Platform service fee (10%)`,
           completedAt: new Date(),
+        });
+        
+        // Record in platform ledger for accounting
+        await walletService.recordPlatformLedger({
+          type: "platform_fee_income",
+          amount: platformFee,
+          rideId: ride.id,
+          description: `Service fee from ride ${ride.id.substring(0, 8)}`,
+          currency: ride.currency || "AED",
         });
       }
 
@@ -2367,73 +2854,225 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const driver = await storage.getDriver(req.params.driverId);
       if (!driver) {
-        return res.status(404).json({ message: "Driver not found" });
+        return res.status(404).json({ 
+          code: "DRIVER_NOT_FOUND",
+          message: "Driver not found" 
+        });
       }
       // Verify driver owns this wallet
       if (driver.userId !== req.userId && req.userRole !== "admin") {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(403).json({ 
+          code: "ACCESS_DENIED",
+          message: "Access denied" 
+        });
       }
       const transactions = await storage.getDriverTransactions(req.params.driverId);
       const payouts = await storage.getDriverPayouts(req.params.driverId);
       
+      // Calculate earnings breakdown
+      const rideEarnings = transactions
+        .filter(t => t.type === "ride_payment" && t.status === "completed")
+        .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+      
+      const tips = transactions
+        .filter(t => t.type === "tip" && t.status === "completed")
+        .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+      
+      const bonuses = transactions
+        .filter(t => t.type === "bonus" && t.status === "completed")
+        .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
+      
+      const withdrawals = payouts
+        .filter(p => p.status === "completed" || p.status === "processing")
+        .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+      
+      const pendingPayouts = payouts
+        .filter(p => p.status === "pending" || p.status === "pending_bank_setup")
+        .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
+      
       res.json({
         balance: driver.walletBalance || "0.00",
         totalEarnings: driver.totalEarnings || "0.00",
+        totalTrips: driver.totalTrips || 0,
         cryptoWalletAddress: driver.cryptoWalletAddress || null,
-        transactions,
-        payouts,
+        
+        earningsBreakdown: {
+          rideEarnings: rideEarnings.toFixed(2),
+          tips: tips.toFixed(2),
+          bonuses: bonuses.toFixed(2),
+          totalWithdrawals: withdrawals.toFixed(2),
+          pendingPayouts: pendingPayouts.toFixed(2),
+        },
+        
+        platformInfo: {
+          platformFeePercent: 10,
+          driverSharePercent: 90,
+          minPayoutAmount: 50,
+          payoutMethods: ["bank", "crypto"],
+        },
+        
+        transactions: transactions.slice(0, 50), // Last 50 transactions
+        payouts: payouts.slice(0, 20), // Last 20 payouts
       });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      res.status(500).json({ 
+        code: "WALLET_ERROR",
+        message: error.message 
+      });
     }
   });
 
   app.post("/api/drivers/:driverId/payout", requireAuth, async (req: any, res) => {
     try {
-      const { amount } = req.body;
+      const { amount, method = "bank" } = req.body;
       const driver = await storage.getDriver(req.params.driverId);
       
       if (!driver) {
-        return res.status(404).json({ message: "Driver not found" });
+        return res.status(404).json({ 
+          code: "DRIVER_NOT_FOUND",
+          message: "Driver account not found" 
+        });
       }
       
       // Verify driver owns this wallet
       if (driver.userId !== req.userId && req.userRole !== "admin") {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(403).json({ 
+          code: "ACCESS_DENIED",
+          message: "You can only withdraw from your own wallet" 
+        });
       }
 
       const balance = parseFloat(driver.walletBalance || "0");
       const requestedAmount = parseFloat(amount);
 
-      if (requestedAmount <= 0) {
-        return res.status(400).json({ message: "Invalid amount" });
+      // Validation with comprehensive error codes
+      if (isNaN(requestedAmount) || requestedAmount <= 0) {
+        return res.status(400).json({ 
+          code: "INVALID_AMOUNT",
+          message: "Please enter a valid withdrawal amount" 
+        });
+      }
+
+      const MIN_PAYOUT = 50; // Minimum 50 AED
+      if (requestedAmount < MIN_PAYOUT) {
+        return res.status(400).json({ 
+          code: "BELOW_MINIMUM",
+          message: `Minimum withdrawal is AED ${MIN_PAYOUT}`,
+          minimumAmount: MIN_PAYOUT,
+        });
       }
 
       if (balance < requestedAmount) {
-        return res.status(400).json({ message: "Insufficient balance" });
+        return res.status(400).json({ 
+          code: "INSUFFICIENT_BALANCE",
+          message: `Insufficient balance. You have AED ${balance.toFixed(2)} available.`,
+          availableBalance: balance,
+          requestedAmount,
+        });
       }
 
+      // Get driver's user account for Stripe customer
+      const driverUser = await storage.getUser(driver.userId);
+      if (!driverUser) {
+        return res.status(404).json({ 
+          code: "USER_NOT_FOUND",
+          message: "Driver user account not found" 
+        });
+      }
+
+      // Check if Stripe is configured for payouts
+      const stripeConfigured = await isStripeConfigured();
+      
+      let stripePayoutId = null;
+      let payoutStatus = "pending";
+
+      if (method === "bank" && stripeConfigured) {
+        try {
+          const stripe = await getUncachableStripeClient();
+          
+          // Check if driver has Stripe Connect account
+          let stripeAccountId = (driverUser as any).stripeConnectAccountId;
+          
+          if (!stripeAccountId) {
+            // For now, mark payout as pending manual processing
+            payoutStatus = "pending_bank_setup";
+          } else {
+            // Create a transfer to the connected account
+            const transfer = await stripe.transfers.create({
+              amount: Math.round(requestedAmount * 100),
+              currency: "aed",
+              destination: stripeAccountId,
+              metadata: {
+                driverId: driver.id,
+                userId: driver.userId,
+                type: "driver_payout",
+              },
+            });
+            stripePayoutId = transfer.id;
+            payoutStatus = "processing";
+          }
+        } catch (stripeError: any) {
+          console.error("Stripe payout error:", stripeError);
+          
+          // Handle specific Stripe errors
+          if (stripeError.code === "account_invalid") {
+            return res.status(400).json({ 
+              code: "INVALID_BANK_ACCOUNT",
+              message: "Your bank account details are invalid. Please update them." 
+            });
+          }
+          if (stripeError.code === "balance_insufficient") {
+            return res.status(503).json({ 
+              code: "PLATFORM_BALANCE_LOW",
+              message: "Payout temporarily unavailable. Please try again later." 
+            });
+          }
+          
+          // Fall back to pending status for manual processing
+          payoutStatus = "pending_review";
+        }
+      }
+
+      // Deduct from driver's wallet
       await storage.updateDriverWalletBalance(req.params.driverId, -requestedAmount);
 
       const payout = await storage.createDriverPayout({
         id: uuidv4(),
         driverId: req.params.driverId,
-        amount: amount,
-        status: 'pending',
+        amount: requestedAmount.toFixed(2),
+        method: method,
+        status: payoutStatus,
+        stripePayoutId: stripePayoutId,
       });
 
       await storage.createWalletTransaction({
         id: uuidv4(),
         driverId: req.params.driverId,
         type: 'withdrawal',
-        amount: amount,
-        status: 'pending',
-        description: `Withdrawal request`,
+        amount: requestedAmount.toFixed(2),
+        status: payoutStatus === "processing" ? "completed" : "pending",
+        description: method === "bank" 
+          ? `Bank withdrawal - ${payoutStatus === "pending_bank_setup" ? "awaiting bank setup" : "processing"}`
+          : `Withdrawal request`,
+        completedAt: payoutStatus === "processing" ? new Date() : undefined,
       });
 
-      res.json({ success: true, payout });
+      res.json({ 
+        success: true, 
+        payout,
+        message: payoutStatus === "pending_bank_setup" 
+          ? "Payout requested. Please set up your bank account to receive funds."
+          : payoutStatus === "processing"
+          ? "Payout is being processed and will arrive in 2-3 business days."
+          : "Payout request submitted for review.",
+        newBalance: (balance - requestedAmount).toFixed(2),
+      });
     } catch (error: any) {
-      res.status(500).json({ message: error.message });
+      console.error("Payout error:", error);
+      res.status(500).json({ 
+        code: "PAYOUT_ERROR",
+        message: "Failed to process payout. Please try again." 
+      });
     }
   });
 
@@ -2444,33 +3083,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const driver = await storage.getDriver(req.params.driverId);
       
       if (!driver) {
-        return res.status(404).json({ message: "Driver not found" });
+        return res.status(404).json({ 
+          code: "DRIVER_NOT_FOUND",
+          message: "Driver account not found" 
+        });
       }
       
       if (driver.userId !== req.userId && req.userRole !== "admin") {
-        return res.status(403).json({ message: "Access denied" });
+        return res.status(403).json({ 
+          code: "ACCESS_DENIED",
+          message: "You can only withdraw from your own wallet" 
+        });
       }
 
       const balance = parseFloat(driver.walletBalance || "0");
       const requestedAmount = parseFloat(amount);
 
-      if (requestedAmount < 10) {
-        return res.status(400).json({ message: "Minimum withdrawal is 10 USDT" });
+      const MIN_CRYPTO_PAYOUT = 10;
+      if (isNaN(requestedAmount) || requestedAmount < MIN_CRYPTO_PAYOUT) {
+        return res.status(400).json({ 
+          code: "BELOW_MINIMUM",
+          message: `Minimum USDT withdrawal is ${MIN_CRYPTO_PAYOUT} USDT`,
+          minimumAmount: MIN_CRYPTO_PAYOUT,
+        });
       }
 
       if (balance < requestedAmount) {
-        return res.status(400).json({ message: "Insufficient balance" });
+        return res.status(400).json({ 
+          code: "INSUFFICIENT_BALANCE",
+          message: `Insufficient balance. You have AED ${balance.toFixed(2)} available.`,
+          availableBalance: balance,
+          requestedAmount,
+        });
       }
 
       const { sendUsdtPayout, isWalletConfigured } = await import("./blockchain");
       
       if (!isWalletConfigured()) {
-        return res.status(503).json({ message: "Crypto payouts are not configured. Contact support." });
+        return res.status(503).json({ 
+          code: "CRYPTO_NOT_CONFIGURED",
+          message: "USDT payouts are temporarily unavailable. Please try bank withdrawal or contact support." 
+        });
       }
 
       const targetAddress = walletAddress || driver.cryptoWalletAddress;
       if (!targetAddress) {
-        return res.status(400).json({ message: "Please set your crypto wallet address first" });
+        return res.status(400).json({ 
+          code: "NO_WALLET_ADDRESS",
+          message: "Please add your USDT wallet address in settings first" 
+        });
+      }
+
+      // Validate wallet address format (basic Ethereum/Polygon address check)
+      if (!/^0x[a-fA-F0-9]{40}$/.test(targetAddress)) {
+        return res.status(400).json({ 
+          code: "INVALID_WALLET_ADDRESS",
+          message: "Invalid wallet address format. Please enter a valid Polygon (MATIC) address." 
+        });
       }
 
       await storage.updateDriverWalletBalance(req.params.driverId, -requestedAmount);
@@ -3385,8 +4054,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/payments/methods", async (req, res) => {
     res.json({
       methods: [
+        { id: "wallet", name: "Wallet", icon: "wallet-outline", available: true, description: "Pay from your wallet balance" },
+        { id: "card", name: "Card", icon: "card-outline", available: true, description: "Pay with saved card" },
         { id: "usdt", name: "USDT (Crypto)", icon: "logo-bitcoin", available: true, description: "Pay with USDT via BitPay" },
-        { id: "cash", name: "Cash", icon: "cash-outline", available: true, description: "Pay driver directly with cash" },
       ],
     });
   });
@@ -3575,6 +4245,113 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(payouts);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Comprehensive ride receipt endpoint
+  app.get("/api/rides/:rideId/receipt", requireAuth, async (req: any, res) => {
+    try {
+      const ride = await storage.getRide(req.params.rideId);
+      if (!ride) {
+        return res.status(404).json({ 
+          code: "RIDE_NOT_FOUND",
+          message: "Ride not found" 
+        });
+      }
+
+      // Access control
+      const driver = await storage.getDriverByUserId(req.userId);
+      const isCustomer = ride.customerId === req.userId;
+      const isDriver = driver && ride.driverId === driver.id;
+      const isAdmin = req.userRole === "admin";
+
+      if (!isCustomer && !isDriver && !isAdmin) {
+        return res.status(403).json({ 
+          code: "ACCESS_DENIED",
+          message: "You don't have access to this receipt" 
+        });
+      }
+
+      if (ride.status !== "completed") {
+        return res.status(400).json({ 
+          code: "RIDE_NOT_COMPLETED",
+          message: "Receipt only available for completed rides" 
+        });
+      }
+
+      // Get payment record
+      const paymentRecords = await db.select().from(payments).where(eq(payments.rideId, ride.id));
+      const payment = paymentRecords[0];
+
+      // Get user and driver info
+      const customer = await storage.getUser(ride.customerId);
+      const driverUser = ride.driverId ? await storage.getDriver(ride.driverId) : null;
+      const driverProfile = driverUser ? await storage.getUser(driverUser.userId) : null;
+
+      // Calculate fare breakdown
+      const totalFare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
+      const platformFee = totalFare * 0.10;
+      const driverEarnings = totalFare * 0.90;
+      
+      // Get invoices
+      const invoices = await storage.getRideInvoicesByRide(ride.id);
+      const customerInvoice = invoices.find(i => i.invoiceType === "customer");
+
+      const receipt = {
+        receiptId: customerInvoice?.invoiceNumber || `RCP-${ride.id.substring(0, 8).toUpperCase()}`,
+        rideId: ride.id,
+        status: "paid",
+        createdAt: ride.completedAt || ride.createdAt,
+        
+        trip: {
+          pickupAddress: ride.pickupAddress,
+          dropoffAddress: ride.dropoffAddress,
+          distance: ride.distance,
+          duration: ride.duration,
+          startedAt: ride.startedAt,
+          completedAt: ride.completedAt,
+        },
+        
+        rider: {
+          name: customer?.name || "Rider",
+          phone: customer?.phone,
+        },
+        
+        driver: driverProfile ? {
+          name: driverProfile.name,
+          phone: driverProfile.phone,
+          rating: driverUser?.rating,
+        } : null,
+        
+        payment: {
+          method: payment?.method || ride.paymentMethod || "cash",
+          status: payment?.status || "completed",
+          processedAt: payment?.createdAt,
+          stripePaymentId: payment?.stripePaymentId,
+        },
+        
+        fareBreakdown: {
+          baseFare: totalFare,
+          discount: 0,
+          totalFare: totalFare,
+          currency: ride.currency || "AED",
+        },
+        
+        blockchain: ride.blockchainHash ? {
+          hash: ride.blockchainHash,
+          verified: !!ride.blockchainTxHash,
+          txHash: ride.blockchainTxHash,
+        } : null,
+        
+        invoiceNumber: customerInvoice?.invoiceNumber,
+      };
+
+      res.json(receipt);
+    } catch (error: any) {
+      res.status(500).json({ 
+        code: "RECEIPT_ERROR",
+        message: error.message 
+      });
     }
   });
 
@@ -5452,6 +6229,441 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ? `You've earned $${earnings.totalPremiumsEarned.toFixed(2)} in faster pickup bonuses from ${earnings.ridesWithPremium} rides.`
           : "Activate Going Home mode to earn bonuses on rides heading your way.",
       });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== RIDE TRUTH ENGINE API =====
+
+  app.post("/api/truth/consent", requireAuth, async (req: any, res) => {
+    try {
+      const { screenshots, notifications, gpsTrace, screenshotCapture, notificationParsing, gpsTracking, postRideConfirmation } = req.body;
+      await truthFraud.grantConsent(req.userId, {
+        screenshotCapture: screenshotCapture ?? screenshots ?? false,
+        notificationParsing: notificationParsing ?? notifications ?? false,
+        gpsTracking: gpsTracking ?? gpsTrace ?? false,
+        postRideConfirmation: postRideConfirmation ?? true,
+      });
+      res.json({ message: "Consent updated successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/consent", requireAuth, async (req: any, res) => {
+    try {
+      const result = await truthEngine.checkUserConsent(req.userId);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/truth/consent", requireAuth, async (req: any, res) => {
+    try {
+      await truthFraud.revokeConsent(req.userId);
+      res.json({ message: "Consent revoked" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/truth/data", requireAuth, async (req: any, res) => {
+    try {
+      const result = await truthFraud.deleteUserTruthData(req.userId);
+      res.json({ message: `Deleted ${result.deletedRides} rides and all associated data` });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/truth/rides", requireAuth, async (req: any, res) => {
+    try {
+      const consent = await truthEngine.checkUserConsent(req.userId);
+      if (!consent.hasConsent) {
+        return res.status(403).json({ message: "Truth Engine consent required. Please grant consent first." });
+      }
+
+      const { providerName, screenshotBase64, notificationText, gpsTrace, rideDate, postRideAnswers, cityName } = req.body;
+
+      let signals: any = {};
+      let extractionMethod = "manual";
+
+      if (screenshotBase64) {
+        signals = await truthEngine.extractSignalsFromScreenshot(screenshotBase64);
+        extractionMethod = "screenshot_ai";
+      }
+
+      if (notificationText) {
+        const notifSignals = truthEngine.extractSignalsFromNotification(notificationText);
+        signals = { ...signals, ...notifSignals };
+        extractionMethod = extractionMethod === "screenshot_ai" ? "screenshot_ai+notification" : "notification";
+      }
+
+      if (postRideAnswers) {
+        if (postRideAnswers.priceMatched === false) signals.quotedPrice = signals.quotedPrice || postRideAnswers.quotedPrice;
+        if (postRideAnswers.driverCancelled === true) signals.driverCancelled = true;
+        if (postRideAnswers.arrivedOnTime === false && postRideAnswers.actualWaitMin) {
+          signals.actualPickupMinutes = postRideAnswers.actualWaitMin;
+        }
+      }
+
+      let gpsAnalysis = null;
+      if (gpsTrace && Array.isArray(gpsTrace) && gpsTrace.length > 0) {
+        gpsAnalysis = truthEngine.analyzeGpsTrace(gpsTrace);
+        if (gpsAnalysis.distanceKm > 0) {
+          signals.actualDistanceKm = gpsAnalysis.distanceKm;
+          signals.actualDurationMin = gpsAnalysis.durationMin;
+        }
+      }
+
+      const resolvedProviderName = signals.providerName || providerName || "Unknown";
+      const providerId = await truthEngine.getOrCreateProvider(resolvedProviderName);
+
+      const fraudCheck = await truthFraud.validateRideSubmission(
+        req.userId, providerId, cityName || "Unknown", gpsTrace
+      );
+
+      const rideDateObj = rideDate ? new Date(rideDate) : new Date();
+      const timeBlock = truthEngine.getTimeBlock(rideDateObj);
+      const distance = signals.actualDistanceKm || signals.expectedDistanceKm;
+      const routeType = distance ? truthEngine.getRouteType(distance) : undefined;
+
+      const [truthRide] = await db.insert(truthRides).values({
+        userId: req.userId,
+        providerId,
+        cityName: cityName || "Unknown",
+        routeType,
+        timeBlock,
+        rideDate: rideDateObj,
+        quotedPrice: signals.quotedPrice?.toString(),
+        finalPrice: signals.finalPrice?.toString(),
+        quotedEtaMinutes: signals.quotedEtaMinutes?.toString(),
+        actualPickupMinutes: signals.actualPickupMinutes?.toString(),
+        driverCancelled: signals.driverCancelled,
+        cancellationCount: signals.cancellationCount || 0,
+        expectedDistanceKm: signals.expectedDistanceKm?.toString(),
+        actualDistanceKm: signals.actualDistanceKm?.toString(),
+        expectedDurationMin: signals.expectedDurationMin?.toString(),
+        actualDurationMin: signals.actualDurationMin?.toString(),
+        supportResolved: signals.supportResolved,
+        supportOutcome: signals.supportOutcome,
+        screenshotUrl: screenshotBase64 ? "stored" : null,
+        gpsTraceJson: gpsTrace ? JSON.stringify(gpsTrace) : null,
+        notificationData: notificationText,
+        proofOfRide: !!(gpsAnalysis?.isConsistent) || !!screenshotBase64,
+        pickupLat: gpsTrace?.[0]?.lat?.toString(),
+        pickupLng: gpsTrace?.[0]?.lng?.toString(),
+        dropoffLat: gpsTrace?.[gpsTrace.length - 1]?.lat?.toString(),
+        dropoffLng: gpsTrace?.[gpsTrace.length - 1]?.lng?.toString(),
+      }).returning();
+
+      await truthEngine.storeSignals(truthRide.id, signals, extractionMethod);
+
+      const score = await truthScoring.computeAndStorePRTS(truthRide.id);
+
+      await truthAggregation.updateAggregationCache(providerId, cityName || "Unknown", timeBlock, routeType);
+
+      res.json({
+        truthRideId: truthRide.id,
+        score: score.totalScore,
+        explanation: score.explanation,
+        breakdown: {
+          priceIntegrity: score.priceIntegrityScore,
+          pickupReliability: score.pickupReliabilityScore,
+          cancellation: score.cancellationScore,
+          routeIntegrity: score.routeIntegrityScore,
+          supportResolution: score.supportResolutionScore,
+        },
+        fraudFlags: fraudCheck.flags,
+        provider: resolvedProviderName,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/rides/:id/score", requireAuth, async (req: any, res) => {
+    try {
+      const [score] = await db.select().from(truthScores)
+        .where(eq(truthScores.truthRideId, req.params.id))
+        .limit(1);
+
+      if (!score) return res.status(404).json({ message: "Score not found" });
+
+      res.json({
+        totalScore: parseFloat(score.totalScore),
+        priceIntegrity: parseFloat(score.priceIntegrityScore || "0"),
+        pickupReliability: parseFloat(score.pickupReliabilityScore || "0"),
+        cancellation: parseFloat(score.cancellationScore || "0"),
+        routeIntegrity: parseFloat(score.routeIntegrityScore || "0"),
+        supportResolution: parseFloat(score.supportResolutionScore || "0"),
+        explanation: score.explanation,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/rankings", requireAuth, async (req: any, res) => {
+    try {
+      const { city, timeBlock, routeType } = req.query;
+      if (!city) return res.status(400).json({ message: "City parameter required" });
+
+      const result = await truthRecommendation.getContextualRankings(
+        city as string,
+        timeBlock as string | undefined,
+        routeType as string | undefined
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/recommend", requireAuth, async (req: any, res) => {
+    try {
+      const { city, timeBlock, routeType } = req.query;
+      if (!city) return res.status(400).json({ message: "City parameter required" });
+
+      const recommendation = await truthRecommendation.getRecommendation(
+        city as string,
+        timeBlock as string | undefined,
+        routeType as string | undefined
+      );
+
+      if (!recommendation) {
+        return res.json({ hasRecommendation: false, message: "Not enough data for a recommendation yet." });
+      }
+
+      res.json({ hasRecommendation: true, recommendation });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/providers", async (_req, res) => {
+    try {
+      const providers = await db.select().from(truthProviders).where(eq(truthProviders.isActive, true));
+      res.json(providers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/truth/my-rides", requireAuth, async (req: any, res) => {
+    try {
+      const userRides = await db.select({
+        ride: truthRides,
+        score: truthScores,
+      })
+        .from(truthRides)
+        .leftJoin(truthScores, eq(truthScores.truthRideId, truthRides.id))
+        .where(eq(truthRides.userId, req.userId))
+        .orderBy(desc(truthRides.rideDate))
+        .limit(50);
+
+      res.json(userRides.map(r => ({
+        id: r.ride.id,
+        providerId: r.ride.providerId,
+        cityName: r.ride.cityName,
+        rideDate: r.ride.rideDate,
+        quotedPrice: r.ride.quotedPrice,
+        finalPrice: r.ride.finalPrice,
+        score: r.score ? parseFloat(r.score.totalScore) : null,
+        explanation: r.score?.explanation,
+        isFromTravony: r.ride.isFromTravony,
+      })));
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== GHOST MODE API =====
+
+  app.post("/api/ghost/rides", requireAuth, async (req: any, res) => {
+    try {
+      const rideId = await ghostRideService.createGhostRide({
+        ...req.body,
+        riderId: req.userId,
+      });
+      res.json({ ghostRideId: rideId, message: "Ghost ride created" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/ghost/rides/accept", requireAuth, async (req: any, res) => {
+    try {
+      await ghostRideService.acceptGhostRide(req.body);
+      res.json({ message: "Ghost ride accepted" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/ghost/rides/start", requireAuth, async (req: any, res) => {
+    try {
+      await ghostRideService.startGhostRide(req.body.localId);
+      res.json({ message: "Ghost ride started" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/ghost/rides/complete", requireAuth, async (req: any, res) => {
+    try {
+      await ghostRideService.completeGhostRide(req.body);
+      res.json({ message: "Ghost ride completed" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/ghost/sync", requireAuth, async (req: any, res) => {
+    try {
+      const rideResults = await ghostRideService.syncAllPendingGhostRides(req.userId);
+      const queueResults = await ghostRideService.processSyncQueue(req.userId);
+
+      res.json({
+        rides: rideResults,
+        queue: queueResults,
+        message: `Synced ${rideResults.filter(r => r.success).length} rides`,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/ghost/rides", requireAuth, async (req: any, res) => {
+    try {
+      const userGhostRides = await db.select()
+        .from(ghostRides)
+        .where(eq(ghostRides.riderId, req.userId))
+        .orderBy(desc(ghostRides.createdAt))
+        .limit(50);
+
+      res.json(userGhostRides);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/ghost/pricing/:city", requireAuth, async (req: any, res) => {
+    try {
+      const pricing = await ghostRideService.getCachedPricingForCity(req.params.city);
+      res.json(pricing);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/ghost/estimate", requireAuth, async (req: any, res) => {
+    try {
+      const { cityName, vehicleType, distanceKm, durationMin } = req.body;
+      const estimate = await ghostRideService.calculateOfflineFare(
+        cityName, vehicleType, distanceKm, durationMin
+      );
+      res.json(estimate);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== AUTO-FEED TRAVONY RIDES TO TRUTH ENGINE =====
+
+  app.post("/api/truth/auto-feed/:rideId", requireAuth, async (req: any, res) => {
+    try {
+      const [ride] = await db.select().from(rides)
+        .where(and(eq(rides.id, req.params.rideId), eq(rides.status, "completed")))
+        .limit(1);
+
+      if (!ride) return res.status(404).json({ message: "Completed ride not found" });
+
+      const providerId = await truthEngine.getOrCreateProvider("Travony");
+      const rideDateObj = ride.completedAt || ride.createdAt;
+      const timeBlock = truthEngine.getTimeBlock(rideDateObj);
+      const distance = ride.distance ? parseFloat(ride.distance) : undefined;
+      const routeType = distance ? truthEngine.getRouteType(distance) : undefined;
+
+      const [truthRide] = await db.insert(truthRides).values({
+        userId: ride.customerId,
+        providerId,
+        cityName: ride.regionCode || "Unknown",
+        routeType,
+        timeBlock,
+        rideDate: rideDateObj,
+        quotedPrice: ride.estimatedFare,
+        finalPrice: ride.actualFare,
+        expectedDistanceKm: ride.distance,
+        actualDistanceKm: ride.distance,
+        driverCancelled: false,
+        proofOfRide: true,
+        isFromTravony: true,
+        travonyRideId: ride.id,
+        pickupLat: ride.pickupLat,
+        pickupLng: ride.pickupLng,
+        dropoffLat: ride.dropoffLat,
+        dropoffLng: ride.dropoffLng,
+      }).returning();
+
+      const score = await truthScoring.computeAndStorePRTS(truthRide.id);
+
+      res.json({
+        truthRideId: truthRide.id,
+        score: score.totalScore,
+        message: "Travony ride auto-fed to Truth Engine",
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== ADMIN: TRUTH ENGINE & GHOST MODE DASHBOARD =====
+
+  app.get("/api/admin/truth/stats", requireAuth, async (req: any, res) => {
+    try {
+      const [totalRides] = await db.select({ count: count() }).from(truthRides);
+      const [totalScores] = await db.select({ count: count() }).from(truthScores);
+      const [totalProviders] = await db.select({ count: count() }).from(truthProviders);
+      const [totalConsents] = await db.select({ count: count() }).from(truthConsent);
+      const [totalGhost] = await db.select({ count: count() }).from(ghostRides);
+      const [pendingSync] = await db.select({ count: count() })
+        .from(ghostRides)
+        .where(eq(ghostRides.syncStatus, "pending"));
+
+      res.json({
+        truthRides: totalRides?.count || 0,
+        scoredRides: totalScores?.count || 0,
+        providers: totalProviders?.count || 0,
+        consentedUsers: totalConsents?.count || 0,
+        ghostRides: totalGhost?.count || 0,
+        pendingGhostSync: pendingSync?.count || 0,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/admin/truth/rankings/:city", requireAuth, async (req: any, res) => {
+    try {
+      const rankings = await truthAggregation.getRankings(req.params.city);
+      res.json(rankings);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/admin/ghost/rides", requireAuth, async (req: any, res) => {
+    try {
+      const allGhost = await db.select()
+        .from(ghostRides)
+        .orderBy(desc(ghostRides.createdAt))
+        .limit(100);
+
+      res.json(allGhost);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

@@ -305,7 +305,8 @@ function detectRegionFromCoordinates(lat: number, lng: number): string {
 }
 
 const paymentMethods = [
-  { id: "cash", name: "Cash", icon: "cash-outline", description: "Pay driver directly" },
+  { id: "wallet", name: "Wallet", icon: "wallet-outline", description: "Pay from your wallet balance" },
+  { id: "card", name: "Card", icon: "card-outline", description: "Pay with saved card" },
   { id: "usdt", name: "USDT", icon: "logo-bitcoin", description: "Pay with crypto" },
 ];
 
@@ -347,6 +348,21 @@ export default function BookingBottomSheet({
     queryKey: ["/api/regions", detectedRegion],
     enabled: !!detectedRegion,
   });
+
+  // Fetch wallet balance for payment validation
+  const { data: walletData } = useQuery<{ balance: string }>({
+    queryKey: [`/api/wallet/balance/${user?.id}`],
+    enabled: !!user?.id,
+  });
+
+  // Fetch saved payment methods for card payment validation
+  const { data: savedCards = [] } = useQuery<{ stripePaymentMethodId?: string }[]>({
+    queryKey: [`/api/payment-methods/${user?.id}`],
+    enabled: !!user?.id,
+  });
+
+  const walletBalance = parseFloat(walletData?.balance || "0");
+  const hasValidCard = savedCards.some((card) => card.stripePaymentMethodId);
 
   const vehicleTypes = useMemo(() => {
     const config = regionConfig as { vehicleTypes?: any[] } | undefined;
@@ -508,19 +524,49 @@ export default function BookingBottomSheet({
 
   const handleBookRide = () => {
     console.log("Book ride clicked, user:", user?.id ? "logged in" : "not logged in");
-    if (!user?.id) {
+    
+    const showError = (title: string, message: string) => {
       if (Platform.OS === "web") {
-        window.alert("Please sign in to book a ride. Go to the Profile tab to sign in.");
+        window.alert(`${title}: ${message}`);
       } else {
-        Alert.alert(
-          "Sign In Required",
-          "Please sign in to book a ride. Go to the Profile tab to sign in.",
-          [{ text: "OK" }]
-        );
+        Alert.alert(title, message, [{ text: "OK" }]);
       }
+    };
+    
+    if (!user?.id) {
+      showError("Sign In Required", "Please sign in to book a ride. Go to the Profile tab to sign in.");
       return;
     }
-    console.log("Booking ride with payment:", selectedPayment.id);
+    
+    // Calculate the fare for validation
+    const fareAmount = parseFloat(calculateFare(selectedVehicle));
+    
+    // PAYMENT VALIDATION - Require valid payment before booking
+    if (selectedPayment.id === "wallet") {
+      if (walletBalance < fareAmount) {
+        showError(
+          "Insufficient Balance",
+          `Your wallet balance (AED ${walletBalance.toFixed(2)}) is less than the fare (AED ${fareAmount.toFixed(2)}). Please top up your wallet first.`
+        );
+        return;
+      }
+    } else if (selectedPayment.id === "card") {
+      if (!hasValidCard) {
+        showError(
+          "No Card Added",
+          "You need to add a card in the Wallet tab before you can pay by card."
+        );
+        return;
+      }
+    } else if (selectedPayment.id === "usdt") {
+      // USDT payment - BitPay invoice will be created, allow booking
+      console.log("USDT payment selected - will create BitPay invoice");
+    } else {
+      showError("Payment Required", "Please select a valid payment method.");
+      return;
+    }
+    
+    console.log("Booking ride with payment:", selectedPayment.id, "fare:", fareAmount);
     bookRideMutation.mutate();
   };
 

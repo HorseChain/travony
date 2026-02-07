@@ -77,11 +77,16 @@ export default function DriverHomeScreen() {
     }
   }, [driverData?.is_online]);
 
-  const { data: pendingRides } = useQuery<RideRequest[]>({
+  const { data: pendingRides, error: pendingRidesError, isLoading: pendingRidesLoading } = useQuery<RideRequest[]>({
     queryKey: ["/api/drivers/pending-rides"],
     enabled: isOnline,
     refetchInterval: 5000,
   });
+
+  // Debug logging for pending rides
+  useEffect(() => {
+    console.log("[DRIVER-DEBUG] isOnline:", isOnline, "pendingRides:", pendingRides?.length, "error:", pendingRidesError?.message, "loading:", pendingRidesLoading);
+  }, [isOnline, pendingRides, pendingRidesError, pendingRidesLoading]);
 
   interface DemandZone {
     zoneLat: string;
@@ -283,6 +288,9 @@ export default function DriverHomeScreen() {
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
             <ThemedText style={styles.searchingText}>Searching for ride requests...</ThemedText>
+            <ThemedText style={{ fontSize: 10, marginTop: 4, opacity: 0.6 }}>
+              [DEBUG: {pendingRides?.length ?? 0} rides, {pendingRidesLoading ? 'loading' : 'ready'}{pendingRidesError ? `, err: ${pendingRidesError.message}` : ''}]
+            </ThemedText>
           </View>
         </View>
       )}

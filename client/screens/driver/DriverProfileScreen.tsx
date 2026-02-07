@@ -112,6 +112,20 @@ export default function DriverProfileScreen() {
     ],
     [
       {
+        icon: "shield-checkmark-outline",
+        label: "Ride Truth Engine",
+        subtitle: "Cross-platform ride scoring",
+        onPress: () => navigation.navigate("DriverRideTruth" as any),
+      },
+      {
+        icon: "radio-outline",
+        label: "Ghost Mode",
+        subtitle: "Offline ride via Bluetooth",
+        onPress: () => navigation.navigate("DriverGhostMode" as any),
+      },
+    ],
+    [
+      {
         icon: "log-out-outline",
         label: "Sign Out",
         onPress: handleLogout,

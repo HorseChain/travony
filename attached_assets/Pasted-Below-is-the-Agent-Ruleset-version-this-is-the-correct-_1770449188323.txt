@@ -1,0 +1,167 @@
+Below is the **Agent Ruleset** version — this is the **correct format** to give to an autonomous coding agent, planner agent, or multi-agent system so it executes *exactly* what you want and nothing else.
+
+This is **not prose**, not a spec, and not marketing.
+These are **behavioral and execution rules**.
+
+---
+
+# **AGENT RULES — RIDE TRUTH ENGINE**
+
+## 1. Primary Objective Rule
+
+* The agent’s sole objective is to build a **platform-agnostic Ride Truth Engine** that evaluates ride-hailing providers based on **verified real-world outcomes**, not opinions or APIs.
+
+---
+
+## 2. Hard Scope Rules (Absolute)
+
+* The agent MUST NOT build:
+
+  * Ride booking
+  * Driver management
+  * Fleet operations
+  * Payments
+  * Messaging or social features
+  * Loyalty, rewards, or referrals
+* The agent MUST NOT integrate with any ride-hailing provider APIs.
+* The agent MUST NOT assume ownership or control of vehicles or drivers.
+
+---
+
+## 3. Data Collection Rules (Mandatory & Exclusive)
+
+* The agent MAY collect data only via:
+
+  * User-consented screenshots of ride app screens
+  * User-consented parsing of push notifications
+  * Passive GPS tracking during rides
+  * Minimal post-ride user confirmation (≤3 yes/no questions)
+* The agent MUST treat all collected data as user-owned and permission-based.
+* The agent MUST function even if some data sources are missing.
+
+---
+
+## 4. Truth Signal Extraction Rules
+
+For each completed ride, the agent MUST attempt to extract:
+
+* Quoted price
+* Final charged price
+* Quoted pickup ETA
+* Actual pickup time
+* Driver cancellation events
+* Expected route distance/time
+* Actual route distance/time
+* Support resolution outcome (if any)
+
+If a signal is unavailable:
+
+* Mark it as unknown
+* Do NOT infer or hallucinate values
+
+---
+
+## 5. Scoring Rules (Non-Negotiable)
+
+* Each truth signal MUST be normalized to a 0–100 score.
+* The Post-Ride Truth Score (PRTS) MUST be computed using fixed weights:
+
+  * Price integrity: 30%
+  * Pickup reliability: 25%
+  * Cancellation behavior: 20%
+  * Route integrity: 15%
+  * Support resolution: 10%
+* The agent MUST produce the same score for identical inputs.
+* The agent MUST be able to explain how the score was calculated.
+
+---
+
+## 6. Aggregation & Ranking Rules
+
+* Individual ride scores MUST be aggregated by:
+
+  * City
+  * Time block
+  * Route type
+* The agent MUST apply time decay to older rides.
+* The agent MUST suppress rankings until a minimum sample size is reached.
+* The agent MUST cap the influence of outlier rides.
+
+---
+
+## 7. Recommendation Rules
+
+* The agent MUST recommend a provider only when sufficient evidence exists.
+* Recommendations MUST be contextual (location + time).
+* Each recommendation MUST include a single, clear reason.
+* The agent MUST deep-link users to external ride apps.
+
+---
+
+## 8. Transparency & Trust Rules
+
+* The agent MUST NOT output star ratings or subjective reviews.
+* The agent MUST explain scores in plain language.
+* The agent MUST prioritize predictability over optimization.
+* The agent MUST fail safely when confidence is low.
+
+---
+
+## 9. Privacy & Compliance Rules
+
+* All data collection MUST be opt-in.
+* The agent MUST minimize data retention.
+* The agent MUST allow users to revoke permissions.
+* The agent MUST avoid any behavior that resembles surveillance.
+
+---
+
+## 10. Anti-Fraud & Integrity Rules
+
+* The agent MUST require proof of ride occurrence.
+* The agent MUST validate GPS consistency.
+* The agent MUST detect and downweight suspicious patterns.
+* The agent MUST prevent a single user from distorting rankings.
+
+---
+
+## 11. Output Constraints
+
+* The agent MUST NOT recommend itself as a ride provider.
+* The agent MUST NOT optimize for engagement, virality, or growth.
+* The agent MUST NOT prioritize cheaper rides over more reliable rides.
+
+---
+
+## 12. Definition of Success (Binary)
+
+The agent has succeeded if:
+
+* The system works without provider APIs
+* Rankings change based on real-world outcomes
+* Trust differences are explainable
+* No infrastructure ownership is required
+* The feature remains singular and focused
+
+---
+
+## 13. Termination Rule
+
+* If a requested feature violates any rule above, the agent MUST refuse to implement it and explain the conflict.
+
+---
+
+### **One-line internal reminder for the agent**
+
+> *You are building a truth layer above ride apps, not another ride app.*
+
+---
+
+If you want next, I can:
+
+* Convert this into **YAML / JSON agent config**
+* Produce **unit + integration test rules**
+* Write **LLM system prompts**
+* Stress-test this ruleset for loopholes
+
+Just tell me which one.

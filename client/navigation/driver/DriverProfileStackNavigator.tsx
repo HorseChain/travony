@@ -9,6 +9,8 @@ import DriverPaymentSettingsScreen from "@/screens/driver/DriverPaymentSettingsS
 import DriverRatingsScreen from "@/screens/driver/DriverRatingsScreen";
 import DriverAppSettingsScreen from "@/screens/driver/DriverAppSettingsScreen";
 import DriverHelpScreen from "@/screens/driver/DriverHelpScreen";
+import RideTruthScreen from "@/screens/RideTruthScreen";
+import GhostModeScreen from "@/screens/GhostModeScreen";
 
 export type DriverProfileStackParamList = {
   DriverProfile: undefined;
@@ -19,6 +21,8 @@ export type DriverProfileStackParamList = {
   DriverRatings: undefined;
   DriverAppSettings: undefined;
   DriverHelp: undefined;
+  DriverRideTruth: undefined;
+  DriverGhostMode: undefined;
 };
 
 const Stack = createNativeStackNavigator<DriverProfileStackParamList>();
@@ -67,6 +71,16 @@ export default function DriverProfileStackNavigator() {
         name="DriverHelp"
         component={DriverHelpScreen}
         options={{ headerTitle: "Help & Support" }}
+      />
+      <Stack.Screen
+        name="DriverRideTruth"
+        component={RideTruthScreen}
+        options={{ headerTitle: "Ride Truth Engine" }}
+      />
+      <Stack.Screen
+        name="DriverGhostMode"
+        component={GhostModeScreen}
+        options={{ headerTitle: "Ghost Mode" }}
       />
     </Stack.Navigator>
   );

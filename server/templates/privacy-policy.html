@@ -93,6 +93,8 @@
                 <li><strong>Ride History:</strong> Details of your trips including pickup/drop-off locations, routes, fares, and timestamps.</li>
                 <li><strong>Driver Information:</strong> For drivers, we collect vehicle details, driver's license, insurance documents, and background check information.</li>
                 <li><strong>Communications:</strong> Messages between riders and drivers, customer support interactions, and feedback.</li>
+                <li><strong>Ride Truth Engine Data (consent-based):</strong> If you opt in, we collect ride outcome signals (provider name, city, price accuracy, pickup reliability, cancellation data) and optional receipt screenshots. This data is anonymized and used solely for provider reliability scoring.</li>
+                <li><strong>Ghost Mode Data:</strong> When using Ghost Mode (offline ride-hailing), we collect Bluetooth connection metadata, pre-calculated fares, and ride details which are synced when connectivity is restored.</li>
             </ul>
 
             <h2>3. How We Use Your Information</h2>
@@ -105,6 +107,8 @@
                 <li>Ensure safety and security of all users</li>
                 <li>Comply with legal obligations</li>
                 <li>Analyze usage patterns to improve user experience</li>
+                <li>Generate anonymized provider reliability scores (Ride Truth Engine, consent-based only)</li>
+                <li>Enable offline ride-hailing via Bluetooth mesh and synchronize ride data upon reconnection (Ghost Mode)</li>
             </ul>
 
             <h2>4. Information Sharing</h2>
@@ -133,25 +137,48 @@
                 <li>Request deletion of your data</li>
                 <li>Opt-out of marketing communications</li>
                 <li>Export your data in a portable format</li>
+                <li>Revoke Ride Truth Engine consent at any time without affecting your account</li>
+                <li>Delete all Ride Truth Engine data independently of your account</li>
             </ul>
 
-            <h2>7. Data Retention</h2>
+            <h2>7. Ride Truth Engine - Consent and Data</h2>
+            <p>The Ride Truth Engine is a fully optional, consent-based feature. We want to be transparent about how it works:</p>
+            <ul>
+                <li><strong>Explicit Consent Required:</strong> No Ride Truth Engine data is collected until you explicitly opt in through the app.</li>
+                <li><strong>What We Collect:</strong> Provider name, city, ride outcome signals (price accuracy, pickup timing, driver cancellations), and optional receipt screenshots for AI-powered OCR verification.</li>
+                <li><strong>How Data Is Used:</strong> Your submissions are anonymized and aggregated with other users' data to produce Provider Ride Truth Scores (PRTS) - reliability scores ranging from 0 to 100 for each ride-hailing provider in each city.</li>
+                <li><strong>Anti-Fraud Measures:</strong> To maintain data integrity, the system enforces per-user submission caps (maximum 15% of total signals from any single user), GPS validation, time-decay weighting, and anomaly detection.</li>
+                <li><strong>Revoke Consent:</strong> You can revoke your consent at any time from the Privacy Settings section of the Ride Truth Engine screen. Your data will no longer be included in future calculations.</li>
+                <li><strong>Delete Your Data:</strong> You can permanently delete all your Ride Truth Engine data at any time, or email privacy@travony.com.</li>
+                <li><strong>No Impact on Service:</strong> Opting out or deleting your data does not affect your ability to use Travony's ride-hailing services.</li>
+            </ul>
+
+            <h2>8. Ghost Mode - Offline Data</h2>
+            <p>Ghost Mode enables ride-hailing when internet connectivity is unavailable:</p>
+            <ul>
+                <li><strong>Bluetooth Data:</strong> When Ghost Mode is active, minimal Bluetooth connection metadata is used to discover nearby drivers. This data is not stored permanently.</li>
+                <li><strong>Offline Ride Records:</strong> Ghost ride details (city, vehicle type, distance, duration, estimated fare) are stored locally on your device until connectivity is restored.</li>
+                <li><strong>Automatic Sync:</strong> Upon reconnection, ghost ride records are synced to the server for payment processing. Synced data follows the same retention and deletion policies as regular ride data.</li>
+                <li><strong>Data Deletion:</strong> Ghost Mode ride data can be deleted through the standard account deletion process or by contacting privacy@travony.com.</li>
+            </ul>
+
+            <h2>9. Data Retention</h2>
             <p>We retain your personal information for as long as your account is active or as needed to provide services. We may retain certain information for legal compliance, dispute resolution, and enforcement of our agreements.</p>
 
-            <h2>8. Children's Privacy</h2>
+            <h2>10. Children's Privacy</h2>
             <p>Our services are not intended for users under 18 years of age. We do not knowingly collect personal information from children.</p>
 
-            <h2>9. Changes to This Policy</h2>
+            <h2>11. Changes to This Policy</h2>
             <p>We may update this privacy policy from time to time. We will notify you of any changes by posting the new policy on this page and updating the "Last Updated" date.</p>
 
-            <h2>10. Contact Us</h2>
+            <h2>12. Contact Us</h2>
             <p>If you have questions about this privacy policy or our privacy practices, please contact us at:</p>
             <ul>
                 <li>Email: privacy@travony.com</li>
                 <li>Support: <a href="/support">https://travony.replit.app/support</a></li>
             </ul>
 
-            <p class="last-updated">Last Updated: January 2026</p>
+            <p class="last-updated">Last Updated: February 2026</p>
         </div>
     </div>
 

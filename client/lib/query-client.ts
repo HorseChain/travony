@@ -32,7 +32,23 @@ async function getAuthToken(): Promise<string | null> {
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    throw new Error(`${res.status}: ${text}`);
+    
+    // Try to extract clean message from JSON error responses
+    try {
+      const errorData = JSON.parse(text);
+      // Extract just the message, not the code or raw JSON
+      const message = errorData.message || errorData.error || text;
+      throw new Error(message);
+    } catch (parseError) {
+      // If not JSON, use the raw text but make it cleaner
+      if (text.includes('"message"')) {
+        const match = text.match(/"message"\s*:\s*"([^"]+)"/);
+        if (match) {
+          throw new Error(match[1]);
+        }
+      }
+      throw new Error(text || "Something went wrong. Please try again.");
+    }
   }
 }
 

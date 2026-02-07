@@ -1,0 +1,313 @@
+Requirement Description
+The Client seeks to establish a comprehensive ride-booking platform by aggregating
+ride providers and passengers, enabling seamless booking of rides via the application.
+Objectives:
+Optimize ride booking by matching passengers with nearby drivers in realtime. Enhance ride booking efficiency and reduce costs.
+Stakeholders for this solution:
+The platform will have following stakeholders:
+
+Customers: Customers are the end users who will place the request for the taxi via
+the platform.
+Drivers: Drivers are the employees or the freelancers who will receive the request
+and will perform the service accordingly.
+Service Owner Admin: Service owner owning and managing the entire platform:
+users, tasks, content and other key operations. Our solution will include native mobile application for the customers and drivers
+(Driver App). An admin panel (Dashboard) for the service owner on our base
+template to manage all stakeholders and other key operations.
+Technical Solution
+We will offer the design and development of an application for the client and help that
+is flexible, user friendly and allows users to navigate through the key information
+conveniently.
+Requirement Gathering, Planning & Designs
+Requirements
+Gathering &
+Analysis
+Project Kick-Off meeting
+Business requirement analysis
+Queries & doubts clarification
+Meeting & technical discussion with clients
+Resource requirement & planning
+Creating project scope and timeline
+Design & Branding Objective will be to design app that is simple, clean,
+functional and easy to use
+Identify the color scheme, design guideline and
+branding requirements
+Wireframing using moqups
+App UI and Icon Design
+User Friendly and intuitive navigation
+Scope of Work
+Customers
+PLATFORM: MOBILE APP 1. Onboarding:
+● Ability for customers to sign up by entering details such as name, email address,
+password, mobile number, etc.
+● Option to continue with social media accounts like Google and Facebook for quick
+registration.
+● Agreement to the Terms and Conditions during the registration process for user
+acknowledgment.
+● Convenient login via email and password for existing users.
+● Option for password recovery via email in case of forgotten credentials. ● Guest
+checkout functionality allowing users to continue as guests and sign up or sign in later
+before placing a delivery request.
+● Password reset capability via a one-time verification code sent to the user's email for
+added security.
+● Option to resend the recent verification code in case of session expiration.
+Aggregation:
+● Automatic detection of user location when GPS is enabled and location permissions
+are granted to the app.
+● Ability to add the pickup and drop off location by selecting the pin on map or enter
+manually.
+● Ability to select location from saved addresses.
+● Ability to select the type of vehicle and view the fare estimates accordingly.
+● Ability to schedule a ride ASAP or later.
+● Ability to select the payment method and book the ride.
+Matching:
+● Real-time matching of customers/passengers with nearby drivers based on the
+nearest available.
+Notifications:
+● Ability to receive push notifications for:
+Driver Assignment
+Driver On the way to pickup
+Ride Started
+Ride in progress
+Reached Destination
+Ride Completed
+Location and Contact Sharing: ● Share the user's location and contact details with the assigned driver upon ride request
+acceptance, facilitating efficient communication and pickup coordination.
+Tracking:
+● Integrate live tracking functionality to allow users to track the real-time location of their
+assigned driver on map throughout the journey.
+● Display the estimated time of arrival (ETA).
+Ratings and Review:
+● Enable customers to provide rating to the driver once the ride is completed.
+Payment:
+● Integrate a payment gateway to facilitate secure transactions via credit/debit cards,
+with cash payment options also available.
+Promo Code:
+● Implement functionality for users to use promo codes to redeem discounts or special
+offers during ride bookings.
+Live Cars View:
+● Display a live cars view to show nearby available drivers and their real-time locations
+on a map.
+Surge Pricing Notification:
+● Send notifications to users regarding surge pricing to inform them about increased
+fares during peak demand periods.
+Call or Message Driver:
+● Allow users to call or message the assigned driver directly from within the app for
+communication purposes.
+Driver OTP Verification:
+● Implement driver OTP verification as an added security measure to ensure driver
+authenticity.
+Panic Button:
+● Include a panic button feature for users to quickly alert emergency services in case of
+safety concerns.
+Bookings: ● Ability to view upcoming and past bookings with details.
+● Provide users with the ability to cancel a ride before pickup, with applicable
+cancellation charges based on predefined policies.
+Profile:
+● User-friendly profile management features enabling customers to update personal
+information, delivery addresses, and payment methods.
+● Access to order history and delivery preferences for convenient reordering and
+tracking of past deliveries
+Contact Us:
+● Ability to view support phone number, support email address, physical address, and
+website link.
+● Ability to click on support phone number and directly place a call through the cellular
+network.
+● Ability to click on support email address and be redirected to 'Compose Email' via
+configured email account.
+Sign Out:
+● Secure sign-out functionality allows customers to log out of their accounts to protect
+their privacy and ensure account security.
+Driver
+PLATFORM: Mobile App
+Onboarding:
+● Registration process for drivers to sign up by entering personal details including name,
+email address, phone number, vehicle information and upload any required
+documents.
+● Option to register using social media accounts such as Google or Facebook for quicker
+access.
+● Agreement to the Terms and Conditions during the registration process for driver
+acknowledgment.
+● Secure login functionality via email and password for registered drivers.
+● Password recovery option via email in case of forgotten credentials. ● Ability to reset password using a one-time verification code sent to the driver’s email
+address.
+● Resend verification code feature in case the session expires or the code is not received.
+Aggregation:
+● Automatic detection of driver’s location using GPS when enabled within the app.
+● Display of booking requests.
+● Detailed view of booking details including customer information, pickup, and drop-off
+locations.
+● Option to accept or reject booking requests based on availability and preferences.
+View Current Location Using GPS:
+● Provide drivers with the ability to view their current location on a map using GPS
+technology.
+Live Tracking Using Google Navigator:
+● Integrate Google Navigator to enable live tracking of drivers' locations in real-time
+during trips.
+View Past and Upcoming Trips:
+● Allow drivers to access a list of past and upcoming trips for reference and planning
+purposes.
+View Earnings:
+● Provide drivers with visibility into their earnings, allowing them to track their progress .
+View Revenue Amount in App:
+● Display the total revenue earned by the driver within the app, calculated from the date
+of registration/login.
+Help and Support:
+● Offer access to help and support resources within the app, including FAQs, contact
+information.
+OTP Entry Option:
+● Allow drivers to manually enter OTPs (One-Time Passwords) for verification purposes if
+necessary.
+Ratings and Review:
+● Ability for drivers to receive ratings and reviews from customers based on their trip performance.
+Profile
+● Enable drivers to view and edit their profile information and password settings within
+the app for customization and security purposes.
+Signout:
+● Ability to signout from the app securely.
+Admin
+PLATFORM: Web
+Separate Admin Login:
+● Provide a dedicated login interface for the admin to access the platform's
+administrative features.
+Dashboard with Live Ride Details:
+● Offer a comprehensive dashboard displaying real-time information about ongoing
+rides, facilitating efficient monitoring and management.
+User/Driver Management:
+● Enable the admin to manage users and drivers, including registration, verification, and
+account management.
+Driver Approval:
+● Implement functionality for the admin to approve driver registrations and verify their
+credentials before allowing them to provide services.
+Assign Service/Vehicle for Drivers:
+● Allow the admin to assign specific services or vehicles to drivers based on availability
+and requirements.
+Service Type Management:
+● Provide tools for the admin to manage different service types offered on the platform,
+including adding, editing, or removing service categories.
+Edit/Delete User and Provider:
+● Enable the admin to edit or delete user and provider accounts as needed, ensuring
+platform integrity and compliance.
+Edit/Delete Service Type:
+● Allow the admin to edit or delete existing service types to maintain relevance and
+accuracy within the platform.
+Coupon Management: ● Implement coupon management functionality, allowing the admin to create, distribute,
+and track coupon usage for promotional purposes.
+Separate Login for Fleet Owner/Account Manager:
+● Offer separate login capabilities for fleet owners or account managers, allowing them
+access to specific management features relevant to their role.
+Driver Wallet Amount Details:
+● Display detailed information about driver wallet balances and transactions for financial
+transparency and management.
+Payment Details/Settings:
+● Enable the admin to manage payment details and settings, including configuring
+payment gateways and processing transactions.
+Ride/Schedule Ride Details:
+● Provide access to ride and scheduled ride details, allowing the admin to track and
+manage bookings efficiently.
+Forget Password:
+● Implement a password recovery feature for admin accounts, allowing for the retrieval
+of forgotten passwords via email verification.
+Geofencing for Service Areas:
+● Implement geofencing capabilities to define and restrict service availability to specific
+geographic areas as needed.
+Detailed Analytics on Rating and Review:
+● Provide comprehensive analytics on user and driver ratings and reviews, enabling the
+admin to assess service quality and identify areas for improvement.
+Change Password:
+● Allow the admin to change their password securely within the platform for enhanced
+account security.
+Site Settings:
+● Offer options to customize site settings such as logo, assigning details, and email
+configurations to align with branding and operational needs.
+Custom Push Notifications:
+● Enable the admin to send custom push notifications to users and drivers for
+emergency alerts or promotional messages.
+Help/Privacy Policy:
+● Provide access to help resources and privacy policy information for users and drivers
+within the platform interface.
+From Khalid: More structured requirements for each section of the delivery , ride app, including the
+backend service using Cosmos SDK, the rides app, and the driver app:
+Backend Service using Cosmos SDK:
+Blockchain Module:
+Define smart contracts for order management, driver management, and payment
+processing.
+Use Cosmos SDK's modules for transaction management and state storage. - Implement
+event handling for order updates, driver assignments, and payment notifications.
+Smart Contracts:
+Develop smart contracts for order creation, modification, and cancellation. - Create smart
+contracts for driver registration, authentication, and availability management. - Implement
+smart contracts for secure and transparent payment processing.
+API Gateway:
+Develop APIs for the rides app and driver app to interact with the
+blockchain. - Implement authentication and authorization mechanisms for API
+access. - Use RESTful API design principles for scalability and maintainability.
+Data Storage:
+Use the Cosmos SDK's state machine for storing order, driver, and payment
+data. - Ensure data consistency and integrity using blockchain transactions. -
+Implement data encryption for sensitive information.
+Interoperability:
+Use the Cosmos SDK's IBC protocol for interoperability with other blockchains. -
+Implement relayers for cross-chain communication and asset transfer. - Ensure
+compatibility with Ethereum-based smart contracts for seamless integration.
+Scalability and Performance:
+Design the blockchain network for horizontal scaling using sharding or sidechains.
+Implement load balancing mechanisms for even distribution of network traffic. -
+Monitor network performance and optimize resource allocation based on demand.
+Security:
+Use cryptographic algorithms for secure data transmission and storage. -
+Implement access control mechanisms to prevent unauthorized access. -
+Conduct regular security audits and apply patches and updates as needed. Rides App:
+User Interface:
+Develop a user-friendly interface for browsing and booking rides.
+Include features for selecting pickup and drop-off locations, choosing vehicle types, and
+viewing fare estimates.
+Ensure accessibility and responsiveness across different devices.
+Order Management:
+Integrate with the backend service for real-time order processing and tracking. -
+Provide notifications for order confirmation, driver assignment, and ride completion.
+Implement a rating system for users to rate their ride experience.
+Payment Integration:
+Integrate with the backend service for secure payment processing.
+Offer multiple payment options such as credit/debit cards, mobile wallets, and
+cash. - Ensure PCI compliance for handling payment information.
+Location Services:
+Use GPS for accurate location tracking of users and drivers.
+Implement geocoding services for converting addresses to
+coordinates. - Ensure real-time updating of ride status and estimated
+arrival times.
+Feedback and Support:
+Provide a feedback mechanism for users to rate their ride and provide
+comments. - Offer customer support through in-app chat, email, or phone.
+Use feedback to improve service quality and user satisfaction.
+Driver App:
+Driver Interface:
+Develop a user-friendly interface for managing ride requests and navigation. - Include
+features for accepting/rejecting ride requests, navigating to pickup and drop-off locations,
+and viewing earnings.
+Ensure accessibility and responsiveness for easy use on the go.
+Order Management: - Integrate with the backend service for receiving and updating ride requests. -
+Provide notifications for new ride requests, route guidance, and ride completion.
+Implement a rating system for drivers to rate their passengers.
+Location Tracking:
+Use GPS for accurate tracking of driver location and route.
+Implement route optimization for efficient navigation.
+Ensure real-time updating of ride status and estimated time of arrival.
+Earnings and Payments:
+Provide a summary of earnings and completed rides.
+Integrate with the backend service for secure payment processing.
+Offer options for cashless payments and instant payouts.
+Feedback and Communication:
+Provide a feedback mechanism for drivers to rate their passengers and provide
+comments.
+Enable communication with passengers through in-app messaging or
+calling. - Use feedback to improve driver performance and overall service
+quality.
+By following these detailed requirements for each section of the delivery, ride app, we can
+ensure a robust and efficient system that meets the needs of both users and drivers while
+leveraging the capabilities of the Cosmos SDK blockchain.
+Deliverables
+Admin Panel (Web)
+Android apps for Customers
+Android apps for Drivers
+Lets name ut Travony

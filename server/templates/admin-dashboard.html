@@ -650,6 +650,22 @@
         Vehicles
       </a>
     </nav>
+    <nav class="nav-section">
+      <div class="nav-section-title">Intelligence</div>
+      <a href="#" class="nav-item" data-section="truth-engine">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+        </svg>
+        Truth Engine
+      </a>
+      <a href="#" class="nav-item" data-section="ghost-mode">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+          <circle cx="12" cy="12" r="3"></circle>
+        </svg>
+        Ghost Mode
+      </a>
+    </nav>
     
     <nav class="nav-section" style="margin-top: auto;">
       <a href="#" class="nav-item" data-section="settings">
@@ -1143,6 +1159,76 @@
       </div>
     </section>
 
+    <section id="truth-engine" class="section">
+      <div class="header">
+        <h1 class="page-title">Ride Truth Engine</h1>
+        <p style="color: var(--text-secondary); margin-top: 4px;">Platform-agnostic reliability scoring across ride providers</p>
+      </div>
+      <div class="stats-grid" id="truth-stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Truth Rides Logged</div>
+          <div class="stat-value" id="truth-rides-count">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Scored Rides</div>
+          <div class="stat-value" id="truth-scored-count">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Providers Tracked</div>
+          <div class="stat-value" id="truth-providers-count">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Consented Users</div>
+          <div class="stat-value" id="truth-consents-count">0</div>
+        </div>
+      </div>
+      <div class="card" style="padding: 24px; margin-top: 24px;">
+        <h3 style="margin-bottom: 16px;">Provider Rankings by City</h3>
+        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+          <input type="text" id="truth-city-input" placeholder="Enter city name (e.g., Dubai)" style="flex: 1; padding: 10px 14px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px;">
+          <button onclick="loadTruthRankings()" style="padding: 10px 20px; background: var(--primary); color: white; border: none; border-radius: 8px; cursor: pointer; font-weight: 500;">Search</button>
+        </div>
+        <div id="truth-rankings-result" style="color: var(--text-secondary);">Enter a city to view provider rankings.</div>
+      </div>
+    </section>
+
+    <section id="ghost-mode" class="section">
+      <div class="header">
+        <h1 class="page-title">Ghost Mode</h1>
+        <p style="color: var(--text-secondary); margin-top: 4px;">Offline ride-hailing via Bluetooth mesh networking</p>
+      </div>
+      <div class="stats-grid" id="ghost-stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">Total Ghost Rides</div>
+          <div class="stat-value" id="ghost-total-count">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pending Sync</div>
+          <div class="stat-value" id="ghost-pending-count">0</div>
+        </div>
+      </div>
+      <div class="card" style="padding: 24px; margin-top: 24px;">
+        <h3 style="margin-bottom: 16px;">Recent Ghost Rides</h3>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>City</th>
+                <th>Status</th>
+                <th>Fare</th>
+                <th>Sync</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="ghost-rides-table">
+              <tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">Loading...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section id="settings" class="section">
       <div class="header">
         <h1 class="page-title">Settings</h1>
@@ -1271,6 +1357,8 @@
         if (section === 'cities') loadCities();
         if (section === 'vehicles') loadVehicleStats();
         if (section === 'revenue') loadRevenueStats();
+        if (section === 'truth-engine') loadTruthStats();
+        if (section === 'ghost-mode') loadGhostStats();
       });
     });
     
@@ -1697,6 +1785,75 @@
       }
     }
     
+    async function loadTruthStats() {
+      try {
+        const resp = await apiCall(`${API_BASE}/admin/truth/stats`);
+        const data = await resp.json();
+        document.getElementById('truth-rides-count').textContent = data.truthRides || 0;
+        document.getElementById('truth-scored-count').textContent = data.scoredRides || 0;
+        document.getElementById('truth-providers-count').textContent = data.providers || 0;
+        document.getElementById('truth-consents-count').textContent = data.consentedUsers || 0;
+      } catch (err) {
+        console.error('Failed to load truth stats:', err);
+      }
+    }
+
+    async function loadTruthRankings() {
+      const city = document.getElementById('truth-city-input').value.trim();
+      if (!city) return;
+      const container = document.getElementById('truth-rankings-result');
+      container.innerHTML = 'Loading...';
+      try {
+        const resp = await apiCall(`${API_BASE}/admin/truth/rankings/${encodeURIComponent(city)}`);
+        const data = await resp.json();
+        if (!data || data.length === 0) {
+          container.innerHTML = '<p>No rankings data available for this city yet.</p>';
+          return;
+        }
+        container.innerHTML = data.map((r, i) => `
+          <div style="display: flex; align-items: center; padding: 12px; border-bottom: 1px solid var(--border);">
+            <div style="width: 32px; height: 32px; border-radius: 50%; background: ${i === 0 ? 'var(--success)' : i === 1 ? 'var(--warning)' : 'var(--border)'}; display: flex; align-items: center; justify-content: center; color: white; font-weight: 700; margin-right: 12px;">${i + 1}</div>
+            <div style="flex: 1;">
+              <div style="font-weight: 600;">${r.providerName || 'Unknown'}</div>
+              <div style="font-size: 12px; color: var(--text-secondary);">${r.sampleCount || 0} rides scored</div>
+            </div>
+            <div style="font-size: 20px; font-weight: 700; color: ${(r.avgScore || 0) >= 75 ? 'var(--success)' : (r.avgScore || 0) >= 50 ? 'var(--warning)' : 'var(--error)'};">${(r.avgScore || 0).toFixed(1)}</div>
+          </div>
+        `).join('');
+      } catch (err) {
+        container.innerHTML = '<p style="color: var(--error);">Failed to load rankings.</p>';
+      }
+    }
+
+    async function loadGhostStats() {
+      try {
+        const statsResp = await apiCall(`${API_BASE}/admin/truth/stats`);
+        const stats = await statsResp.json();
+        document.getElementById('ghost-total-count').textContent = stats.ghostRides || 0;
+        document.getElementById('ghost-pending-count').textContent = stats.pendingGhostSync || 0;
+
+        const ridesResp = await apiCall(`${API_BASE}/admin/ghost/rides`);
+        const rides = await ridesResp.json();
+        const tbody = document.getElementById('ghost-rides-table');
+        if (rides && rides.length > 0) {
+          tbody.innerHTML = rides.map(r => `
+            <tr>
+              <td>${(r.localId || r.id || '').substring(0, 8)}...</td>
+              <td>${r.cityName || '-'}</td>
+              <td><span class="badge ${r.status === 'completed' ? 'green' : r.status === 'accepted' ? 'blue' : 'orange'}">${r.status}</span></td>
+              <td>${r.agreedFare ? '$' + parseFloat(r.agreedFare).toFixed(2) : '-'}</td>
+              <td><span class="badge ${r.syncStatus === 'synced' ? 'green' : r.syncStatus === 'failed' ? 'red' : 'orange'}">${r.syncStatus}</span></td>
+              <td>${new Date(r.createdAt).toLocaleDateString()}</td>
+            </tr>
+          `).join('');
+        } else {
+          tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-secondary);">No ghost rides yet</td></tr>';
+        }
+      } catch (err) {
+        console.error('Failed to load ghost stats:', err);
+      }
+    }
+
     loadStats();
   </script>
 </body>

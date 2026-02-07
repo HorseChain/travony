@@ -1,0 +1,380 @@
+Below is a **full, concrete, execution-grade specification**.
+This is not vision language. This is **architecture, math, UX, scalability, and doctrine** you can hand to an agent or engineering lead.
+
+---
+
+# TRAVONEY — INTENT-BASED MOBILITY (IBM)
+
+## Complete System Specification
+
+---
+
+## 1. CONCRETE SYSTEM ARCHITECTURE
+
+### 1.1 Core Components
+
+**A. Client Apps**
+
+* Driver App
+* Rider App
+  Responsibilities:
+* Capture minimal explicit signals (1 tap)
+* Stream passive telemetry (location, direction, session state)
+* Render certainty-focused UI
+
+---
+
+**B. Intent Engine (Core Innovation)**
+Stateless + stateful hybrid service.
+
+Inputs:
+
+* Driver telemetry
+* Rider request context
+* City flow data
+* Historical behavior embeddings
+
+Outputs:
+
+* Intent vectors
+* Intent alignment score
+* Match confidence score
+
+---
+
+**C. Matching & Commitment Layer**
+
+* Performs **intent-first filtering**
+* Applies guarantees (first ride, time respect)
+* Issues soft commitments before hard match
+
+---
+
+**D. Wallet & Settlement Layer**
+
+* Internal ledger (BitBy-style)
+* Instant credits/debits
+* Platform risk pool
+* No escrow dependency
+
+---
+
+**E. Accountability Engine**
+
+* Evaluates outcome vs promise
+* Triggers auto-compensation
+* Feeds trust metrics back to Intent Engine
+
+---
+
+**F. City Brain**
+
+* Zone-level flow modeling
+* Supply/demand imbalance detection
+* Adaptive thresholds (guarantees, premiums)
+
+---
+
+### 1.2 High-Level Flow
+
+1. Driver declares **availability** (one tap)
+2. Rider declares **priority** (one tap)
+3. Intent Engine computes vectors
+4. Alignment score calculated
+5. If score ≥ threshold → match
+6. If not → wait, re-route, or compensate
+7. Wallet settles instantly
+8. Accountability Engine audits outcome
+
+---
+
+## 2. INTENT VECTORS — MATHEMATICAL DEFINITION
+
+### 2.1 Driver Intent Vector (Dᵢ)
+
+Each driver session generates a vector:
+
+```
+Dᵢ = [
+  d₁ = Directionality (−1 to +1),
+  d₂ = Time Constraint (0–1),
+  d₃ = Earnings Urgency (0–1),
+  d₄ = Trip Preference (short↔long),
+  d₅ = Zone Affinity (0–1),
+  d₆ = Fatigue Index (0–1)
+]
+```
+
+Derived from:
+
+* Heading vs historical routes
+* Session length
+* Acceptance patterns
+* Cancellation entropy
+* Time of day
+* Past earnings gaps
+
+No manual input.
+
+---
+
+### 2.2 Rider Intent Vector (Rⱼ)
+
+Each request generates:
+
+```
+Rⱼ = [
+  r₁ = Priority (speed, price, certainty),
+  r₂ = Flexibility (0–1),
+  r₃ = Pickup Urgency (0–1),
+  r₄ = Destination Constraint (0–1),
+  r₅ = Reliability Sensitivity (0–1)
+]
+```
+
+Only **one explicit input**:
+
+* Priority selector (fast / cheap / reliable)
+
+Others inferred.
+
+---
+
+### 2.3 Alignment Score
+
+```
+AlignmentScore = w · |Dᵢ − Rⱼ|
+```
+
+Where:
+
+* `w` = city-specific weight vector
+* Lower distance = better alignment
+
+Thresholds:
+
+* ≥ 0.85 → instant match
+* 0.7–0.85 → soft commitment + incentive
+* < 0.7 → wait or compensate
+
+---
+
+## 3. EXACT UX DESIGN
+
+### 3.1 Driver UX
+
+**Home Screen**
+
+* One button:
+  **“Go Online”**
+
+No modes.
+No sliders.
+
+---
+
+**Once Online**
+Status pill:
+
+> Online — aligned rides only
+
+Subtext:
+
+> We match trips that fit your direction & time
+
+No metrics.
+
+---
+
+**Incoming Ride**
+Card header:
+
+> Good fit for you
+
+Shown:
+
+* Pickup ETA
+* Drop-off direction arrow
+* Total earnings
+
+No probability.
+No surge language.
+
+---
+
+**If No Ride**
+Passive notification:
+
+> You’ve been credited for waiting.
+
+No explanation.
+
+---
+
+### 3.2 Rider UX
+
+**Request Screen**
+Pickup + destination as usual.
+
+One choice:
+
+> What matters most?
+
+* Fastest
+* Cheapest
+* Most reliable
+
+That’s it.
+
+---
+
+**Matching State**
+Text:
+
+> Finding the right driver
+
+No spinner.
+No countdown.
+
+---
+
+**If Delayed**
+Auto-message:
+
+> We’re taking responsibility for the delay.
+
+Credit applied automatically if needed.
+
+---
+
+## 4. SCALABILITY STRESS TEST
+
+### 4.1 City Launch (Low Density)
+
+Risk:
+
+* Sparse alignment options
+
+Mitigation:
+
+* Lower alignment threshold
+* Higher platform guarantees
+* Wider intent tolerance
+
+---
+
+### 4.2 Hyper-Density Cities
+
+Risk:
+
+* Over-optimization
+* Starvation of edge intents
+
+Mitigation:
+
+* Randomized exploration factor (ε-greedy)
+* Fairness constraints per zone
+
+---
+
+### 4.3 Abuse & Gaming
+
+Driver risks:
+
+* Farming guarantees
+* Direction spoofing
+
+Controls:
+
+* Entropy analysis
+* Session correlation
+* Invisible eligibility decay
+
+Rider risks:
+
+* Priority flipping
+
+Controls:
+
+* Historical intent weighting
+
+---
+
+### 4.4 System Load
+
+* Intent vectors: O(n)
+* Matching: locality-bounded (zone sharding)
+* No global optimization loops
+* Real-time safe at city scale
+
+---
+
+## 5. INTERNAL “TRAVONEY DOCTRINE”
+
+This is internal.
+Not marketing.
+Non-negotiable.
+
+---
+
+### Doctrine 1 — Certainty Over Efficiency
+
+We prefer predictable outcomes over marginal efficiency gains.
+
+---
+
+### Doctrine 2 — Intent Is Truth
+
+Availability is a system convenience.
+Intent is human reality.
+
+---
+
+### Doctrine 3 — Silence Means Success
+
+If the user says nothing, the system worked.
+
+---
+
+### Doctrine 4 — Time Is Labor
+
+Waiting is work.
+We price it, respect it, and compensate it.
+
+---
+
+### Doctrine 5 — The Platform Bears Uncertainty
+
+Risk belongs to Travoney, not drivers or riders.
+
+---
+
+### Doctrine 6 — One Tap Is the Upper Bound
+
+If a feature needs explanation, it does not ship.
+
+---
+
+## THE ONE PARAGRAPH AGENT FEED (OPTIONAL)
+
+> **Build Travoney as an intent-based mobility system where AI infers driver and rider intent vectors, matches on alignment instead of proximity, guarantees outcomes instead of probabilities, compensates automatically when the system fails, and hides all complexity behind one-tap UX. Availability is secondary; intent alignment is the core primitive.**
+
+---
+
+## FINAL EXECUTIVE TRUTH
+
+If Uber optimized **cars**,
+and Lyft optimized **rides**,
+
+Travoney optimizes **human intent**.
+
+That is a permanent shift.
+
+If you want next, I can:
+
+* Simulate this on a real city map
+* Define KPIs that prove intent alignment works
+* Translate this into a pitch deck
+* Help you choose the *first* city where this dominates
+
+Just say the word.

@@ -1,0 +1,105 @@
+{
+  "id": "7ad2520f-bb7a-427f-b580-c9a4e6ba1c25",
+  "createdAt": "2026-01-15T11:53:53.206Z",
+  "runtimeVersion": "exposdk:54.0.0",
+  "launchAsset": {
+    "key": "bundle-1768478033206-5902",
+    "contentType": "application/javascript",
+    "url": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/1768478033206-5902/_expo/static/js/ios/bundle.js"
+  },
+  "assets": [],
+  "metadata": {},
+  "extra": {
+    "eas": {},
+    "expoClient": {
+      "name": "Travony",
+      "slug": "travony",
+      "version": "1.0.0",
+      "orientation": "portrait",
+      "icon": "./assets/images/icon.png",
+      "scheme": "travony",
+      "userInterfaceStyle": "automatic",
+      "newArchEnabled": true,
+      "ios": {
+        "supportsTablet": true,
+        "bundleIdentifier": "com.travony.app"
+      },
+      "android": {
+        "adaptiveIcon": {
+          "backgroundColor": "#00B14F",
+          "foregroundImage": "./assets/images/android-icon-foreground.png",
+          "backgroundImage": "./assets/images/android-icon-background.png",
+          "monochromeImage": "./assets/images/android-icon-monochrome.png",
+          "foregroundImageUrl": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/assets/images/android-icon-foreground.png",
+          "monochromeImageUrl": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/assets/images/android-icon-monochrome.png",
+          "backgroundImageUrl": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/assets/images/android-icon-background.png"
+        },
+        "edgeToEdgeEnabled": true,
+        "predictiveBackGestureEnabled": false,
+        "package": "com.travony.app"
+      },
+      "web": {
+        "output": "single",
+        "favicon": "./assets/images/favicon.png"
+      },
+      "plugins": [
+        [
+          "expo-splash-screen",
+          {
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 200,
+            "resizeMode": "contain",
+            "backgroundColor": "#00B14F",
+            "dark": {
+              "backgroundColor": "#1A1A1A"
+            }
+          }
+        ],
+        "expo-web-browser"
+      ],
+      "experiments": {
+        "reactCompiler": true
+      },
+      "_internal": {
+        "isDebug": false,
+        "projectRoot": "/home/runner/workspace",
+        "dynamicConfigPath": {},
+        "staticConfigPath": "/home/runner/workspace/app.json",
+        "packageJsonPath": "/home/runner/workspace/package.json",
+        "pluginHistory": {
+          "expo-splash-screen": {
+            "name": "expo-splash-screen",
+            "version": "31.0.13"
+          },
+          "expo-web-browser": {
+            "name": "expo-web-browser",
+            "version": "15.0.10"
+          }
+        }
+      },
+      "sdkVersion": "54.0.0",
+      "platforms": [
+        "ios",
+        "android",
+        "web"
+      ],
+      "androidStatusBar": {
+        "backgroundColor": "#00B14F"
+      },
+      "iconUrl": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/assets/images/icon.png",
+      "hostUri": "cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/ios"
+    },
+    "expoGo": {
+      "debuggerHost": "cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/ios",
+      "developer": {
+        "tool": "expo-cli",
+        "projectRoot": "/home/runner/workspace"
+      },
+      "packagerOpts": {
+        "dev": false
+      },
+      "mainModuleName": "client/index"
+    },
+    "scopeKey": "@anonymous/travony-45f6806a-4083-47a5-bbf5-554a7673f11b"
+  }
+}

@@ -45,7 +45,8 @@ const vehicleTypes: VehicleType[] = [
 ];
 
 const paymentMethods = [
-  { id: "cash", name: "Cash", icon: "dollar-sign" },
+  { id: "wallet", name: "Wallet", icon: "credit-card" },
+  { id: "card", name: "Card", icon: "credit-card" },
   { id: "usdt", name: "USDT", icon: "dollar-sign" },
 ];
 
@@ -91,6 +92,21 @@ export default function ConfirmRideScreen() {
     },
     staleTime: 30000,
   });
+
+  // Fetch wallet balance for payment validation
+  const { data: walletData } = useQuery<{ balance: string }>({
+    queryKey: [`/api/wallet/balance/${user?.id}`],
+    enabled: !!user?.id,
+  });
+
+  // Fetch saved payment methods for card payment validation
+  const { data: savedCards = [] } = useQuery<{ stripePaymentMethodId?: string }[]>({
+    queryKey: [`/api/payment-methods/${user?.id}`],
+    enabled: !!user?.id,
+  });
+
+  const walletBalance = parseFloat(walletData?.balance || "0");
+  const hasValidCard = savedCards.some((card) => card.stripePaymentMethodId);
 
   const calculateFare = (vehicle: VehicleType) => {
     if (aiPricing && vehicle.type === selectedVehicle.type) {
@@ -143,6 +159,35 @@ export default function ConfirmRideScreen() {
       Alert.alert("Sign In Required", "Please sign in to book a ride");
       return;
     }
+    
+    // Calculate the fare for validation
+    const fareAmount = parseFloat(calculateFare(selectedVehicle));
+    
+    // PAYMENT VALIDATION - Require valid payment before booking
+    if (selectedPayment.id === "wallet") {
+      if (walletBalance < fareAmount) {
+        Alert.alert(
+          "Insufficient Balance",
+          `Your wallet balance (AED ${walletBalance.toFixed(2)}) is less than the fare (AED ${fareAmount.toFixed(2)}). Please top up your wallet first.`
+        );
+        return;
+      }
+    } else if (selectedPayment.id === "card") {
+      if (!hasValidCard) {
+        Alert.alert(
+          "No Card Added",
+          "You need to add a card in the Wallet tab before you can pay by card."
+        );
+        return;
+      }
+    } else if (selectedPayment.id === "usdt") {
+      // USDT payment - BitPay invoice will be created, allow booking
+      console.log("USDT payment selected");
+    } else {
+      Alert.alert("Payment Required", "Please select a valid payment method.");
+      return;
+    }
+    
     bookRideMutation.mutate();
   };
 

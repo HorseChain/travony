@@ -1,0 +1,283 @@
+Excellent clarification. This is the correct question to ask at this stage.
+
+You have **zero local network in Mexico**, so the correct sequence is:
+
+1. **Pure system testing (no real people)**
+2. **Anonymous, remote driver seeding**
+3. **Trust-first soft entry**
+
+Below is **exactly what you tell the system**, plus **what you do next**, step by step.
+
+---
+
+# PART A — WHAT TO TEST FIRST (NO REAL USERS)
+
+This is **SYSTEM-ONLY DRIVER TESTING**.
+No Mexico people involved yet.
+
+---
+
+## ✅ SYSTEM COMMAND TO AGENT (COPY THIS)
+
+> **Put Mexico City in `INTERNAL_DRIVER_TEST` mode.**
+> No real drivers. No real riders.
+> Use simulated drivers and simulated rides only.
+> Validate all driver-side logic before any human access.
+
+---
+
+## 🔍 DRIVER APP – COMPLETE TEST CHECKLIST
+
+Your system / agent must test **every item below**.
+
+### 1. Driver Account Lifecycle
+
+* Sign up with valid data
+* Sign up with invalid data
+* Duplicate account attempt
+* Blocked driver re-attempt
+* Reactivation after rejection
+
+---
+
+### 2. Identity & Vehicle Verification
+
+* Clear ID scan
+* Blurry ID scan
+* Expired license
+* Mismatched selfie vs ID
+* Wrong vehicle type
+* Multiple vehicles upload
+
+Expected:
+
+* Correct approval / rejection
+* Clear explanation shown to driver
+
+---
+
+### 3. Driver Education & Activation
+
+* Cannot go online before training
+* Partial training completion
+* Full training completion
+* Training retake
+
+---
+
+### 4. Going Online / Offline
+
+* Online toggle works
+* Offline during trip blocked
+* Auto-offline on inactivity
+* Network loss recovery
+
+---
+
+### 5. Ride Assignment Logic
+
+* Ride request received
+* Driver accepts
+* Driver ignores
+* Driver rejects
+* Timeout behavior
+* Multiple drivers in zone
+
+---
+
+### 6. Pricing & Earnings
+
+* Fare calculation correct
+* Surge / multiplier logic
+* Commission deduction
+* Earnings summary accuracy
+* Daily payout calculation
+
+---
+
+### 7. Ride Flow
+
+* Normal ride
+* Rider no-show
+* Driver no-show
+* Mid-ride cancellation
+* Route deviation
+* Trip completion
+
+---
+
+### 8. Ratings & Feedback
+
+* Rider rates driver
+* Driver rates rider
+* No rating submitted
+* Low rating protection logic
+* Rating dispute
+
+---
+
+### 9. Disputes System (CRITICAL)
+
+* Fare dispute
+* Cancellation dispute
+* Rating dispute
+* False complaint
+* AI decision logic
+* Manual override path
+
+Driver must see:
+
+* Reason
+* Rule applied
+* Outcome
+
+---
+
+### 10. Safety & Emergency
+
+* Emergency button pressed
+* False alarm
+* Emergency during ride
+* Emergency after ride
+* Location accuracy
+* Event logging
+
+---
+
+### 11. Notifications & Bots
+
+* Push notifications
+* WhatsApp bot responses
+* Telegram bot responses
+* Error message clarity
+* Silence detection
+
+---
+
+### 12. Abuse & Fraud Protection
+
+* Fake GPS
+* Multi-account attempt
+* Ride manipulation
+* Referral abuse
+
+---
+
+### EXIT CRITERIA (MANDATORY)
+
+Do **not** proceed until:
+
+* No critical bugs
+* All rejection messages are clear
+* Driver flow is understandable without explanation
+
+---
+
+# PART B — YOU HAVE NO ONE IN MEXICO: WHAT TO DO NEXT
+
+This is normal. You do **NOT** need friends.
+
+---
+
+## STEP 1 — Anonymous Driver Seeding (REMOTE)
+
+### What You Tell the System:
+
+> **Enable `CONTROLLED_REAL_DRIVER_ACCESS` for Mexico City.**
+> Accept a maximum of 10 real drivers.
+> Tag them as `FOUNDING_DRIVERS`.
+> No riders yet.
+
+---
+
+### How You Get Drivers (You Don’t Need Contacts)
+
+Your system (or you manually) does this:
+
+* Join **Facebook groups**:
+
+  * “Uber Drivers Mexico City”
+  * “Didi Drivers CDMX”
+  * “Taxi Drivers CDMX”
+* Post a **simple, honest message**:
+
+  * New platform
+  * Early access
+  * Higher transparency
+  * Limited slots
+
+No marketing. No hype.
+
+---
+
+## STEP 2 — Driver-Only Live Testing
+
+With 5–10 real drivers:
+
+* Let them go online
+* Let system assign **test rides** (internal / simulated riders)
+* Observe confusion
+* Fix language, flows, timing
+
+This is not growth.
+This is **trust calibration**.
+
+---
+
+## STEP 3 — Create the Driver Group
+
+Once 5 drivers are active:
+
+* Create WhatsApp group
+* Introduce support bot
+* Ask one simple question:
+
+  > “What was unclear today?”
+
+Do not defend. Only fix.
+
+---
+
+## STEP 4 — Soft Real Entry (Still No Marketing)
+
+Only after drivers say:
+
+* App is clear
+* Earnings make sense
+* Disputes feel fair
+
+Then:
+
+> **Enable invite-only riders.**
+
+Drivers bring riders.
+You still stay invisible.
+
+---
+
+# PART C — VERY IMPORTANT MINDSET SHIFT
+
+You are not “launching in Mexico”.
+
+You are **asking Mexico drivers for permission to exist**.
+
+If the system respects them, they will build the city for you.
+
+---
+
+## SIMPLE ONE-LINE YOU CAN FEED THE AGENT
+
+If you want **one clean instruction**, here it is:
+
+> “Put Mexico City in internal driver test mode. Simulate all driver flows and edge cases. After zero critical failures, enable controlled real driver access (max 10 drivers, no riders). Collect confusion points, fix them, then gradually allow invite-only riders.”
+
+---
+
+If you want next, I can:
+
+* Rewrite **Facebook driver outreach messages**
+* Create **driver test scripts**
+* Build a **bug severity classification**
+* Design a **driver feedback ingestion system**
+
+Just say which one.

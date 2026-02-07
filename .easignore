@@ -1,0 +1,43 @@
+# EAS Build ignore file
+.git
+.cache
+node_modules/.cache
+*.log
+.DS_Store
+Thumbs.db
+
+# Exclude OSX-specific binaries that cause issues
+**/osx-bin/**
+**/darwin-*/**
+**/*-darwin-*
+**/macos/**
+
+# Exclude test files
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+__tests__
+__mocks__
+
+# Exclude development files
+.eslintcache
+.prettierrc
+.editorconfig
+coverage
+
+# Exclude documentation
+*.md
+!README.md
+docs
+
+# Exclude build artifacts
+dist
+build
+.expo
+
+# Exclude local environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
