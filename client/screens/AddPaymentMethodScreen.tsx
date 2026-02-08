@@ -1,10 +1,10 @@
 import React, { useState } from "react";
-import { View, StyleSheet, TextInput, Pressable, Alert, ActivityIndicator } from "react-native";
+import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -14,6 +14,23 @@ import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
 
+let StripeCardField: any = null;
+let useConfirmSetupIntentHook: any = null;
+if (Platform.OS !== "web") {
+  try {
+    const stripeModule = require("@stripe/stripe-react-native");
+    StripeCardField = stripeModule.CardField;
+    useConfirmSetupIntentHook = stripeModule.useConfirmSetupIntent;
+  } catch (e) {}
+}
+
+function useStripeSetupIntent() {
+  if (useConfirmSetupIntentHook) {
+    return useConfirmSetupIntentHook();
+  }
+  return { confirmSetupIntent: null };
+}
+
 export default function AddPaymentMethodScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
@@ -21,60 +38,66 @@ export default function AddPaymentMethodScreen() {
   const { user } = useAuth();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
+  const { confirmSetupIntent } = useStripeSetupIntent();
 
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [cvv, setCvv] = useState("");
-  const [cardName, setCardName] = useState("");
+  const [cardComplete, setCardComplete] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [cardDetails, setCardDetails] = useState<any>(null);
 
-  const formatCardNumber = (text: string) => {
-    const cleaned = text.replace(/\D/g, "");
-    const formatted = cleaned.match(/.{1,4}/g)?.join(" ") || cleaned;
-    return formatted.slice(0, 19);
-  };
-
-  const formatExpiryDate = (text: string) => {
-    const cleaned = text.replace(/\D/g, "");
-    if (cleaned.length >= 2) {
-      return cleaned.slice(0, 2) + "/" + cleaned.slice(2, 4);
+  const handleAddCard = async () => {
+    if (Platform.OS === "web" || !confirmSetupIntent) {
+      Alert.alert("Not Available", "Card setup is only available in the mobile app. Please use Expo Go on your device.");
+      return;
     }
-    return cleaned;
-  };
 
-  const addPaymentMutation = useMutation({
-    mutationFn: async () => {
-      return apiRequest("/api/payment-methods", {
+    if (!cardComplete) {
+      Alert.alert("Incomplete", "Please fill in all card details.");
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      const setupResponse = await apiRequest("/api/payments/setup-intent", {
         method: "POST",
-        body: JSON.stringify({
-          userId: user?.id,
-          type: "card",
-          last4: cardNumber.replace(/\s/g, "").slice(-4),
-          brand: "Visa",
-          isDefault: true,
-        }),
         headers: { "Content-Type": "application/json" },
       });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: [`/api/payment-methods/${user?.id}`] });
-      Alert.alert("Success", "Payment method added successfully");
-      navigation.goBack();
-    },
-    onError: (error: any) => {
-      Alert.alert("Error", error.message || "Failed to add payment method");
-    },
-  });
 
-  const handleSubmit = () => {
-    if (!cardNumber || !expiryDate || !cvv || !cardName) {
-      Alert.alert("Error", "Please fill in all fields");
-      return;
+      if (!setupResponse?.clientSecret) {
+        throw new Error("Could not initiate card setup. Please try again.");
+      }
+
+      const { setupIntent, error } = await confirmSetupIntent(setupResponse.clientSecret, {
+        paymentMethodType: "Card",
+      });
+
+      if (error) {
+        throw new Error(error.message || "Card verification failed.");
+      }
+
+      if (!setupIntent?.paymentMethodId) {
+        throw new Error("Card could not be verified. Please try again.");
+      }
+
+      await apiRequest("/api/payments/add-card", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentMethodId: setupIntent.paymentMethodId,
+          last4: cardDetails?.last4 || null,
+          brand: cardDetails?.brand || null,
+          isDefault: true,
+        }),
+      });
+
+      queryClient.invalidateQueries({ queryKey: [`/api/payment-methods/${user?.id}`] });
+      Alert.alert("Card Added", "Your card has been securely saved for future payments.");
+      navigation.goBack();
+    } catch (err: any) {
+      Alert.alert("Error", err.message || "Failed to add card. Please try again.");
+    } finally {
+      setIsProcessing(false);
     }
-    if (cardNumber.replace(/\s/g, "").length !== 16) {
-      Alert.alert("Error", "Please enter a valid card number");
-      return;
-    }
-    addPaymentMutation.mutate();
   };
 
   return (
@@ -91,112 +114,106 @@ export default function AddPaymentMethodScreen() {
         <View style={[styles.cardPreview, { backgroundColor: theme.primary }]}>
           <View style={styles.cardChip} />
           <ThemedText style={styles.cardNumber}>
-            {cardNumber || "**** **** **** ****"}
+            {cardDetails?.last4 ? `**** **** **** ${cardDetails.last4}` : "**** **** **** ****"}
           </ThemedText>
           <View style={styles.cardDetails}>
             <View>
-              <ThemedText style={styles.cardLabel}>CARD HOLDER</ThemedText>
+              <ThemedText style={styles.cardLabel}>BRAND</ThemedText>
               <ThemedText style={styles.cardValue}>
-                {cardName || "YOUR NAME"}
+                {cardDetails?.brand || "CARD"}
               </ThemedText>
             </View>
             <View>
               <ThemedText style={styles.cardLabel}>EXPIRES</ThemedText>
               <ThemedText style={styles.cardValue}>
-                {expiryDate || "MM/YY"}
+                {cardDetails?.expiryMonth && cardDetails?.expiryYear
+                  ? `${String(cardDetails.expiryMonth).padStart(2, "0")}/${String(cardDetails.expiryYear).slice(-2)}`
+                  : "MM/YY"}
               </ThemedText>
             </View>
           </View>
         </View>
 
         <View style={styles.form}>
-          <View style={styles.inputGroup}>
-            <ThemedText style={styles.label}>Card Number</ThemedText>
-            <View style={[styles.inputContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
-              <Ionicons name="card-outline" size={20} color={theme.textMuted} />
-              <TextInput
-                style={[styles.input, { color: theme.text }]}
-                placeholder="1234 5678 9012 3456"
-                placeholderTextColor={theme.textMuted}
-                value={cardNumber}
-                onChangeText={(text) => setCardNumber(formatCardNumber(text))}
-                keyboardType="number-pad"
-                maxLength={19}
+          <ThemedText style={styles.label}>Card Information</ThemedText>
+          <View style={[styles.cardFieldContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
+            {StripeCardField ? (
+              <StripeCardField
+                postalCodeEnabled={false}
+                placeholders={{
+                  number: "4242 4242 4242 4242",
+                }}
+                cardStyle={{
+                  backgroundColor: "transparent",
+                  textColor: theme.text,
+                  placeholderColor: theme.textMuted,
+                  borderWidth: 0,
+                  fontSize: 16,
+                }}
+                style={styles.cardField}
+                onCardChange={(details: any) => {
+                  setCardComplete(details.complete);
+                  setCardDetails(details);
+                }}
               />
-            </View>
-          </View>
-
-          <View style={styles.row}>
-            <View style={[styles.inputGroup, { flex: 1, marginRight: Spacing.md }]}>
-              <ThemedText style={styles.label}>Expiry Date</ThemedText>
-              <View style={[styles.inputContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
-                <TextInput
-                  style={[styles.input, { color: theme.text }]}
-                  placeholder="MM/YY"
-                  placeholderTextColor={theme.textMuted}
-                  value={expiryDate}
-                  onChangeText={(text) => setExpiryDate(formatExpiryDate(text))}
-                  keyboardType="number-pad"
-                  maxLength={5}
-                />
+            ) : (
+              <View style={[styles.cardField, { justifyContent: "center", alignItems: "center" }]}>
+                <ThemedText style={{ color: theme.textMuted, textAlign: "center" }}>
+                  Card entry is available in the mobile app.{"\n"}Please use Expo Go on your device.
+                </ThemedText>
               </View>
-            </View>
-            <View style={[styles.inputGroup, { flex: 1 }]}>
-              <ThemedText style={styles.label}>CVV</ThemedText>
-              <View style={[styles.inputContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
-                <TextInput
-                  style={[styles.input, { color: theme.text }]}
-                  placeholder="123"
-                  placeholderTextColor={theme.textMuted}
-                  value={cvv}
-                  onChangeText={setCvv}
-                  keyboardType="number-pad"
-                  maxLength={4}
-                  secureTextEntry
-                />
-              </View>
-            </View>
+            )}
           </View>
-
-          <View style={styles.inputGroup}>
-            <ThemedText style={styles.label}>Cardholder Name</ThemedText>
-            <View style={[styles.inputContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
-              <Ionicons name="person-outline" size={20} color={theme.textMuted} />
-              <TextInput
-                style={[styles.input, { color: theme.text }]}
-                placeholder="John Doe"
-                placeholderTextColor={theme.textMuted}
-                value={cardName}
-                onChangeText={setCardName}
-                autoCapitalize="words"
-              />
-            </View>
-          </View>
+          <ThemedText style={[styles.cardFieldHint, { color: theme.textMuted }]}>
+            Your card information is securely processed by Stripe. We never store your full card details.
+          </ThemedText>
         </View>
 
         <Pressable
           style={({ pressed }) => [
             styles.submitButton,
             {
-              backgroundColor: theme.primary,
-              opacity: addPaymentMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+              backgroundColor: cardComplete ? theme.primary : theme.textMuted,
+              opacity: isProcessing ? 0.7 : pressed ? 0.9 : 1,
             },
           ]}
-          onPress={handleSubmit}
-          disabled={addPaymentMutation.isPending}
+          onPress={handleAddCard}
+          disabled={isProcessing || !cardComplete}
         >
-          {addPaymentMutation.isPending ? (
-            <ActivityIndicator color="#FFFFFF" />
+          {isProcessing ? (
+            <View style={styles.processingRow}>
+              <ActivityIndicator color="#FFFFFF" size="small" />
+              <ThemedText style={[styles.submitButtonText, { marginLeft: Spacing.sm }]}>
+                Verifying Card...
+              </ThemedText>
+            </View>
           ) : (
             <ThemedText style={styles.submitButtonText}>Add Card</ThemedText>
           )}
         </Pressable>
 
         <View style={styles.securityNote}>
-          <Ionicons name="lock-closed-outline" size={16} color={theme.textMuted} />
+          <Ionicons name="shield-checkmark-outline" size={18} color={theme.success} />
           <ThemedText style={[styles.securityText, { color: theme.textMuted }]}>
-            Your card information is encrypted and secure
+            PCI DSS Level 1 compliant. Payments powered by Stripe.
           </ThemedText>
+        </View>
+
+        <View style={styles.acceptedCards}>
+          <ThemedText style={[styles.acceptedLabel, { color: theme.textMuted }]}>
+            Accepted cards
+          </ThemedText>
+          <View style={styles.cardLogos}>
+            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
+              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>VISA</ThemedText>
+            </View>
+            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
+              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>MC</ThemedText>
+            </View>
+            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
+              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>AMEX</ThemedText>
+            </View>
+          </View>
         </View>
       </KeyboardAwareScrollViewCompat>
     </ThemedView>
@@ -246,29 +263,24 @@ const styles = StyleSheet.create({
   form: {
     marginBottom: Spacing["2xl"],
   },
-  inputGroup: {
-    marginBottom: Spacing.lg,
-  },
   label: {
     ...Typography.bodyMedium,
     fontWeight: "600",
     marginBottom: Spacing.sm,
   },
-  inputContainer: {
-    flexDirection: "row",
-    alignItems: "center",
-    height: Spacing.inputHeight,
+  cardFieldContainer: {
     borderRadius: BorderRadius.sm,
     borderWidth: 1,
-    paddingHorizontal: Spacing.lg,
+    overflow: "hidden",
   },
-  input: {
-    flex: 1,
-    marginLeft: Spacing.md,
-    ...Typography.body,
+  cardField: {
+    width: "100%",
+    height: 50,
   },
-  row: {
-    flexDirection: "row",
+  cardFieldHint: {
+    ...Typography.small,
+    marginTop: Spacing.sm,
+    lineHeight: 18,
   },
   submitButton: {
     height: Spacing.buttonHeight,
@@ -281,13 +293,39 @@ const styles = StyleSheet.create({
     ...Typography.button,
     color: "#FFFFFF",
   },
+  processingRow: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
   securityNote: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: Spacing["2xl"],
+    gap: Spacing.sm,
   },
   securityText: {
     ...Typography.small,
-    marginLeft: Spacing.sm,
+  },
+  acceptedCards: {
+    alignItems: "center",
+  },
+  acceptedLabel: {
+    ...Typography.caption,
+    marginBottom: Spacing.sm,
+  },
+  cardLogos: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+  },
+  cardLogo: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.xs,
+  },
+  cardLogoText: {
+    ...Typography.caption,
+    fontWeight: "700",
+    letterSpacing: 1,
   },
 });
