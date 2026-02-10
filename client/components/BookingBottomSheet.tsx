@@ -305,9 +305,9 @@ function detectRegionFromCoordinates(lat: number, lng: number): string {
 }
 
 const paymentMethods = [
+  { id: "cash", name: "Cash", icon: "cash-outline", description: "Pay driver directly" },
   { id: "wallet", name: "Wallet", icon: "wallet-outline", description: "Pay from your wallet balance" },
-  { id: "card", name: "Card", icon: "card-outline", description: "Pay with saved card" },
-  { id: "usdt", name: "USDT", icon: "logo-bitcoin", description: "Pay with crypto" },
+  { id: "usdt", name: "USDT", icon: "logo-bitcoin", description: "Pay with crypto (0.5% fee)" },
 ];
 
 type TabType = "location" | "rides" | "confirm";
@@ -466,7 +466,7 @@ export default function BookingBottomSheet({
         headers: { "Content-Type": "application/json" },
       });
 
-      if ((selectedPayment.id === "usdt" || selectedPayment.id === "card") && ride.id) {
+      if (selectedPayment.id === "usdt" && ride.id) {
         try {
           const invoiceResponse = await apiRequest("/api/payments/nowpayments/wallet-topup", {
             method: "POST",
@@ -539,8 +539,8 @@ export default function BookingBottomSheet({
         );
         return;
       }
-    } else if (selectedPayment.id === "card") {
-      console.log("Card payment selected - processed via NOWPayments at ride end");
+    } else if (selectedPayment.id === "cash") {
+      console.log("Cash payment selected - rider will pay driver directly");
     } else if (selectedPayment.id === "usdt") {
       console.log("USDT payment selected - processed via NOWPayments");
     } else {
