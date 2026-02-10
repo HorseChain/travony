@@ -684,8 +684,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
             requiredAmount: estimatedFareAmount,
           });
         }
-      } else if (paymentMethod === "card") {
-        console.log("Card payment selected - will be processed via NOWPayments at ride end");
       } else if (paymentMethod === "usdt") {
         console.log("USDT payment selected - will be processed via NOWPayments at ride end");
       } else if (paymentMethod === "cash") {
@@ -693,7 +691,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         return res.status(400).json({
           code: "INVALID_PAYMENT_METHOD",
-          message: "Invalid payment method. Please use wallet, card, USDT, or cash.",
+          message: "Invalid payment method. Please use wallet, USDT, or cash.",
         });
       }
       
@@ -2484,7 +2482,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Payment for ride to ${ride.dropoffAddress}`,
           completedAt: new Date(),
         });
-      } else if (paymentMethod === 'card' || paymentMethod === 'usdt') {
+      } else if (paymentMethod === 'usdt') {
         try {
           const orderId = `ride_${ride.id}_${Date.now()}`;
           const currency = (ride.currency || "AED").toLowerCase();
@@ -2510,7 +2508,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: 'ride_payment',
             amount: fare.toFixed(2),
             status: 'completed',
-            description: `${paymentMethod === 'card' ? 'Card' : 'USDT'} payment for ride to ${ride.dropoffAddress}`,
+            description: `USDT payment for ride to ${ride.dropoffAddress}`,
             completedAt: new Date(),
           });
         } catch (paymentError: any) {
