@@ -19,15 +19,6 @@ import type { WalletStackParamList } from "@/navigation/WalletStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<WalletStackParamList, "Wallet">;
 
-interface PaymentMethod {
-  id: string;
-  type: string;
-  last4: string | null;
-  brand: string | null;
-  isDefault: boolean;
-  stripePaymentMethodId?: string;
-}
-
 interface WalletTransaction {
   id: string;
   type: string;
@@ -48,16 +39,10 @@ export default function WalletScreen() {
 
   const [topupModalVisible, setTopupModalVisible] = useState(false);
   const [topupAmount, setTopupAmount] = useState("");
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<PaymentMethod | null>(null);
-  const [topupMethod, setTopupMethod] = useState<"card" | "usdt">("card");
+  const [topupMethod, setTopupMethod] = useState<"card" | "usdt">("usdt");
 
   const { data: walletData } = useQuery<{ balance: string }>({
     queryKey: [`/api/wallet/balance/${user?.id}`],
-    enabled: !!user?.id,
-  });
-
-  const { data: paymentMethods = [] } = useQuery<PaymentMethod[]>({
-    queryKey: [`/api/payment-methods/${user?.id}`],
     enabled: !!user?.id,
   });
 
@@ -78,29 +63,40 @@ export default function WalletScreen() {
     setIsCreatingInvoice(true);
     
     try {
-      const response = await apiRequest("/api/payments/stripe/checkout", {
+      const response = await apiRequest("/api/payments/nowpayments/wallet-topup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           amount: amount,
           currency: "AED",
-          userId: user?.id,
+          payVia: "card",
         }),
       });
       
-      if (!response.checkoutUrl) {
-        throw new Error("Failed to create checkout session");
-      }
-
       setTopupModalVisible(false);
       setTopupAmount("");
       
-      await WebBrowser.openBrowserAsync(response.checkoutUrl);
-      
-      queryClient.invalidateQueries({ queryKey: [`/api/wallet/balance/${user?.id}`] });
-      queryClient.invalidateQueries({ queryKey: [`/api/wallet/transactions/${user?.id}`] });
+      if (response.invoiceUrl) {
+        Alert.alert(
+          "Card Payment",
+          `Your payment of AED ${amount} is ready.\n\nYou will be redirected to complete the card payment securely.`,
+          [
+            { text: "Cancel", style: "cancel" },
+            { 
+              text: "Pay Now", 
+              onPress: () => {
+                WebBrowser.openBrowserAsync(response.invoiceUrl);
+              }
+            }
+          ]
+        );
+      }
     } catch (error: any) {
-      Alert.alert("Error", error.message || "Failed to process payment");
+      if (error.message?.includes("not configured")) {
+        Alert.alert("Payments Not Available", "Payment processing is being set up. Please use cash for now.");
+      } else {
+        Alert.alert("Error", error.message || "Failed to create payment");
+      }
     } finally {
       setIsCreatingInvoice(false);
     }
@@ -116,7 +112,7 @@ export default function WalletScreen() {
     setIsCreatingInvoice(true);
     
     try {
-      const response = await apiRequest("/api/payments/bitpay/wallet-topup", {
+      const response = await apiRequest("/api/payments/nowpayments/wallet-topup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -137,9 +133,7 @@ export default function WalletScreen() {
             { 
               text: "Pay Now", 
               onPress: () => {
-                import('expo-web-browser').then(WebBrowser => {
-                  WebBrowser.openBrowserAsync(response.invoiceUrl);
-                });
+                WebBrowser.openBrowserAsync(response.invoiceUrl);
               }
             }
           ]
@@ -147,7 +141,7 @@ export default function WalletScreen() {
       }
     } catch (error: any) {
       if (error.message?.includes("not configured")) {
-        Alert.alert("USDT Not Available", "USDT payments via BitPay are not yet configured. Please use card payment instead.");
+        Alert.alert("USDT Not Available", "USDT crypto payments are being set up. Please use cash for now.");
       } else {
         Alert.alert("Error", error.message || "Failed to create payment invoice");
       }
@@ -254,7 +248,7 @@ export default function WalletScreen() {
             <View style={styles.paymentInfo}>
               <ThemedText style={styles.paymentTitle}>USDT (Crypto)</ThemedText>
               <ThemedText style={[styles.paymentSubtitle, { color: theme.textSecondary }]}>
-                Pay with cryptocurrency via BitPay
+                Pay with cryptocurrency
               </ThemedText>
             </View>
             <View style={[styles.defaultBadge, { backgroundColor: "#26A17B20" }]}>
@@ -265,8 +259,28 @@ export default function WalletScreen() {
           </View>
         </Card>
 
+        {/* Card Payment */}
+        <Card style={styles.paymentCard}>
+          <View style={styles.paymentRow}>
+            <View style={[styles.cardIconContainer, { backgroundColor: "#4F46E520" }]}>
+              <Ionicons name="card-outline" size={24} color="#4F46E5" />
+            </View>
+            <View style={styles.paymentInfo}>
+              <ThemedText style={styles.paymentTitle}>Card</ThemedText>
+              <ThemedText style={[styles.paymentSubtitle, { color: theme.textSecondary }]}>
+                Debit or credit card
+              </ThemedText>
+            </View>
+            <View style={[styles.defaultBadge, { backgroundColor: "#4F46E520" }]}>
+              <ThemedText style={[styles.defaultText, { color: "#4F46E5" }]}>
+                Available
+              </ThemedText>
+            </View>
+          </View>
+        </Card>
+
         <ThemedText style={[styles.paymentNote, { color: theme.textMuted }]}>
-          Select your payment method when booking a ride. USDT payments are processed via BitPay.
+          All payment methods are powered by NOWPayments for secure transactions.
         </ThemedText>
       </View>
 
@@ -343,21 +357,6 @@ export default function WalletScreen() {
                 style={[
                   styles.paymentMethodOption,
                   { 
-                    backgroundColor: topupMethod === "card" ? Colors.travonyGreen + "20" : theme.backgroundDefault,
-                    borderColor: topupMethod === "card" ? Colors.travonyGreen : theme.border,
-                  }
-                ]}
-                onPress={() => setTopupMethod("card")}
-              >
-                <Ionicons name="card-outline" size={24} color={topupMethod === "card" ? Colors.travonyGreen : theme.textSecondary} />
-                <ThemedText style={[styles.paymentMethodLabel, { color: topupMethod === "card" ? Colors.travonyGreen : theme.textPrimary }]}>
-                  Card
-                </ThemedText>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.paymentMethodOption,
-                  { 
                     backgroundColor: topupMethod === "usdt" ? "#26A17B20" : theme.backgroundDefault,
                     borderColor: topupMethod === "usdt" ? "#26A17B" : theme.border,
                   }
@@ -367,6 +366,21 @@ export default function WalletScreen() {
                 <ThemedText style={{ fontSize: 14, fontWeight: "700", color: topupMethod === "usdt" ? "#26A17B" : theme.textSecondary }}>USDT</ThemedText>
                 <ThemedText style={[styles.paymentMethodLabel, { color: topupMethod === "usdt" ? "#26A17B" : theme.textPrimary }]}>
                   Crypto
+                </ThemedText>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.paymentMethodOption,
+                  { 
+                    backgroundColor: topupMethod === "card" ? "#4F46E520" : theme.backgroundDefault,
+                    borderColor: topupMethod === "card" ? "#4F46E5" : theme.border,
+                  }
+                ]}
+                onPress={() => setTopupMethod("card")}
+              >
+                <Ionicons name="card-outline" size={24} color={topupMethod === "card" ? "#4F46E5" : theme.textSecondary} />
+                <ThemedText style={[styles.paymentMethodLabel, { color: topupMethod === "card" ? "#4F46E5" : theme.textPrimary }]}>
+                  Card
                 </ThemedText>
               </Pressable>
             </View>
