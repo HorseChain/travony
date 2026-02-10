@@ -128,7 +128,7 @@ The platform operates on trust-first principles ensuring transparency and fairne
 -   `expo-local-authentication`
 
 ### Payment Gateways
--   **BitPay**: For USDT cryptocurrency payments (`BITPAY_API_TOKEN`, `BITPAY_ENV`).
+-   **NOWPayments**: For card and USDT cryptocurrency payments (`NOWPAYMENTS_API_KEY`). Supports cash, card, wallet, and USDT stablecoin.
 
 ### Blockchain
 -   **Polygon Amoy Testnet (chainId: 80002)**: For blockchain verification of ride records, using `ethers.js` (`BLOCKCHAIN_PRIVATE_KEY`, `RIDE_REGISTRY_CONTRACT`).
