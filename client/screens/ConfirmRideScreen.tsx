@@ -46,7 +46,6 @@ const vehicleTypes: VehicleType[] = [
 
 const paymentMethods = [
   { id: "cash", name: "Cash", icon: "banknotes" },
-  { id: "card", name: "Card", icon: "credit-card" },
   { id: "wallet", name: "Wallet", icon: "credit-card" },
   { id: "usdt", name: "USDT", icon: "dollar-sign" },
 ];
@@ -166,8 +165,6 @@ export default function ConfirmRideScreen() {
         );
         return;
       }
-    } else if (selectedPayment.id === "card") {
-      console.log("Card payment selected - processed via NOWPayments at ride end");
     } else if (selectedPayment.id === "cash") {
       console.log("Cash payment selected - pay driver directly");
     } else if (selectedPayment.id === "usdt") {
