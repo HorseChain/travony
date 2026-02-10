@@ -45,8 +45,9 @@ const vehicleTypes: VehicleType[] = [
 ];
 
 const paymentMethods = [
-  { id: "wallet", name: "Wallet", icon: "credit-card" },
+  { id: "cash", name: "Cash", icon: "banknotes" },
   { id: "card", name: "Card", icon: "credit-card" },
+  { id: "wallet", name: "Wallet", icon: "credit-card" },
   { id: "usdt", name: "USDT", icon: "dollar-sign" },
 ];
 
@@ -99,14 +100,7 @@ export default function ConfirmRideScreen() {
     enabled: !!user?.id,
   });
 
-  // Fetch saved payment methods for card payment validation
-  const { data: savedCards = [] } = useQuery<{ stripePaymentMethodId?: string }[]>({
-    queryKey: [`/api/payment-methods/${user?.id}`],
-    enabled: !!user?.id,
-  });
-
   const walletBalance = parseFloat(walletData?.balance || "0");
-  const hasValidCard = savedCards.some((card) => card.stripePaymentMethodId);
 
   const calculateFare = (vehicle: VehicleType) => {
     if (aiPricing && vehicle.type === selectedVehicle.type) {
@@ -173,15 +167,10 @@ export default function ConfirmRideScreen() {
         return;
       }
     } else if (selectedPayment.id === "card") {
-      if (!hasValidCard) {
-        Alert.alert(
-          "No Card Added",
-          "You need to add a card in the Wallet tab before you can pay by card."
-        );
-        return;
-      }
+      console.log("Card payment selected - processed via NOWPayments at ride end");
+    } else if (selectedPayment.id === "cash") {
+      console.log("Cash payment selected - pay driver directly");
     } else if (selectedPayment.id === "usdt") {
-      // USDT payment - BitPay invoice will be created, allow booking
       console.log("USDT payment selected");
     } else {
       Alert.alert("Payment Required", "Please select a valid payment method.");
