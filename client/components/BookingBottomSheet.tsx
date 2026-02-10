@@ -355,14 +355,7 @@ export default function BookingBottomSheet({
     enabled: !!user?.id,
   });
 
-  // Fetch saved payment methods for card payment validation
-  const { data: savedCards = [] } = useQuery<{ stripePaymentMethodId?: string }[]>({
-    queryKey: [`/api/payment-methods/${user?.id}`],
-    enabled: !!user?.id,
-  });
-
   const walletBalance = parseFloat(walletData?.balance || "0");
-  const hasValidCard = savedCards.some((card) => card.stripePaymentMethodId);
 
   const vehicleTypes = useMemo(() => {
     const config = regionConfig as { vehicleTypes?: any[] } | undefined;
@@ -473,26 +466,22 @@ export default function BookingBottomSheet({
         headers: { "Content-Type": "application/json" },
       });
 
-      // If USDT payment selected, create BitPay invoice
-      if (selectedPayment.id === "usdt" && ride.id) {
+      if ((selectedPayment.id === "usdt" || selectedPayment.id === "card") && ride.id) {
         try {
-          const invoiceResponse = await apiRequest("/api/payments/bitpay/create-invoice", {
+          const invoiceResponse = await apiRequest("/api/payments/nowpayments/wallet-topup", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              rideId: ride.id,
               amount: parseFloat(calculateFare(selectedVehicle)),
-              currency: "USD",
+              currency: "AED",
             }),
           });
           
-          // Open BitPay payment URL
-          if (invoiceResponse.url) {
-            Linking.openURL(invoiceResponse.url);
+          if (invoiceResponse.invoiceUrl) {
+            Linking.openURL(invoiceResponse.invoiceUrl);
           }
         } catch (error) {
-          console.log("BitPay invoice creation (simulated mode):", error);
-          // In simulated mode, just continue - payment will be simulated
+          console.log("NOWPayments invoice creation:", error);
         }
       }
 
@@ -551,16 +540,9 @@ export default function BookingBottomSheet({
         return;
       }
     } else if (selectedPayment.id === "card") {
-      if (!hasValidCard) {
-        showError(
-          "No Card Added",
-          "You need to add a card in the Wallet tab before you can pay by card."
-        );
-        return;
-      }
+      console.log("Card payment selected - processed via NOWPayments at ride end");
     } else if (selectedPayment.id === "usdt") {
-      // USDT payment - BitPay invoice will be created, allow booking
-      console.log("USDT payment selected - will create BitPay invoice");
+      console.log("USDT payment selected - processed via NOWPayments");
     } else {
       showError("Payment Required", "Please select a valid payment method.");
       return;
