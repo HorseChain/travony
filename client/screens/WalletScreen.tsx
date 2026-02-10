@@ -39,7 +39,7 @@ export default function WalletScreen() {
 
   const [topupModalVisible, setTopupModalVisible] = useState(false);
   const [topupAmount, setTopupAmount] = useState("");
-  const [topupMethod, setTopupMethod] = useState<"card" | "usdt">("usdt");
+  const [topupMethod, setTopupMethod] = useState<"usdt">("usdt");
 
   const { data: walletData } = useQuery<{ balance: string }>({
     queryKey: [`/api/wallet/balance/${user?.id}`],
@@ -52,55 +52,6 @@ export default function WalletScreen() {
   });
 
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
-
-  const handleCardTopup = async () => {
-    if (!topupAmount || parseFloat(topupAmount) <= 0) {
-      Alert.alert("Error", "Please enter a valid amount");
-      return;
-    }
-    
-    const amount = parseFloat(topupAmount);
-    setIsCreatingInvoice(true);
-    
-    try {
-      const response = await apiRequest("/api/payments/nowpayments/wallet-topup", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          amount: amount,
-          currency: "AED",
-          payVia: "card",
-        }),
-      });
-      
-      setTopupModalVisible(false);
-      setTopupAmount("");
-      
-      if (response.invoiceUrl) {
-        Alert.alert(
-          "Card Payment",
-          `Your payment of AED ${amount} is ready.\n\nYou will be redirected to complete the card payment securely.`,
-          [
-            { text: "Cancel", style: "cancel" },
-            { 
-              text: "Pay Now", 
-              onPress: () => {
-                WebBrowser.openBrowserAsync(response.invoiceUrl);
-              }
-            }
-          ]
-        );
-      }
-    } catch (error: any) {
-      if (error.message?.includes("not configured")) {
-        Alert.alert("Payments Not Available", "Payment processing is being set up. Please use cash for now.");
-      } else {
-        Alert.alert("Error", error.message || "Failed to create payment");
-      }
-    } finally {
-      setIsCreatingInvoice(false);
-    }
-  };
 
   const handleUsdtTopup = async () => {
     if (!topupAmount || parseFloat(topupAmount) <= 0) {
@@ -151,11 +102,7 @@ export default function WalletScreen() {
   };
 
   const handleTopup = () => {
-    if (topupMethod === "card") {
-      handleCardTopup();
-    } else {
-      handleUsdtTopup();
-    }
+    handleUsdtTopup();
   };
 
   const formatDate = (dateString: string) => {
@@ -368,21 +315,6 @@ export default function WalletScreen() {
                   Crypto
                 </ThemedText>
               </Pressable>
-              <Pressable
-                style={[
-                  styles.paymentMethodOption,
-                  { 
-                    backgroundColor: topupMethod === "card" ? "#4F46E520" : theme.backgroundDefault,
-                    borderColor: topupMethod === "card" ? "#4F46E5" : theme.border,
-                  }
-                ]}
-                onPress={() => setTopupMethod("card")}
-              >
-                <Ionicons name="card-outline" size={24} color={topupMethod === "card" ? "#4F46E5" : theme.textSecondary} />
-                <ThemedText style={[styles.paymentMethodLabel, { color: topupMethod === "card" ? "#4F46E5" : theme.textPrimary }]}>
-                  Card
-                </ThemedText>
-              </Pressable>
             </View>
 
             <ThemedText style={[styles.modalLabel, { color: theme.textSecondary }]}>
@@ -422,7 +354,7 @@ export default function WalletScreen() {
             </View>
 
             <Pressable
-              style={[styles.topupButton, { backgroundColor: topupMethod === "card" ? Colors.travonyGreen : "#26A17B" }]}
+              style={[styles.topupButton, { backgroundColor: "#26A17B" }]}
               onPress={handleTopup}
               disabled={isCreatingInvoice}
             >
@@ -430,7 +362,7 @@ export default function WalletScreen() {
                 <ActivityIndicator color="#fff" />
               ) : (
                 <ThemedText style={styles.topupButtonText}>
-                  {topupMethod === "card" ? "Pay with Card" : "Pay with USDT"}
+                  Pay with USDT
                 </ThemedText>
               )}
             </Pressable>
