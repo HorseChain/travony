@@ -15,7 +15,7 @@ import {
   createRideReceipt
 } from "./blockchain";
 import { sendRideReceiptEmail, sendDriverEarningsEmail, sendWeeklyFeedbackEmail } from "./email";
-import { bitpayService } from "./bitpay";
+import { nowPaymentsService } from "./nowpayments";
 import { createRideInvoices } from "./invoiceService";
 import { 
   initializeRegions,
@@ -39,7 +39,6 @@ import {
   getSupportedLanguages 
 } from "./translationService";
 import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
-import { getUncachableStripeClient, getStripePublishableKey, isStripeConfigured } from "./stripeClient";
 import {
   initializeMexicoCityLaunch,
   getCityBySlug,
@@ -686,30 +685,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
       } else if (paymentMethod === "card") {
-        const configured = await isStripeConfigured();
-        if (!configured) {
-          return res.status(503).json({ 
-            code: "STRIPE_NOT_CONFIGURED",
-            message: "Card payments are temporarily unavailable. Please use wallet." 
-          });
-        }
-        const savedCard = await storage.getDefaultPaymentMethod(customerId);
-        if (!savedCard?.stripePaymentMethodId) {
-          return res.status(400).json({ 
-            code: "NO_SAVED_CARD",
-            message: "No saved card found. Please add a card in Payment Settings first.",
-          });
-        }
+        console.log("Card payment selected - will be processed via NOWPayments at ride end");
+      } else if (paymentMethod === "usdt") {
+        console.log("USDT payment selected - will be processed via NOWPayments at ride end");
       } else if (paymentMethod === "cash") {
-        // Cash payments disabled for live mode - requires real payment
-        return res.status(400).json({
-          code: "CASH_DISABLED",
-          message: "Cash payments are not available. Please use wallet or card.",
-        });
+        console.log("Cash payment selected - rider will pay driver directly");
       } else {
         return res.status(400).json({
           code: "INVALID_PAYMENT_METHOD",
-          message: "Invalid payment method. Please use wallet or card.",
+          message: "Invalid payment method. Please use wallet, card, USDT, or cash.",
         });
       }
       
@@ -2333,189 +2317,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/stripe/publishable-key", async (_req, res) => {
-    try {
-      const configured = await isStripeConfigured();
-      if (!configured) {
-        return res.status(503).json({ message: "Stripe payments not configured" });
-      }
-      const publishableKey = await getStripePublishableKey();
-      res.json({ publishableKey });
-    } catch (error: any) {
-      res.status(503).json({ message: "Stripe payments not configured" });
-    }
-  });
-
-  app.post("/api/payments/setup-intent", requireAuth, async (req: any, res) => {
-    try {
-      const configured = await isStripeConfigured();
-      if (!configured) {
-        return res.status(503).json({ message: "Stripe payments not configured" });
-      }
-      const stripe = await getUncachableStripeClient();
-      const setupIntent = await stripe.setupIntents.create({
-        payment_method_types: ['card'],
-        metadata: { userId: req.userId },
-      });
-      res.json({ clientSecret: setupIntent.client_secret });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/payments/add-card", requireAuth, async (req: any, res) => {
-    try {
-      const { paymentMethodId } = req.body;
-      if (!paymentMethodId) {
-        return res.status(400).json({ message: "Payment method ID required" });
-      }
-      await storage.createPaymentMethod({
-        userId: req.userId,
-        type: "card",
-        stripePaymentMethodId: paymentMethodId,
-        last4: req.body.last4 || null,
-        brand: req.body.brand || null,
-        isDefault: req.body.isDefault || false,
-      });
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/wallet/topup-stripe", requireAuth, async (req: any, res) => {
-    try {
-      const configured = await isStripeConfigured();
-      if (!configured) {
-        return res.status(503).json({ message: "Stripe payments not configured" });
-      }
-      const { amount, currency = "AED" } = req.body;
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ message: "Invalid amount" });
-      }
-      const stripe = await getUncachableStripeClient();
-      const amountInCents = Math.round(amount * 100);
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount: amountInCents,
-        currency: currency.toLowerCase(),
-        metadata: { 
-          userId: req.userId, 
-          type: "wallet_topup",
-          amount: amount.toString(),
-        },
-      });
-      res.json({ 
-        clientSecret: paymentIntent.client_secret,
-        paymentIntentId: paymentIntent.id,
-      });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/payments/stripe/checkout", requireAuth, async (req: any, res) => {
-    try {
-      const configured = await isStripeConfigured();
-      if (!configured) {
-        return res.status(503).json({ message: "Stripe payments not configured" });
-      }
-      const { amount, currency = "AED", userId } = req.body;
-      if (!amount || amount <= 0) {
-        return res.status(400).json({ message: "Invalid amount" });
-      }
-      
-      const stripe = await getUncachableStripeClient();
-      const amountInCents = Math.round(amount * 100);
-      
-      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : `https://${process.env.REPLIT_DOMAINS?.split(",")[0] || "localhost:5000"}`;
-      
-      const session = await stripe.checkout.sessions.create({
-        payment_method_types: ["card"],
-        line_items: [
-          {
-            price_data: {
-              currency: currency.toLowerCase(),
-              product_data: {
-                name: "Travony Wallet Top-up",
-                description: `Add AED ${amount} to your Travony wallet`,
-              },
-              unit_amount: amountInCents,
-            },
-            quantity: 1,
-          },
-        ],
-        mode: "payment",
-        success_url: `${baseUrl}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${baseUrl}/payment-cancelled`,
-        metadata: {
-          userId: req.userId,
-          type: "wallet_topup",
-          amount: amount.toString(),
-        },
-      });
-      
-      res.json({ 
-        checkoutUrl: session.url,
-        sessionId: session.id,
-      });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/payments/stripe/webhook", async (req, res) => {
-    try {
-      const configured = await isStripeConfigured();
-      if (!configured) {
-        return res.status(503).json({ message: "Stripe not configured" });
-      }
-      
-      const stripe = await getUncachableStripeClient();
-      const event = req.body;
-      
-      if (event.type === "checkout.session.completed") {
-        const session = event.data.object;
-        const userId = session.metadata?.userId;
-        const amount = parseFloat(session.metadata?.amount || "0");
-        
-        if (userId && amount > 0) {
-          await walletService.topUpWallet(userId, amount, "AED");
-        }
-      }
-      
-      res.json({ received: true });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/wallet/confirm-topup", requireAuth, async (req: any, res) => {
-    try {
-      const { paymentIntentId, amount, currency = "AED" } = req.body;
-      if (!paymentIntentId || !amount) {
-        return res.status(400).json({ message: "Payment intent ID and amount required" });
-      }
-      
-      const stripe = await getUncachableStripeClient();
-      const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
-      
-      if (paymentIntent.status !== "succeeded") {
-        return res.status(400).json({ message: "Payment not completed. Please complete the payment first." });
-      }
-      
-      if (paymentIntent.metadata?.userId !== req.userId) {
-        return res.status(403).json({ message: "Payment does not belong to this user" });
-      }
-      
-      const result = await walletService.topUpWallet(req.userId, amount, currency);
-      res.json({ success: true, newBalance: result.newBalance });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
   app.delete("/api/payment-methods/:id", async (req, res) => {
     try {
       await storage.deletePaymentMethod(req.params.id);
@@ -2683,65 +2484,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
           description: `Payment for ride to ${ride.dropoffAddress}`,
           completedAt: new Date(),
         });
-      } else if (paymentMethod === 'card') {
-        const configured = await isStripeConfigured();
-        if (!configured) {
-          return res.status(503).json({ 
-            code: "STRIPE_NOT_CONFIGURED",
-            message: "Card payments temporarily unavailable. Please use wallet or cash." 
-          });
-        }
-        
-        const savedPaymentMethod = await storage.getDefaultPaymentMethod(ride.customerId);
-        if (!savedPaymentMethod?.stripePaymentMethodId) {
-          return res.status(400).json({ 
-            code: "NO_PAYMENT_METHOD",
-            message: "No saved card found. Please add a card or use wallet/cash." 
-          });
-        }
-
+      } else if (paymentMethod === 'card' || paymentMethod === 'usdt') {
         try {
-          const stripe = await getUncachableStripeClient();
-          const amountInCents = Math.round(fare * 100);
+          const orderId = `ride_${ride.id}_${Date.now()}`;
+          const currency = (ride.currency || "AED").toLowerCase();
           
-          let stripeCustomerId = user.stripeCustomerId;
-          if (!stripeCustomerId) {
-            const customer = await stripe.customers.create({
-              email: user.email || undefined,
-              phone: user.phone || undefined,
-              name: user.name || undefined,
-              metadata: { userId: user.id },
-            });
-            stripeCustomerId = customer.id;
-            await storage.updateUser(user.id, { stripeCustomerId });
-          }
+          const baseUrl = process.env.REPLIT_DEV_DOMAIN 
+            ? `https://${process.env.REPLIT_DEV_DOMAIN}`
+            : `https://${process.env.REPLIT_DOMAINS?.split(",")[0] || "localhost:5000"}`;
 
-          await stripe.paymentMethods.attach(savedPaymentMethod.stripePaymentMethodId, {
-            customer: stripeCustomerId,
-          }).catch(() => {});
-
-          const paymentIntent = await stripe.paymentIntents.create({
-            amount: amountInCents,
-            currency: (ride.currency || "AED").toLowerCase(),
-            customer: stripeCustomerId,
-            payment_method: savedPaymentMethod.stripePaymentMethodId,
-            off_session: true,
-            confirm: true,
-            metadata: {
-              rideId: ride.id,
-              userId: ride.customerId,
-              driverId: ride.driverId || "",
-              type: "ride_payment",
-            },
+          const invoice = await nowPaymentsService.createInvoice({
+            price: fare,
+            currency: currency,
+            orderId: orderId,
+            description: `Ride payment: ${ride.pickupAddress} to ${ride.dropoffAddress}`,
+            callbackUrl: `${baseUrl}/api/payments/nowpayments/ipn`,
+            successUrl: `${baseUrl}/payment-success?type=${paymentMethod}`,
+            cancelUrl: `${baseUrl}/payment-cancelled`,
           });
-
-          if (paymentIntent.status !== 'succeeded') {
-            return res.status(402).json({ 
-              code: "PAYMENT_FAILED",
-              message: "Card payment failed. Please try another payment method.",
-              stripeStatus: paymentIntent.status,
-            });
-          }
 
           await storage.createWalletTransaction({
             id: uuidv4(),
@@ -2750,22 +2510,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
             type: 'ride_payment',
             amount: fare.toFixed(2),
             status: 'completed',
-            description: `Card payment for ride to ${ride.dropoffAddress}`,
+            description: `${paymentMethod === 'card' ? 'Card' : 'USDT'} payment for ride to ${ride.dropoffAddress}`,
             completedAt: new Date(),
-            stripePaymentIntentId: paymentIntent.id,
           });
-        } catch (stripeError: any) {
-          console.error("Stripe payment error:", stripeError);
-          
-          const errorCode = stripeError.code || "PAYMENT_ERROR";
-          const errorMessage = stripeError.decline_code 
-            ? getDeclineMessage(stripeError.decline_code)
-            : stripeError.message || "Payment failed";
+        } catch (paymentError: any) {
+          console.error("NOWPayments ride payment error:", paymentError);
           
           return res.status(402).json({ 
-            code: errorCode,
-            declineCode: stripeError.decline_code,
-            message: errorMessage,
+            code: "PAYMENT_ERROR",
+            message: paymentError.message || "Payment processing failed. Please try another payment method.",
           });
         }
       }
@@ -2971,66 +2724,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Get driver's user account for Stripe customer
-      const driverUser = await storage.getUser(driver.userId);
-      if (!driverUser) {
-        return res.status(404).json({ 
-          code: "USER_NOT_FOUND",
-          message: "Driver user account not found" 
-        });
-      }
-
-      // Check if Stripe is configured for payouts
-      const stripeConfigured = await isStripeConfigured();
-      
-      let stripePayoutId = null;
       let payoutStatus = "pending";
 
-      if (method === "bank" && stripeConfigured) {
-        try {
-          const stripe = await getUncachableStripeClient();
-          
-          // Check if driver has Stripe Connect account
-          let stripeAccountId = (driverUser as any).stripeConnectAccountId;
-          
-          if (!stripeAccountId) {
-            // For now, mark payout as pending manual processing
-            payoutStatus = "pending_bank_setup";
-          } else {
-            // Create a transfer to the connected account
-            const transfer = await stripe.transfers.create({
-              amount: Math.round(requestedAmount * 100),
-              currency: "aed",
-              destination: stripeAccountId,
-              metadata: {
-                driverId: driver.id,
-                userId: driver.userId,
-                type: "driver_payout",
-              },
-            });
-            stripePayoutId = transfer.id;
-            payoutStatus = "processing";
-          }
-        } catch (stripeError: any) {
-          console.error("Stripe payout error:", stripeError);
-          
-          // Handle specific Stripe errors
-          if (stripeError.code === "account_invalid") {
-            return res.status(400).json({ 
-              code: "INVALID_BANK_ACCOUNT",
-              message: "Your bank account details are invalid. Please update them." 
-            });
-          }
-          if (stripeError.code === "balance_insufficient") {
-            return res.status(503).json({ 
-              code: "PLATFORM_BALANCE_LOW",
-              message: "Payout temporarily unavailable. Please try again later." 
-            });
-          }
-          
-          // Fall back to pending status for manual processing
-          payoutStatus = "pending_review";
-        }
+      if (method === "usdt") {
+        payoutStatus = "processing";
+      } else if (method === "bank") {
+        payoutStatus = "pending";
       }
 
       // Deduct from driver's wallet
@@ -3042,7 +2741,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: requestedAmount.toFixed(2),
         method: method,
         status: payoutStatus,
-        stripePayoutId: stripePayoutId,
+        stripePayoutId: null,
       });
 
       await storage.createWalletTransaction({
@@ -3725,8 +3424,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BitPay USDT Wallet Top-up
-  app.post("/api/payments/bitpay/wallet-topup", requireAuth, async (req: any, res) => {
+  // NOWPayments Wallet Top-up (Card & USDT)
+  app.post("/api/payments/nowpayments/wallet-topup", requireAuth, async (req: any, res) => {
     try {
       const { amount, currency = "AED" } = req.body;
       
@@ -3734,8 +3433,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid amount is required" });
       }
 
-      if (!bitpayService.isAvailable()) {
-        return res.status(503).json({ message: "USDT payments are not configured. Please use card payment instead." });
+      if (!nowPaymentsService.isAvailable()) {
+        return res.status(503).json({ message: "USDT payments are not configured yet. Please use cash payment." });
       }
 
       const baseUrl = process.env.REPLIT_DEV_DOMAIN 
@@ -3744,16 +3443,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const orderId = `wallet_${req.userId}_${Date.now()}`;
       
-      const invoice = await bitpayService.createInvoice({
+      const invoice = await nowPaymentsService.createInvoice({
         price: parseFloat(amount),
-        currency: "USD",
+        currency: currency.toLowerCase(),
         orderId: orderId,
-        notificationURL: `${baseUrl}/api/payments/bitpay/wallet-webhook`,
-        redirectURL: `${baseUrl}/payment-success?type=usdt`,
-        buyer: {
-          email: req.userId,
-        },
-        itemDesc: `Travony Wallet Top-up: ${currency} ${amount}`,
+        description: `Travony Wallet Top-up: ${currency} ${amount}`,
+        callbackUrl: `${baseUrl}/api/payments/nowpayments/ipn`,
+        successUrl: `${baseUrl}/payment-success?type=usdt`,
+        cancelUrl: `${baseUrl}/payment-cancelled`,
       });
 
       if (!invoice) {
@@ -3762,301 +3459,69 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       res.json({
         invoiceId: invoice.id,
-        invoiceUrl: invoice.url,
+        invoiceUrl: invoice.invoice_url,
         amount: amount,
         currency: currency,
       });
     } catch (error: any) {
-      console.error("USDT wallet topup error:", error);
+      console.error("NOWPayments wallet topup error:", error);
       res.status(500).json({ message: error.message });
     }
   });
 
-  app.post("/api/payments/bitpay/wallet-webhook", async (req, res) => {
+  // NOWPayments IPN (Instant Payment Notification) Webhook
+  app.post("/api/payments/nowpayments/ipn", async (req, res) => {
     try {
       const payload = req.body;
-      console.log("BitPay wallet webhook received:", JSON.stringify(payload));
+      console.log("NOWPayments IPN received:", JSON.stringify(payload));
 
-      if (!bitpayService.verifyWebhookPayload(payload)) {
-        return res.status(400).json({ message: "Invalid webhook payload" });
+      const signature = req.headers["x-nowpayments-sig"] as string;
+      if (signature && !nowPaymentsService.verifyIpnSignature(payload, signature)) {
+        return res.status(400).json({ message: "Invalid IPN signature" });
       }
 
-      const invoiceId = payload.id || payload.data?.id;
-      const status = payload.status || payload.data?.status;
-      const orderId = payload.orderId || payload.data?.orderId;
+      const status = payload.payment_status;
+      const orderId = payload.order_id;
 
-      if (!invoiceId || !status) {
-        return res.status(400).json({ message: "Missing invoice data" });
+      if (!status || !orderId) {
+        return res.status(400).json({ message: "Missing payment data" });
       }
 
-      if (status === "complete" || status === "confirmed") {
-        const parts = orderId?.split("_");
-        if (parts && parts[0] === "wallet" && parts[1]) {
+      if (status === "finished" || status === "confirmed") {
+        const parts = orderId.split("_");
+        if (parts[0] === "wallet" && parts[1]) {
           const userId = parts[1];
-          const invoice = await bitpayService.getInvoice(invoiceId);
-          if (invoice) {
-            await walletService.topUpWallet(userId, invoice.price, "AED");
-            console.log(`Wallet topped up via USDT: userId=${userId}, amount=${invoice.price}`);
+          const amount = payload.price_amount || payload.outcome_amount;
+          if (amount) {
+            await walletService.topUpWallet(userId, amount, "AED");
+            console.log(`Wallet topped up via NOWPayments: userId=${userId}, amount=${amount}`);
           }
         }
       }
 
       res.json({ received: true });
     } catch (error: any) {
-      console.error("BitPay wallet webhook error:", error);
+      console.error("NOWPayments IPN error:", error);
       res.status(500).json({ message: error.message });
     }
   });
 
-  // BitPay USDT Payment Routes
-  app.post("/api/payments/bitpay/create-invoice", requireAuth, async (req: any, res) => {
-    try {
-      const { rideId, amount, currency = "USD" } = req.body;
-      
-      if (!rideId || !amount) {
-        return res.status(400).json({ message: "Ride ID and amount are required" });
-      }
-
-      const ride = await storage.getRide(rideId);
-      if (!ride) {
-        return res.status(404).json({ message: "Ride not found" });
-      }
-
-      if (ride.customerId !== req.userId) {
-        return res.status(403).json({ message: "Access denied" });
-      }
-
-      const baseUrl = process.env.REPLIT_DEV_DOMAIN 
-        ? `https://${process.env.REPLIT_DEV_DOMAIN}`
-        : "http://localhost:5000";
-
-      const invoice = await bitpayService.createInvoice({
-        price: parseFloat(amount),
-        currency,
-        orderId: rideId,
-        notificationURL: `${baseUrl}/api/payments/bitpay/webhook`,
-        redirectURL: `${baseUrl}/payment-complete?rideId=${rideId}`,
-        buyer: {
-          email: req.userId,
-        },
-        itemDesc: `Travony Ride Payment - ${ride.pickupAddress} to ${ride.dropoffAddress}`,
-      });
-
-      if (!invoice) {
-        return res.status(500).json({ message: "Failed to create payment invoice" });
-      }
-
-      await storage.updateRide(rideId, {
-        paymentMethod: "usdt",
-        paymentStatus: "pending",
-        bitpayInvoiceId: invoice.id,
-        bitpayInvoiceUrl: invoice.url,
-      });
-
-      res.json({
-        invoiceId: invoice.id,
-        invoiceUrl: invoice.url,
-        status: invoice.status,
-        expiresAt: new Date(invoice.expirationTime).toISOString(),
-      });
-    } catch (error: any) {
-      console.error("BitPay invoice creation error:", error);
-      res.status(500).json({ message: error.message });
-    }
+  // NOWPayments status check
+  app.get("/api/payments/nowpayments/status", requireAuth, async (req: any, res) => {
+    res.json({ 
+      available: nowPaymentsService.isAvailable(),
+      provider: "nowpayments",
+    });
   });
 
-  app.get("/api/payments/bitpay/invoice/:invoiceId", requireAuth, async (req: any, res) => {
-    try {
-      const invoice = await bitpayService.getInvoice(req.params.invoiceId);
-      if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
-      }
-      res.json(invoice);
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/payments/bitpay/webhook", async (req, res) => {
-    try {
-      const payload = req.body;
-      console.log("BitPay webhook received:", JSON.stringify(payload));
-
-      if (!bitpayService.verifyWebhookPayload(payload)) {
-        return res.status(400).json({ message: "Invalid webhook payload" });
-      }
-
-      const invoiceId = payload.id || payload.data?.id;
-      const status = payload.status || payload.data?.status;
-      const orderId = payload.orderId || payload.data?.orderId;
-
-      if (!invoiceId || !status) {
-        return res.status(400).json({ message: "Missing invoice data" });
-      }
-
-      const invoice = await bitpayService.getInvoice(invoiceId);
-      if (!invoice) {
-        return res.status(404).json({ message: "Invoice not found" });
-      }
-
-      const rideId = orderId || invoice.orderId;
-      const ride = await storage.getRide(rideId);
-      
-      if (!ride) {
-        console.log("BitPay webhook: Ride not found for invoice", invoiceId);
-        return res.sendStatus(200);
-      }
-
-      if (ride.paymentMethod !== "usdt") {
-        console.log("BitPay webhook: Ride is not a USDT payment", rideId);
-        return res.sendStatus(200);
-      }
-
-      if (ride.bitpayInvoiceId !== invoiceId) {
-        console.log("BitPay webhook: Invoice ID mismatch", invoiceId, ride.bitpayInvoiceId);
-        return res.status(400).json({ message: "Invoice ID mismatch" });
-      }
-
-      if (status === "confirmed" || status === "complete") {
-        const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-        
-        if (fare <= 0) {
-          console.log("BitPay webhook: Invalid fare amount", fare);
-          await storage.updateRide(rideId, { paymentStatus: "failed" });
-          return res.sendStatus(200);
-        }
-
-        const driverShare = fare * 0.90;
-        const platformFee = fare * 0.10;
-
-        await storage.updateRide(rideId, {
-          paymentStatus: "completed",
-          driverEarnings: driverShare.toFixed(2),
-          platformFee: platformFee.toFixed(2),
-        });
-
-        if (ride.driverId) {
-          await storage.updateDriverWalletBalance(ride.driverId, driverShare);
-          
-          const driver = await storage.getDriver(ride.driverId);
-          if (driver) {
-            const currentEarnings = parseFloat(driver.totalEarnings || "0");
-            await storage.updateDriver(ride.driverId, {
-              totalEarnings: (currentEarnings + driverShare).toFixed(2),
-            });
-          }
-
-          await storage.createWalletTransaction({
-            id: uuidv4(),
-            driverId: ride.driverId,
-            rideId: ride.id,
-            type: "ride_payment",
-            amount: driverShare.toFixed(2),
-            currency: "USDT",
-            status: "completed",
-            description: `USDT payment from ride`,
-            completedAt: new Date(),
-          });
-
-          // Generate invoices for USDT payment
-          try {
-            await createRideInvoices(ride.id);
-          } catch (invoiceError: any) {
-            console.log("Invoice generation error:", invoiceError.message);
-          }
-        }
-
-        console.log(`BitPay payment confirmed for ride ${rideId}: AED ${fare}`);
-      } else if (status === "expired" || status === "invalid") {
-        await storage.updateRide(rideId, {
-          paymentStatus: "failed",
-        });
-        console.log(`BitPay payment failed for ride ${rideId}: ${status}`);
-      }
-
-      res.sendStatus(200);
-    } catch (error: any) {
-      console.error("BitPay webhook error:", error);
-      res.status(500).json({ message: error.message });
-    }
-  });
-
-  app.post("/api/payments/bitpay/simulate-complete/:invoiceId", requireAuth, async (req: any, res) => {
-    const isDev = process.env.NODE_ENV === "development" || !process.env.BITPAY_API_TOKEN;
-    if (!isDev) {
-      return res.status(403).json({ message: "Only available in development mode" });
-    }
-
-    try {
-      const success = bitpayService.simulatePaymentComplete(req.params.invoiceId);
-      if (!success) {
-        return res.status(404).json({ message: "Invoice not found" });
-      }
-
-      const invoice = await bitpayService.getInvoice(req.params.invoiceId);
-      if (invoice && invoice.orderId) {
-        const ride = await storage.getRide(invoice.orderId);
-        if (ride && ride.paymentMethod === "usdt" && ride.bitpayInvoiceId === req.params.invoiceId) {
-          const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-          
-          if (fare <= 0) {
-            return res.status(400).json({ message: "Invalid fare amount" });
-          }
-          
-          const driverShare = fare * 0.90;
-          const platformFee = fare * 0.10;
-
-          await storage.updateRide(invoice.orderId, {
-            paymentStatus: "completed",
-            driverEarnings: driverShare.toFixed(2),
-            platformFee: platformFee.toFixed(2),
-          });
-
-          if (ride.driverId) {
-            await storage.updateDriverWalletBalance(ride.driverId, driverShare);
-            
-            const driver = await storage.getDriver(ride.driverId);
-            if (driver) {
-              const currentEarnings = parseFloat(driver.totalEarnings || "0");
-              await storage.updateDriver(ride.driverId, {
-                totalEarnings: (currentEarnings + driverShare).toFixed(2),
-              });
-            }
-
-            await storage.createWalletTransaction({
-              id: uuidv4(),
-              driverId: ride.driverId,
-              rideId: ride.id,
-              type: "ride_payment",
-              amount: driverShare.toFixed(2),
-              currency: "USDT",
-              status: "completed",
-              description: `USDT payment from ride (simulated)`,
-              completedAt: new Date(),
-            });
-
-            // Generate invoices for simulated USDT payment
-            try {
-              await createRideInvoices(ride.id);
-            } catch (invoiceError: any) {
-              console.log("Invoice generation error:", invoiceError.message);
-            }
-          }
-        }
-      }
-
-      res.json({ message: "Payment simulated successfully", invoice });
-    } catch (error: any) {
-      res.status(500).json({ message: error.message });
-    }
-  });
 
   app.get("/api/payments/methods", async (req, res) => {
     res.json({
       methods: [
+        { id: "cash", name: "Cash", icon: "cash-outline", available: true, description: "Pay driver directly" },
         { id: "wallet", name: "Wallet", icon: "wallet-outline", available: true, description: "Pay from your wallet balance" },
-        { id: "card", name: "Card", icon: "card-outline", available: true, description: "Pay with saved card" },
-        { id: "usdt", name: "USDT (Crypto)", icon: "logo-bitcoin", available: true, description: "Pay with USDT via BitPay" },
+        { id: "card", name: "Card", icon: "card-outline", available: true, description: "Pay with debit or credit card via NOWPayments" },
+        { id: "usdt", name: "USDT (Crypto)", icon: "logo-usd", available: true, description: "Pay with USDT stablecoin via NOWPayments" },
       ],
     });
   });
@@ -4148,20 +3613,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid withdrawal amount" });
       }
 
-      // Create payout via BitPay
-      const payout = await bitpayService.createPayout({
-        amount: amount,
-        currency: "USDT",
-        ledgerCurrency: "USD",
-        recipientAddress: cryptoSettings.usdtWalletAddress,
-        reference: `driver_${driver.id}_${Date.now()}`,
-      });
-
-      if (!payout) {
-        return res.status(500).json({ message: "Failed to create payout" });
-      }
-
-      // Record payout in database
       const dbPayout = await storage.createDriverPayout({
         driverId: driver.id,
         amount: amount.toFixed(2),
@@ -4169,10 +3620,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: "crypto",
         status: "processing",
         cryptoWalletAddress: cryptoSettings.usdtWalletAddress,
-        bitpayPayoutId: payout.id,
+        bitpayPayoutId: null,
       });
 
-      // Create withdrawal transaction
       await storage.createWalletTransaction({
         id: uuidv4(),
         driverId: driver.id,
@@ -4181,7 +3631,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         currency: "USDT",
         status: "pending",
         description: `USDT withdrawal to ${cryptoSettings.usdtWalletAddress.slice(0, 10)}...`,
-        metadata: JSON.stringify({ payoutId: dbPayout.id, bitpayPayoutId: payout.id }),
+        metadata: JSON.stringify({ payoutId: dbPayout.id }),
       });
 
       res.json({
@@ -4200,7 +3650,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // Simulate payout complete (dev only)
   app.post("/api/driver/simulate-payout/:payoutId", requireAuth, requireRole("driver"), async (req: any, res) => {
-    const isDev = process.env.NODE_ENV === "development" || !process.env.BITPAY_API_TOKEN;
+    const isDev = process.env.NODE_ENV === "development";
     if (!isDev) {
       return res.status(403).json({ message: "Only available in development mode" });
     }
@@ -4214,10 +3664,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const driver = await storage.getDriverByUserId(req.userId);
       if (!driver || payout.driverId !== driver.id) {
         return res.status(403).json({ message: "Access denied" });
-      }
-
-      if (payout.bitpayPayoutId) {
-        bitpayService.simulatePayoutComplete(payout.bitpayPayoutId);
       }
 
       const txHash = `0x${uuidv4().replace(/-/g, "")}`;
@@ -4327,7 +3773,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           method: payment?.method || ride.paymentMethod || "cash",
           status: payment?.status || "completed",
           processedAt: payment?.createdAt,
-          stripePaymentId: payment?.stripePaymentId,
+          paymentId: payment?.id,
         },
         
         fareBreakdown: {
