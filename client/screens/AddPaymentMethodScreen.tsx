@@ -1,109 +1,53 @@
-import React, { useState } from "react";
-import { View, StyleSheet, Pressable, Alert, ActivityIndicator, Platform } from "react-native";
+import React from "react";
+import { View, StyleSheet, Pressable, Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
-import { useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
-import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
-import { useAuth } from "@/hooks/useAuth";
-import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
-
-let StripeCardField: any = null;
-let useConfirmSetupIntentHook: any = null;
-if (Platform.OS !== "web") {
-  try {
-    const stripeModule = require("@stripe/stripe-react-native");
-    StripeCardField = stripeModule.CardField;
-    useConfirmSetupIntentHook = stripeModule.useConfirmSetupIntent;
-  } catch (e) {}
-}
-
-function useStripeSetupIntent() {
-  if (useConfirmSetupIntentHook) {
-    return useConfirmSetupIntentHook();
-  }
-  return { confirmSetupIntent: null };
-}
+import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 
 export default function AddPaymentMethodScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
-  const { user } = useAuth();
   const navigation = useNavigation();
-  const queryClient = useQueryClient();
-  const { confirmSetupIntent } = useStripeSetupIntent();
 
-  const [cardComplete, setCardComplete] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [cardDetails, setCardDetails] = useState<any>(null);
-
-  const handleAddCard = async () => {
-    if (Platform.OS === "web" || !confirmSetupIntent) {
-      Alert.alert("Not Available", "Card setup is only available in the mobile app. Please use Expo Go on your device.");
-      return;
-    }
-
-    if (!cardComplete) {
-      Alert.alert("Incomplete", "Please fill in all card details.");
-      return;
-    }
-
-    setIsProcessing(true);
-
-    try {
-      const setupResponse = await apiRequest("/api/payments/setup-intent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-      });
-
-      if (!setupResponse?.clientSecret) {
-        throw new Error("Could not initiate card setup. Please try again.");
-      }
-
-      const { setupIntent, error } = await confirmSetupIntent(setupResponse.clientSecret, {
-        paymentMethodType: "Card",
-      });
-
-      if (error) {
-        throw new Error(error.message || "Card verification failed.");
-      }
-
-      if (!setupIntent?.paymentMethodId) {
-        throw new Error("Card could not be verified. Please try again.");
-      }
-
-      await apiRequest("/api/payments/add-card", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentMethodId: setupIntent.paymentMethodId,
-          last4: cardDetails?.last4 || null,
-          brand: cardDetails?.brand || null,
-          isDefault: true,
-        }),
-      });
-
-      queryClient.invalidateQueries({ queryKey: [`/api/payment-methods/${user?.id}`] });
-      Alert.alert("Card Added", "Your card has been securely saved for future payments.");
-      navigation.goBack();
-    } catch (err: any) {
-      Alert.alert("Error", err.message || "Failed to add card. Please try again.");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
+  const paymentOptions = [
+    {
+      id: "cash",
+      title: "Cash",
+      subtitle: "Pay your driver directly at the end of your ride. No setup needed.",
+      icon: "cash-outline" as const,
+      color: Colors.travonyGreen,
+      status: "Always available",
+    },
+    {
+      id: "card",
+      title: "Card Payment",
+      subtitle: "Pay securely with any debit or credit card via NOWPayments checkout. Visa, Mastercard, and more accepted.",
+      icon: "card-outline" as const,
+      color: "#4F46E5",
+      status: "Available",
+    },
+    {
+      id: "usdt",
+      title: "USDT (Crypto)",
+      subtitle: "Pay with USDT stablecoin. Low fees (0.5%), fast transactions, powered by NOWPayments.",
+      icon: "logo-usd" as const,
+      color: "#26A17B",
+      status: "Available",
+    },
+  ];
 
   return (
     <ThemedView style={styles.container}>
-      <KeyboardAwareScrollViewCompat
-        contentContainerStyle={[
+      <View
+        style={[
           styles.scrollContent,
           {
             paddingTop: headerHeight + Spacing.lg,
@@ -111,111 +55,68 @@ export default function AddPaymentMethodScreen() {
           },
         ]}
       >
-        <View style={[styles.cardPreview, { backgroundColor: theme.primary }]}>
-          <View style={styles.cardChip} />
-          <ThemedText style={styles.cardNumber}>
-            {cardDetails?.last4 ? `**** **** **** ${cardDetails.last4}` : "**** **** **** ****"}
-          </ThemedText>
-          <View style={styles.cardDetails}>
-            <View>
-              <ThemedText style={styles.cardLabel}>BRAND</ThemedText>
-              <ThemedText style={styles.cardValue}>
-                {cardDetails?.brand || "CARD"}
-              </ThemedText>
-            </View>
-            <View>
-              <ThemedText style={styles.cardLabel}>EXPIRES</ThemedText>
-              <ThemedText style={styles.cardValue}>
-                {cardDetails?.expiryMonth && cardDetails?.expiryYear
-                  ? `${String(cardDetails.expiryMonth).padStart(2, "0")}/${String(cardDetails.expiryYear).slice(-2)}`
-                  : "MM/YY"}
-              </ThemedText>
-            </View>
+        <View style={[styles.infoCard, { backgroundColor: theme.primary + "10" }]}>
+          <Ionicons name="shield-checkmark-outline" size={24} color={theme.primary} />
+          <View style={styles.infoCardText}>
+            <ThemedText style={[styles.infoTitle, { color: theme.primary }]}>
+              Secure Payments
+            </ThemedText>
+            <ThemedText style={[styles.infoSubtitle, { color: theme.textSecondary }]}>
+              All card and crypto payments are processed securely through NOWPayments. Your payment details are never stored on our servers.
+            </ThemedText>
           </View>
         </View>
 
-        <View style={styles.form}>
-          <ThemedText style={styles.label}>Card Information</ThemedText>
-          <View style={[styles.cardFieldContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
-            {StripeCardField ? (
-              <StripeCardField
-                postalCodeEnabled={false}
-                placeholders={{
-                  number: "4242 4242 4242 4242",
-                }}
-                cardStyle={{
-                  backgroundColor: "transparent",
-                  textColor: theme.text,
-                  placeholderColor: theme.textMuted,
-                  borderWidth: 0,
-                  fontSize: 16,
-                }}
-                style={styles.cardField}
-                onCardChange={(details: any) => {
-                  setCardComplete(details.complete);
-                  setCardDetails(details);
-                }}
-              />
-            ) : (
-              <View style={[styles.cardField, { justifyContent: "center", alignItems: "center" }]}>
-                <ThemedText style={{ color: theme.textMuted, textAlign: "center" }}>
-                  Card entry is available in the mobile app.{"\n"}Please use Expo Go on your device.
-                </ThemedText>
+        {paymentOptions.map((option) => (
+          <Card key={option.id} style={styles.optionCard}>
+            <View style={styles.optionRow}>
+              <View style={[styles.optionIcon, { backgroundColor: option.color + "15" }]}>
+                <Ionicons name={option.icon} size={28} color={option.color} />
               </View>
-            )}
-          </View>
-          <ThemedText style={[styles.cardFieldHint, { color: theme.textMuted }]}>
-            Your card information is securely processed by Stripe. We never store your full card details.
+              <View style={styles.optionInfo}>
+                <ThemedText style={styles.optionTitle}>{option.title}</ThemedText>
+                <ThemedText style={[styles.optionSubtitle, { color: theme.textSecondary }]}>
+                  {option.subtitle}
+                </ThemedText>
+                <View style={[styles.statusBadge, { backgroundColor: option.color + "15" }]}>
+                  <View style={[styles.statusDot, { backgroundColor: option.color }]} />
+                  <ThemedText style={[styles.statusText, { color: option.color }]}>
+                    {option.status}
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+          </Card>
+        ))}
+
+        <View style={styles.feeSection}>
+          <ThemedText style={[styles.feeSectionTitle, { color: theme.textPrimary }]}>
+            Fee Structure
           </ThemedText>
+          <View style={[styles.feeRow, { borderBottomColor: theme.border }]}>
+            <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>Cash</ThemedText>
+            <ThemedText style={[styles.feeValue, { color: Colors.travonyGreen }]}>No fees</ThemedText>
+          </View>
+          <View style={[styles.feeRow, { borderBottomColor: theme.border }]}>
+            <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>Card</ThemedText>
+            <ThemedText style={[styles.feeValue, { color: theme.textPrimary }]}>0.5% processing fee</ThemedText>
+          </View>
+          <View style={styles.feeRow}>
+            <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>USDT</ThemedText>
+            <ThemedText style={[styles.feeValue, { color: theme.textPrimary }]}>0.5% processing fee</ThemedText>
+          </View>
         </View>
 
         <Pressable
-          style={({ pressed }) => [
-            styles.submitButton,
-            {
-              backgroundColor: cardComplete ? theme.primary : theme.textMuted,
-              opacity: isProcessing ? 0.7 : pressed ? 0.9 : 1,
-            },
-          ]}
-          onPress={handleAddCard}
-          disabled={isProcessing || !cardComplete}
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
         >
-          {isProcessing ? (
-            <View style={styles.processingRow}>
-              <ActivityIndicator color="#FFFFFF" size="small" />
-              <ThemedText style={[styles.submitButtonText, { marginLeft: Spacing.sm }]}>
-                Verifying Card...
-              </ThemedText>
-            </View>
-          ) : (
-            <ThemedText style={styles.submitButtonText}>Add Card</ThemedText>
-          )}
+          <Ionicons name="arrow-back-outline" size={20} color={theme.primary} />
+          <ThemedText style={[styles.backButtonText, { color: theme.primary }]}>
+            Back to Wallet
+          </ThemedText>
         </Pressable>
-
-        <View style={styles.securityNote}>
-          <Ionicons name="shield-checkmark-outline" size={18} color={theme.success} />
-          <ThemedText style={[styles.securityText, { color: theme.textMuted }]}>
-            PCI DSS Level 1 compliant. Payments powered by Stripe.
-          </ThemedText>
-        </View>
-
-        <View style={styles.acceptedCards}>
-          <ThemedText style={[styles.acceptedLabel, { color: theme.textMuted }]}>
-            Accepted cards
-          </ThemedText>
-          <View style={styles.cardLogos}>
-            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
-              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>VISA</ThemedText>
-            </View>
-            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
-              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>MC</ThemedText>
-            </View>
-            <View style={[styles.cardLogo, { backgroundColor: theme.backgroundDefault }]}>
-              <ThemedText style={[styles.cardLogoText, { color: theme.text }]}>AMEX</ThemedText>
-            </View>
-          </View>
-        </View>
-      </KeyboardAwareScrollViewCompat>
+      </View>
     </ThemedView>
   );
 }
@@ -227,105 +128,104 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: Spacing.lg,
   },
-  cardPreview: {
-    height: 200,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing["2xl"],
-    marginBottom: Spacing["3xl"],
-    justifyContent: "space-between",
-  },
-  cardChip: {
-    width: 40,
-    height: 30,
-    backgroundColor: "rgba(255, 255, 255, 0.3)",
-    borderRadius: 4,
-  },
-  cardNumber: {
-    ...Typography.h3,
-    color: "#FFFFFF",
-    letterSpacing: 2,
-  },
-  cardDetails: {
+  infoCard: {
     flexDirection: "row",
-    justifyContent: "space-between",
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    marginBottom: Spacing["2xl"],
+    gap: Spacing.md,
+    alignItems: "flex-start",
   },
-  cardLabel: {
-    ...Typography.small,
-    color: "rgba(255, 255, 255, 0.7)",
+  infoCardText: {
+    flex: 1,
+  },
+  infoTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
     marginBottom: Spacing.xs,
   },
-  cardValue: {
-    ...Typography.bodyMedium,
-    color: "#FFFFFF",
-    fontWeight: "600",
-    textTransform: "uppercase",
-  },
-  form: {
-    marginBottom: Spacing["2xl"],
-  },
-  label: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
-    marginBottom: Spacing.sm,
-  },
-  cardFieldContainer: {
-    borderRadius: BorderRadius.sm,
-    borderWidth: 1,
-    overflow: "hidden",
-  },
-  cardField: {
-    width: "100%",
-    height: 50,
-  },
-  cardFieldHint: {
+  infoSubtitle: {
     ...Typography.small,
-    marginTop: Spacing.sm,
     lineHeight: 18,
   },
-  submitButton: {
-    height: Spacing.buttonHeight,
-    borderRadius: BorderRadius.sm,
+  optionCard: {
+    padding: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.md,
+  },
+  optionIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: Spacing.lg,
   },
-  submitButtonText: {
-    ...Typography.button,
-    color: "#FFFFFF",
+  optionInfo: {
+    flex: 1,
   },
-  processingRow: {
-    flexDirection: "row",
-    alignItems: "center",
+  optionTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+    marginBottom: Spacing.xs,
   },
-  securityNote: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing["2xl"],
-    gap: Spacing.sm,
-  },
-  securityText: {
+  optionSubtitle: {
     ...Typography.small,
-  },
-  acceptedCards: {
-    alignItems: "center",
-  },
-  acceptedLabel: {
-    ...Typography.caption,
+    lineHeight: 18,
     marginBottom: Spacing.sm,
   },
-  cardLogos: {
+  statusBadge: {
     flexDirection: "row",
-    gap: Spacing.sm,
+    alignItems: "center",
+    alignSelf: "flex-start",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.full,
+    gap: 6,
   },
-  cardLogo: {
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    borderRadius: BorderRadius.xs,
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
-  cardLogoText: {
-    ...Typography.caption,
+  statusText: {
+    ...Typography.small,
+    fontWeight: "600",
+  },
+  feeSection: {
+    marginTop: Spacing.lg,
+    marginBottom: Spacing["2xl"],
+  },
+  feeSectionTitle: {
+    ...Typography.bodyMedium,
     fontWeight: "700",
-    letterSpacing: 1,
+    marginBottom: Spacing.md,
+  },
+  feeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingVertical: Spacing.md,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  feeLabel: {
+    ...Typography.body,
+  },
+  feeValue: {
+    ...Typography.body,
+    fontWeight: "600",
+  },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+  },
+  backButtonText: {
+    ...Typography.body,
+    fontWeight: "600",
   },
 });
