@@ -27,14 +27,6 @@ export default function AddPaymentMethodScreen() {
       status: "Always available",
     },
     {
-      id: "card",
-      title: "Card Payment",
-      subtitle: "Pay securely with any debit or credit card via NOWPayments checkout. Visa, Mastercard, and more accepted.",
-      icon: "card-outline" as const,
-      color: "#4F46E5",
-      status: "Available",
-    },
-    {
       id: "usdt",
       title: "USDT (Crypto)",
       subtitle: "Pay with USDT stablecoin. Low fees (0.5%), fast transactions, powered by NOWPayments.",
@@ -62,7 +54,7 @@ export default function AddPaymentMethodScreen() {
               Secure Payments
             </ThemedText>
             <ThemedText style={[styles.infoSubtitle, { color: theme.textSecondary }]}>
-              All card and crypto payments are processed securely through NOWPayments. Your payment details are never stored on our servers.
+              All crypto payments are processed securely through NOWPayments. Your payment details are never stored on our servers.
             </ThemedText>
           </View>
         </View>
@@ -96,10 +88,6 @@ export default function AddPaymentMethodScreen() {
           <View style={[styles.feeRow, { borderBottomColor: theme.border }]}>
             <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>Cash</ThemedText>
             <ThemedText style={[styles.feeValue, { color: Colors.travonyGreen }]}>No fees</ThemedText>
-          </View>
-          <View style={[styles.feeRow, { borderBottomColor: theme.border }]}>
-            <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>Card</ThemedText>
-            <ThemedText style={[styles.feeValue, { color: theme.textPrimary }]}>0.5% processing fee</ThemedText>
           </View>
           <View style={styles.feeRow}>
             <ThemedText style={[styles.feeLabel, { color: theme.textSecondary }]}>USDT</ThemedText>
