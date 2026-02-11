@@ -11,7 +11,6 @@ import {
   Image,
 } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
@@ -44,7 +43,6 @@ function formatDate(dateString: string): string {
 
 export default function RideTruthScreen() {
   const headerHeight = useHeaderHeight();
-  const tabBarHeight = useBottomTabBarHeight();
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
@@ -62,7 +60,7 @@ export default function RideTruthScreen() {
     queryKey: ["/api/truth/consent"],
   });
 
-  const hasConsented = consentData?.consented === true;
+  const hasConsented = consentData?.hasConsent === true || consentData?.consented === true;
 
   const { data: myRides, isLoading: ridesLoading } = useQuery<any>({
     queryKey: ["/api/truth/my-rides"],
@@ -295,7 +293,7 @@ export default function RideTruthScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: tabBarHeight + Spacing.xl,
+        paddingBottom: insets.bottom + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
       scrollIndicatorInsets={{ bottom: insets.bottom }}

@@ -505,6 +505,8 @@ export default function BookingBottomSheet({
       };
       if (errorMessage.includes("401") || errorMessage.toLowerCase().includes("token") || errorMessage.toLowerCase().includes("expired")) {
         showError("Session Expired", "Your session has expired. Please sign in again to book a ride.");
+      } else if (errorMessage.includes("too small") || errorMessage.includes("AMOUNT_TOO_SMALL")) {
+        showError("Fare Too Small for USDT", "This ride fare is below the minimum for crypto payment. Please select Cash or Wallet instead.");
       } else {
         showError("Error", errorMessage);
       }

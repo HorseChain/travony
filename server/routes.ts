@@ -868,9 +868,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Drivers and admins can update more fields
         Object.assign(allowedUpdates, req.body);
         
-        // Convert completedAt string to Date object for Drizzle timestamp column
+        // Convert date strings to Date objects for Drizzle timestamp columns
         if (allowedUpdates.completedAt && typeof allowedUpdates.completedAt === 'string') {
           allowedUpdates.completedAt = new Date(allowedUpdates.completedAt);
+        }
+        if (allowedUpdates.cancelledAt && typeof allowedUpdates.cancelledAt === 'string') {
+          allowedUpdates.cancelledAt = new Date(allowedUpdates.cancelledAt);
+        }
+        if (allowedUpdates.startedAt && typeof allowedUpdates.startedAt === 'string') {
+          allowedUpdates.startedAt = new Date(allowedUpdates.startedAt);
         }
         
         // If driver is accepting a pending ride, assign themselves to it
@@ -949,6 +955,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let paymentStatus = "completed";
           let paymentMethod = (ride as any).paymentMethod || "cash";
           
+          const driverShare = fare * 0.90;
+          const platformFee = fare * 0.10;
+          
           if (paymentMethod === "wallet") {
             const balance = parseFloat(user.walletBalance || "0");
             if (balance >= fare) {
@@ -958,30 +967,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 userId: ride.customerId,
                 rideId: ride.id,
                 type: "ride_payment",
-                amount: fare.toFixed(2),
+                amount: (-fare).toFixed(2),
                 status: "completed",
                 description: `Payment for ride to ${ride.dropoffAddress}`,
+                completedAt: new Date(),
+              });
+              
+              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+              await storage.createWalletTransaction({
+                id: uuidv4(),
+                driverId: ride.driverId,
+                rideId: ride.id,
+                type: "ride_payment",
+                amount: driverShare.toFixed(2),
+                status: "completed",
+                description: `Earnings from ride (wallet payment)`,
                 completedAt: new Date(),
               });
             } else {
               paymentStatus = "pending";
             }
-          }
-
-          {
-            const driverShare = fare * 0.90;
-            const platformFee = fare * 0.10;
-
+          } else if (paymentMethod === "usdt") {
             await storage.updateDriverWalletBalance(ride.driverId, driverShare);
-            
-            const driver = await storage.getDriver(ride.driverId);
-            if (driver) {
-              const currentEarnings = parseFloat(driver.totalEarnings || "0");
-              await storage.updateDriver(ride.driverId, {
-                totalEarnings: (currentEarnings + driverShare).toFixed(2),
-              });
-            }
-
             await storage.createWalletTransaction({
               id: uuidv4(),
               driverId: ride.driverId,
@@ -989,19 +996,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
               type: "ride_payment",
               amount: driverShare.toFixed(2),
               status: "completed",
-              description: `Earnings from ride`,
+              description: `Earnings from ride (USDT payment)`,
               completedAt: new Date(),
             });
+          } else {
+            await storage.updateDriverWalletBalance(ride.driverId, -platformFee);
+            await storage.createWalletTransaction({
+              id: uuidv4(),
+              driverId: ride.driverId,
+              rideId: ride.id,
+              type: "platform_fee",
+              amount: (-platformFee).toFixed(2),
+              status: "completed",
+              description: `Platform fee deducted (cash ride - driver collected full fare)`,
+              completedAt: new Date(),
+            });
+          }
 
+          if (paymentStatus === "completed") {
             await storage.createWalletTransaction({
               id: uuidv4(),
               rideId: ride.id,
               type: "platform_fee",
               amount: platformFee.toFixed(2),
               status: "completed",
-              description: `Platform fee`,
+              description: `Platform service fee (10%) - ${paymentMethod} ride`,
               completedAt: new Date(),
             });
+
+            await walletService.recordPlatformLedger({
+              type: "platform_fee_income",
+              amount: platformFee,
+              rideId: ride.id,
+              driverId: ride.driverId,
+              description: `10% service fee from ${paymentMethod} ride ${ride.id.substring(0, 8)}`,
+              currency: ride.currency || "AED",
+            });
+
+            const driver = await storage.getDriver(ride.driverId);
+            if (driver) {
+              const currentEarnings = parseFloat(driver.totalEarnings || "0");
+              await storage.updateDriver(ride.driverId, {
+                totalEarnings: (currentEarnings + driverShare).toFixed(2),
+                totalTrips: (driver.totalTrips || 0) + 1,
+              });
+            }
 
             try {
               const blockchainResult = await recordRideToBlockchain({
@@ -1038,8 +1077,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 completedAt: new Date().toISOString(),
               }).catch(err => console.log("Email send error:", err.message));
 
-              if (driver) {
-                const driverUser = await storage.getUser(driver.userId);
+              const driver2 = await storage.getDriver(ride.driverId);
+              if (driver2) {
+                const driverUser = await storage.getUser(driver2.userId);
                 if (driverUser) {
                   sendDriverEarningsEmail({
                     driverName: driverUser.name,
@@ -1060,7 +1100,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
               console.log("Blockchain recording (optional):", blockchainError.message);
             }
 
-            // Generate invoices for customer and driver
             try {
               await createRideInvoices(ride.id);
             } catch (invoiceError: any) {
@@ -2457,6 +2496,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Ride not found" });
       }
 
+      const existingPayment = await storage.getPaymentByRideId(ride.id);
+      if (existingPayment && existingPayment.status === "completed") {
+        return res.status(409).json({ 
+          code: "ALREADY_PAID",
+          message: "This ride has already been paid for" 
+        });
+      }
+
       const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
       const user = await storage.getUser(ride.customerId);
       if (!user) {
@@ -2477,13 +2524,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           userId: ride.customerId,
           rideId: ride.id,
           type: 'ride_payment',
-          amount: fare.toFixed(2),
+          amount: (-fare).toFixed(2),
           status: 'completed',
           description: `Payment for ride to ${ride.dropoffAddress}`,
           completedAt: new Date(),
         });
       } else if (paymentMethod === 'usdt') {
         try {
+          const minAmount = await nowPaymentsService.getMinimumPaymentAmount("usdttrc20");
+          const estimatedUsdt = fare / 3.67;
+          if (estimatedUsdt < minAmount) {
+            return res.status(400).json({
+              code: "AMOUNT_TOO_SMALL",
+              message: `This fare is too small for USDT payment (minimum ~${(minAmount * 3.67).toFixed(0)} AED). Please use cash or wallet instead.`,
+              minimumUsdt: minAmount,
+            });
+          }
+
           const orderId = `ride_${ride.id}_${Date.now()}`;
           const currency = (ride.currency || "AED").toLowerCase();
           
@@ -2501,15 +2558,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             cancelUrl: `${baseUrl}/payment-cancelled`,
           });
 
+          paymentStatus = 'pending_crypto';
+
           await storage.createWalletTransaction({
             id: uuidv4(),
             userId: ride.customerId,
             rideId: ride.id,
             type: 'ride_payment',
-            amount: fare.toFixed(2),
-            status: 'completed',
-            description: `USDT payment for ride to ${ride.dropoffAddress}`,
-            completedAt: new Date(),
+            amount: (-fare).toFixed(2),
+            status: 'pending',
+            description: `USDT payment pending for ride to ${ride.dropoffAddress}`,
           });
         } catch (paymentError: any) {
           console.error("NOWPayments ride payment error:", paymentError);
@@ -2529,54 +2587,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         method: paymentMethod,
         status: paymentStatus,
       });
-
-      if (ride.driverId && paymentStatus === 'completed') {
-        const driverShare = fare * 0.90;
-        const platformFee = fare * 0.10;
-        
-        await storage.updateDriverWalletBalance(ride.driverId, driverShare);
-        
-        // Update driver's total earnings
-        const currentDriver = await storage.getDriver(ride.driverId);
-        if (currentDriver) {
-          const currentEarnings = parseFloat(currentDriver.totalEarnings || "0");
-          await storage.updateDriver(ride.driverId, {
-            totalEarnings: (currentEarnings + driverShare).toFixed(2),
-            totalTrips: (currentDriver.totalTrips || 0) + 1,
-          });
-        }
-        
-        await storage.createWalletTransaction({
-          id: uuidv4(),
-          driverId: ride.driverId,
-          rideId: ride.id,
-          type: 'ride_payment',
-          amount: driverShare.toFixed(2),
-          status: 'completed',
-          description: `Earnings from ride to ${ride.dropoffAddress}`,
-          completedAt: new Date(),
-        });
-
-        // Record platform fee collection
-        await storage.createWalletTransaction({
-          id: uuidv4(),
-          rideId: ride.id,
-          type: 'platform_fee',
-          amount: platformFee.toFixed(2),
-          status: 'completed',
-          description: `Platform service fee (10%)`,
-          completedAt: new Date(),
-        });
-        
-        // Record in platform ledger for accounting
-        await walletService.recordPlatformLedger({
-          type: "platform_fee_income",
-          amount: platformFee,
-          rideId: ride.id,
-          description: `Service fee from ride ${ride.id.substring(0, 8)}`,
-          currency: ride.currency || "AED",
-        });
-      }
 
       res.json({ success: true, payment });
     } catch (error: any) {
@@ -3491,8 +3501,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const userId = parts[1];
           const amount = payload.price_amount || payload.outcome_amount;
           if (amount) {
-            await walletService.topUpWallet(userId, amount, "AED");
+            await walletService.topUpWallet(userId, parseFloat(amount), "AED");
             console.log(`Wallet topped up via NOWPayments: userId=${userId}, amount=${amount}`);
+          }
+        } else if (parts[0] === "ride" && parts[1]) {
+          const rideId = parts[1];
+          const ride = await storage.getRide(rideId);
+          if (ride && ride.driverId) {
+            const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
+            const driverShare = fare * 0.90;
+            const platformFee = fare * 0.10;
+
+            const existingPayment = await storage.getPaymentByRideId(rideId);
+            if (existingPayment && existingPayment.status !== "completed") {
+              await storage.updatePayment(existingPayment.id, { status: "completed" });
+
+              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+              await storage.createWalletTransaction({
+                id: uuidv4(),
+                driverId: ride.driverId,
+                rideId: ride.id,
+                type: "ride_payment",
+                amount: driverShare.toFixed(2),
+                status: "completed",
+                description: `Earnings from USDT ride payment`,
+                completedAt: new Date(),
+              });
+
+              await storage.createWalletTransaction({
+                id: uuidv4(),
+                rideId: ride.id,
+                type: "platform_fee",
+                amount: platformFee.toFixed(2),
+                status: "completed",
+                description: `Platform fee (10%) from USDT ride`,
+                completedAt: new Date(),
+              });
+
+              await walletService.recordPlatformLedger({
+                type: "platform_fee_income",
+                amount: platformFee,
+                rideId: ride.id,
+                driverId: ride.driverId,
+                description: `10% fee from USDT ride ${ride.id.substring(0, 8)}`,
+                currency: ride.currency || "AED",
+              });
+
+              const driver = await storage.getDriver(ride.driverId);
+              if (driver) {
+                const currentEarnings = parseFloat(driver.totalEarnings || "0");
+                await storage.updateDriver(ride.driverId, {
+                  totalEarnings: (currentEarnings + driverShare).toFixed(2),
+                  totalTrips: (driver.totalTrips || 0) + 1,
+                });
+              }
+
+              console.log(`USDT ride payment confirmed: rideId=${rideId}, driverShare=${driverShare}, platformFee=${platformFee}`);
+            }
           }
         }
       }
@@ -4244,16 +4309,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
             walletBalance: (currentBalance + amount).toString(),
           });
 
-          // Record transaction
           await storage.createWalletTransaction({
             id: uuidv4(),
             driverId: ride.driverId,
             rideId: ride.id,
-            type: "ride_payment",
+            type: "tip",
             amount: amount.toString(),
             currency: ride.currency || "AED",
             status: "completed",
-            description: `Tip from rider for ride ${ride.id.substring(0, 8)}`,
+            description: `Tip from rider (100% yours, no platform cut)`,
+            completedAt: new Date(),
           });
         }
       }

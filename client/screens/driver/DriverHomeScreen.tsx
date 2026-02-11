@@ -288,9 +288,6 @@ export default function DriverHomeScreen() {
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
             <ThemedText style={styles.searchingText}>Searching for ride requests...</ThemedText>
-            <ThemedText style={{ fontSize: 10, marginTop: 4, opacity: 0.6 }}>
-              [DEBUG: {pendingRides?.length ?? 0} rides, {pendingRidesLoading ? 'loading' : 'ready'}{pendingRidesError ? `, err: ${pendingRidesError.message}` : ''}]
-            </ThemedText>
           </View>
         </View>
       )}

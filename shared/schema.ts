@@ -19,7 +19,8 @@ export const transactionTypeEnum = pgEnum("transaction_type", [
   "guarantee_payout",
   "directional_premium",
   "accountability_credit",
-  "ride_fare_debit"
+  "ride_fare_debit",
+  "tip"
 ]);
 export const transactionStatusEnum = pgEnum("transaction_status", ["pending", "completed", "failed", "cancelled"]);
 export const payoutStatusEnum = pgEnum("payout_status", ["pending", "processing", "completed", "failed"]);

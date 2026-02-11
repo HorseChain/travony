@@ -36,7 +36,7 @@ async function getPlatformBalance(): Promise<number> {
   return income - expenses;
 }
 
-async function recordPlatformLedger(entry: {
+export async function recordPlatformLedger(entry: {
   type: "platform_fee_income" | "guarantee_payout" | "accountability_payout" | "operational_expense" | "adjustment";
   amount: number;
   currency?: string;
