@@ -20,19 +20,19 @@ import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import RideMap from "@/components/RideMap";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
+import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "ActiveRide">;
 type RouteProps = RouteProp<HomeStackParamList, "ActiveRide">;
 
 const statusMessages: Record<string, { title: string; subtitle: string; icon: string }> = {
-  pending: { title: "Finding your driver", subtitle: "Please wait while we find a driver nearby", icon: "search" },
-  accepted: { title: "Driver assigned", subtitle: "Your driver is on the way to pick you up", icon: "user-check" },
-  arriving: { title: "Driver arriving", subtitle: "Your driver will arrive shortly", icon: "navigation" },
-  started: { title: "Ride in progress", subtitle: "Enjoy your ride", icon: "location-outline" },
-  in_progress: { title: "Ride in progress", subtitle: "Enjoy your ride", icon: "location-outline" },
-  completed: { title: "Ride completed", subtitle: "Thank you for riding with Travony", icon: "checkmark-circle-outline" },
+  pending: { title: "Optimizing your route", subtitle: "Matching with the ideal vehicle", icon: "search" },
+  accepted: { title: "Route optimized", subtitle: "Vehicle assigned and approaching", icon: "checkmark-circle-outline" },
+  arriving: { title: "Vehicle arriving", subtitle: "Your vehicle will arrive shortly", icon: "navigate-outline" },
+  started: { title: "Route in progress", subtitle: "Enjoy your journey", icon: "location-outline" },
+  in_progress: { title: "Route in progress", subtitle: "Enjoy your journey", icon: "location-outline" },
+  completed: { title: "Route completed", subtitle: "Thank you for travelling with Travony", icon: "checkmark-circle-outline" },
 };
 
 interface Ride {
@@ -149,11 +149,11 @@ export default function ActiveRideScreen() {
     onSuccess: async (data: any) => {
       try {
         await Share.share({
-          message: `Track my Travony ride in real-time: ${data.shareUrl}`,
-          title: "Share My Ride",
+          message: `Track my Travony journey in real-time: ${data.shareUrl}`,
+          title: "Share My Journey",
         });
       } catch (error) {
-        Alert.alert("Sharing failed", "Unable to share ride details");
+        Alert.alert("Sharing failed", "Unable to share journey details");
       }
     },
     onError: (error: any) => {
@@ -167,8 +167,8 @@ export default function ActiveRideScreen() {
 
   const handleCancelRide = () => {
     Alert.alert(
-      "Cancel Ride",
-      "Are you sure you want to cancel this ride? Cancellation fees may apply.",
+      "Cancel Route",
+      "Are you sure you want to cancel? Cancellation fees may apply.",
       [
         { text: "No", style: "cancel" },
         {
@@ -252,6 +252,12 @@ export default function ActiveRideScreen() {
             <View style={[styles.etaBadge, { backgroundColor: theme.primary }]}>
               <Ionicons name="time-outline" size={14} color="#FFFFFF" />
               <ThemedText style={styles.etaBadgeText}>{eta} min</ThemedText>
+            </View>
+          ) : null}
+          {ride?.status !== "completed" && ride?.status !== "pending" ? (
+            <View style={styles.etaIntelligence}>
+              <View style={styles.etaIntelDot} />
+              <ThemedText style={[styles.etaIntelText, { color: theme.textMuted }]}>ETA Intelligence: Active</ThemedText>
             </View>
           ) : null}
         </Card>
@@ -379,7 +385,7 @@ export default function ActiveRideScreen() {
             onPress={handleCancelRide}
           >
             <ThemedText style={[styles.cancelButtonText, { color: theme.error }]}>
-              Cancel Ride
+              Cancel Route
             </ThemedText>
           </Pressable>
         ) : null}
@@ -631,5 +637,23 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     ...Typography.button,
+  },
+  etaIntelligence: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.sm,
+    gap: 6,
+  },
+  etaIntelDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: Colors.travonyGreen,
+  },
+  etaIntelText: {
+    fontSize: 10,
+    fontWeight: "400",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
 });
