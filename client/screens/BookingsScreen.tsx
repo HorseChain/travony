@@ -40,11 +40,11 @@ const statusColors: Record<string, string> = {
 const statusLabels: Record<string, string> = {
   completed: "Completed",
   cancelled: "Cancelled",
-  pending: "Pending",
-  accepted: "Driver Assigned",
-  arriving: "Driver Arriving",
-  started: "In Progress",
-  in_progress: "In Progress",
+  pending: "Matching",
+  accepted: "Vehicle Assigned",
+  arriving: "Vehicle Approaching",
+  started: "In Transit",
+  in_progress: "In Transit",
 };
 
 export default function BookingsScreen() {
