@@ -241,7 +241,7 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
     <tr>
       <td style="background-color: #00B14F; padding: 24px; text-align: center;">
         <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Travony</h1>
-        <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">Ride Completed - Earnings Summary</p>
+        <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">Route Completed - Yield Summary</p>
       </td>
     </tr>
     
@@ -351,7 +351,7 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
     await transporter.sendMail({
       from: `"Travony" <${process.env.SMTP_USER}>`,
       to: data.driverEmail,
-      subject: `Ride Completed - You Earned AED ${data.earnings}`,
+      subject: `Route Completed - Yield: AED ${data.earnings}`,
       html: htmlContent,
     });
     console.log(`Driver earnings email sent to ${data.driverEmail}`);
