@@ -7,11 +7,9 @@ export function getApiUrl(): string {
   let host = process.env.EXPO_PUBLIC_DOMAIN;
 
   if (!host) {
-    // Fallback to production URL for Expo Go
     host = "travony.replit.app";
   }
 
-  // Remove protocol if already present
   if (host.startsWith("http://") || host.startsWith("https://")) {
     host = host.replace(/^https?:\/\//, "");
   }
@@ -29,25 +27,87 @@ async function getAuthToken(): Promise<string | null> {
   }
 }
 
+export class ApiError extends Error {
+  code: string;
+  statusCode: number;
+  details?: Record<string, any>;
+
+  constructor(message: string, code: string, statusCode: number, details?: Record<string, any>) {
+    super(message);
+    this.name = "ApiError";
+    this.code = code;
+    this.statusCode = statusCode;
+    this.details = details;
+  }
+
+  get isNetworkError(): boolean {
+    return this.code === "NETWORK_ERROR";
+  }
+
+  get isAuthError(): boolean {
+    return this.statusCode === 401 || this.statusCode === 403;
+  }
+
+  get isValidation(): boolean {
+    return this.code === "VALIDATION_ERROR";
+  }
+
+  get isServerError(): boolean {
+    return this.statusCode >= 500;
+  }
+
+  get userMessage(): string {
+    return USER_FRIENDLY_MESSAGES[this.code] || this.message;
+  }
+}
+
+const USER_FRIENDLY_MESSAGES: Record<string, string> = {
+  NETWORK_ERROR: "Unable to connect. Please check your internet and try again.",
+  AUTHENTICATION_ERROR: "Please sign in to continue.",
+  AUTHORIZATION_ERROR: "You don't have permission for this action.",
+  NOT_FOUND: "The requested item was not found.",
+  VALIDATION_ERROR: "Please check your input and try again.",
+  CONFLICT: "This action conflicts with existing data.",
+  RATE_LIMIT: "Too many requests. Please wait a moment and try again.",
+  EXTERNAL_SERVICE_ERROR: "A service is temporarily unavailable. Please try again shortly.",
+  PAYMENT_ERROR: "Payment could not be processed. Please try again.",
+  BLOCKCHAIN_ERROR: "Blockchain verification is temporarily unavailable.",
+  RIDE_ERROR: "There was an issue with the ride request.",
+  INTERNAL_ERROR: "Something went wrong. Please try again.",
+};
+
+export function getErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    return error.userMessage;
+  }
+  if (error instanceof TypeError && error.message === "Network request failed") {
+    return USER_FRIENDLY_MESSAGES.NETWORK_ERROR;
+  }
+  if (error instanceof Error) {
+    return error.message || "Something went wrong. Please try again.";
+  }
+  return "Something went wrong. Please try again.";
+}
+
 async function throwIfResNotOk(res: Response) {
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
-    
-    // Try to extract clean message from JSON error responses
+
     try {
       const errorData = JSON.parse(text);
-      // Extract just the message, not the code or raw JSON
-      const message = errorData.message || errorData.error || text;
-      throw new Error(message);
+      throw new ApiError(
+        errorData.message || errorData.error || "Request failed",
+        errorData.code || "UNKNOWN",
+        res.status,
+        errorData.details
+      );
     } catch (parseError) {
-      // If not JSON, use the raw text but make it cleaner
-      if (text.includes('"message"')) {
-        const match = text.match(/"message"\s*:\s*"([^"]+)"/);
-        if (match) {
-          throw new Error(match[1]);
-        }
-      }
-      throw new Error(text || "Something went wrong. Please try again.");
+      if (parseError instanceof ApiError) throw parseError;
+      throw new ApiError(
+        text || "Something went wrong. Please try again.",
+        "UNKNOWN",
+        res.status
+      );
     }
   }
 }
@@ -58,27 +118,36 @@ export async function apiRequest(
 ): Promise<any> {
   const baseUrl = getApiUrl();
   const url = new URL(route, baseUrl);
-  
+
   const token = await getAuthToken();
   const headers: HeadersInit = {
     ...options?.headers,
   };
-  
+
   if (token) {
     (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(url, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers,
+      credentials: "include",
+    });
+  } catch (networkError) {
+    throw new ApiError(
+      "Unable to connect to the server",
+      "NETWORK_ERROR",
+      0
+    );
+  }
 
   await throwIfResNotOk(res);
-  
+
   const text = await res.text();
   if (!text) return null;
-  
+
   try {
     return JSON.parse(text);
   } catch {
@@ -95,17 +164,26 @@ export const getQueryFn: <T>(options: {
     const baseUrl = getApiUrl();
     const path = queryKey.filter(k => k !== null && k !== undefined).join("/");
     const url = new URL(path, baseUrl);
-    
+
     const token = await getAuthToken();
     const headers: HeadersInit = {};
     if (token) {
       (headers as Record<string, string>)["Authorization"] = `Bearer ${token}`;
     }
 
-    const res = await fetch(url, {
-      headers,
-      credentials: "include",
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers,
+        credentials: "include",
+      });
+    } catch (networkError) {
+      throw new ApiError(
+        "Unable to connect to the server",
+        "NETWORK_ERROR",
+        0
+      );
+    }
 
     if (unauthorizedBehavior === "returnNull" && res.status === 401) {
       return null;
@@ -122,7 +200,13 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
-      retry: false,
+      retry: (failureCount, error) => {
+        if (error instanceof ApiError) {
+          if (error.isAuthError || error.isValidation) return false;
+          if (error.isNetworkError || error.isServerError) return failureCount < 2;
+        }
+        return false;
+      },
     },
     mutations: {
       retry: false,
