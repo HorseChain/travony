@@ -151,6 +151,32 @@ export default function ProfileScreen() {
 
       <Card style={styles.menuCard}>
         <MenuItem
+          icon="analytics-outline"
+          title="Network Analytics"
+          onPress={() => navigation.navigate("NetworkAnalytics" as any)}
+        />
+        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+        <MenuItem
+          icon="trophy-outline"
+          title="Community Prestige"
+          onPress={() => navigation.navigate("CommunityPrestige" as any)}
+        />
+        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+        <MenuItem
+          icon="chatbox-outline"
+          title="Share Feedback"
+          onPress={() => navigation.navigate("Feedback" as any)}
+        />
+      </Card>
+
+      <Card style={styles.menuCard}>
+        <MenuItem
+          icon="globe-outline"
+          title="About the Network"
+          onPress={() => navigation.navigate("AboutNetwork" as any)}
+        />
+        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+        <MenuItem
           icon="document-text-outline"
           title="Terms of Service"
           onPress={() => Alert.alert("Terms of Service", "Terms and conditions content here.")}
@@ -174,7 +200,7 @@ export default function ProfileScreen() {
       </Card>
 
       <ThemedText style={[styles.version, { color: theme.textMuted }]}>
-        Travony v1.0.0
+        Travony v4.3.0
       </ThemedText>
     </ScrollView>
   );
