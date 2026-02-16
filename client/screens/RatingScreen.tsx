@@ -20,7 +20,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useTheme } from "@/hooks/useTheme";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "Rating">;
@@ -191,6 +191,11 @@ export default function RatingScreen() {
             Skip for now
           </ThemedText>
         </Pressable>
+
+        <View style={styles.footprintCard}>
+          <Ionicons name="leaf-outline" size={16} color={Colors.travonyGreen} />
+          <ThemedText style={styles.footprintText}>Mobility Footprint Optimized</ThemedText>
+        </View>
       </KeyboardAwareScrollViewCompat>
     </ThemedView>
   );
@@ -286,5 +291,20 @@ const styles = StyleSheet.create({
   },
   skipButtonText: {
     ...Typography.body,
+  },
+  footprintCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
+  footprintText: {
+    fontSize: 11,
+    fontWeight: "400",
+    color: Colors.travonyGreen,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
 });
