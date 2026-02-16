@@ -1246,6 +1246,29 @@ export const carpoolSuggestions = pgTable("carpool_suggestions", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const rideEventTypeEnum = pgEnum("ride_event_type", [
+  "requested", "matched", "accepted", "driver_arriving", "driver_arrived", 
+  "started", "in_progress", "completed", "cancelled_rider", "cancelled_driver",
+  "cancelled_system", "fare_updated", "route_deviated", "payment_initiated",
+  "payment_completed", "payment_failed", "dispute_opened", "dispute_resolved",
+  "tip_added", "rating_submitted", "rematch_initiated", "rematch_completed",
+  "blockchain_recorded", "eta_updated"
+]);
+
+export const rideEventLog = pgTable("ride_event_log", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rideId: varchar("ride_id").references(() => rides.id).notNull(),
+  eventType: rideEventTypeEnum("event_type").notNull(),
+  actorId: varchar("actor_id"),
+  actorRole: text("actor_role"),
+  payload: text("payload"),
+  previousState: text("previous_state"),
+  newState: text("new_state"),
+  correlationId: varchar("correlation_id"),
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 export type Hub = typeof hubs.$inferSelect;
 export type Hotspot = typeof hotspots.$inferSelect;
 export type HubMessage = typeof hubMessages.$inferSelect;
@@ -1254,3 +1277,4 @@ export type HubCheckIn = typeof hubCheckIns.$inferSelect;
 export type CommunityPrestige = typeof communityPrestige.$inferSelect;
 export type UserFeedback = typeof userFeedback.$inferSelect;
 export type CarpoolSuggestion = typeof carpoolSuggestions.$inferSelect;
+export type RideEventLog = typeof rideEventLog.$inferSelect;
