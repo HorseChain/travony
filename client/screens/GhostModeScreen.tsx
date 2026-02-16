@@ -364,10 +364,10 @@ export default function GhostModeScreen() {
       setFareEstimate(null);
       setDropoffAddress("");
       setDropoffCoords(null);
-      showAlert("Ghost Ride Requested", "Your ride request has been broadcast via Bluetooth mesh. A nearby driver will pick it up.");
+      showAlert("Ghost Route Requested", "Your request has been broadcast via Bluetooth mesh. A nearby vehicle will be assigned.");
     },
     onError: (error: Error) => {
-      showAlert("Request Error", error.message || "Failed to request ghost ride.");
+      showAlert("Request Error", error.message || "Failed to request ghost route.");
     },
   });
 
@@ -378,10 +378,10 @@ export default function GhostModeScreen() {
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/ghost/rides"] });
       const syncedCount = data?.rides?.filter((r: any) => r.success).length || 0;
-      showAlert("Sync Complete", `${syncedCount} ride(s) synced successfully.`);
+      showAlert("Sync Complete", `${syncedCount} route(s) synced successfully.`);
     },
     onError: (error: Error) => {
-      showAlert("Sync Error", error.message || "Failed to sync rides.");
+      showAlert("Sync Error", error.message || "Failed to sync routes.");
     },
   });
 
@@ -395,11 +395,11 @@ export default function GhostModeScreen() {
 
   const handleRequestRide = () => {
     if (!fareEstimate) return;
-    const confirmMsg = `Estimated fare: ${fareEstimate.currency} ${fareEstimate.fare.toFixed(2)}\nDistance: ${fareEstimate.distance} km\nDuration: ~${fareEstimate.duration} min\n\nConfirm ghost ride request?`;
+    const confirmMsg = `Estimated fare: ${fareEstimate.currency} ${fareEstimate.fare.toFixed(2)}\nDistance: ${fareEstimate.distance} km\nDuration: ~${fareEstimate.duration} min\n\nConfirm ghost route request?`;
     if (Platform.OS === "web") {
       if (window.confirm(confirmMsg)) requestRideMutation.mutate();
     } else {
-      Alert.alert("Confirm Ghost Ride", confirmMsg, [
+      Alert.alert("Confirm Ghost Route", confirmMsg, [
         { text: "Cancel", style: "cancel" },
         { text: "Confirm", onPress: () => requestRideMutation.mutate() },
       ]);
@@ -508,7 +508,7 @@ export default function GhostModeScreen() {
           <ThemedText style={styles.infoTitle}>How Ghost Mode Works</ThemedText>
         </View>
         <ThemedText style={[styles.infoDescription, { color: theme.textSecondary }]}>
-          Ghost Mode enables ride-hailing even without internet. When you go offline, your device uses Bluetooth mesh networking to find nearby drivers.
+          Ghost Mode enables mobility access even without internet. When you go offline, your device uses Bluetooth mesh networking to find nearby vehicles.
         </ThemedText>
         <View style={styles.infoFeatures}>
           <View style={styles.infoFeatureRow}>
@@ -595,7 +595,7 @@ export default function GhostModeScreen() {
                 onChangeText={setDropoffAddress}
                 onEndEditing={() => geocodeDropoff(dropoffAddress)}
                 onSubmitEditing={() => geocodeDropoff(dropoffAddress)}
-                placeholder="Where are you going?"
+                placeholder="Enter destination"
                 placeholderTextColor={theme.textMuted}
                 returnKeyType="search"
               />
@@ -868,7 +868,7 @@ export default function GhostModeScreen() {
       <Card style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Ionicons name="time-outline" size={22} color={theme.primary} />
-          <ThemedText style={styles.sectionTitle}>Ghost Ride History</ThemedText>
+          <ThemedText style={styles.sectionTitle}>Ghost Route History</ThemedText>
         </View>
 
         {ridesLoading ? (
@@ -911,7 +911,7 @@ export default function GhostModeScreen() {
                   </View>
                   <View style={styles.rideItemDetails}>
                     <ThemedText style={[styles.rideCity, { color: theme.textSecondary }]}>
-                      {ride.cityName || "Ghost Ride"} - {VEHICLE_LABELS[ride.vehicleType] || ride.vehicleType}
+                      {ride.cityName || "Ghost Route"} - {VEHICLE_LABELS[ride.vehicleType] || ride.vehicleType}
                     </ThemedText>
                     <ThemedText style={styles.rideFare}>
                       {parseFloat(ride.estimatedFare).toFixed(2)}
