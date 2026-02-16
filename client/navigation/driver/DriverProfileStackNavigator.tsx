@@ -11,6 +11,10 @@ import DriverAppSettingsScreen from "@/screens/driver/DriverAppSettingsScreen";
 import DriverHelpScreen from "@/screens/driver/DriverHelpScreen";
 import RideTruthScreen from "@/screens/RideTruthScreen";
 import GhostModeScreen from "@/screens/GhostModeScreen";
+import AboutNetworkScreen from "@/screens/AboutNetworkScreen";
+import NetworkAnalyticsScreen from "@/screens/NetworkAnalyticsScreen";
+import CommunityPrestigeScreen from "@/screens/CommunityPrestigeScreen";
+import FeedbackScreen from "@/screens/FeedbackScreen";
 
 export type DriverProfileStackParamList = {
   DriverProfile: undefined;
@@ -23,6 +27,10 @@ export type DriverProfileStackParamList = {
   DriverHelp: undefined;
   DriverRideTruth: undefined;
   DriverGhostMode: undefined;
+  AboutNetwork: undefined;
+  NetworkAnalytics: undefined;
+  CommunityPrestige: undefined;
+  Feedback: undefined;
 };
 
 const Stack = createNativeStackNavigator<DriverProfileStackParamList>();
@@ -81,6 +89,26 @@ export default function DriverProfileStackNavigator() {
         name="DriverGhostMode"
         component={GhostModeScreen}
         options={{ headerTitle: "Ghost Mode" }}
+      />
+      <Stack.Screen
+        name="AboutNetwork"
+        component={AboutNetworkScreen}
+        options={{ headerTitle: "About the Network" }}
+      />
+      <Stack.Screen
+        name="NetworkAnalytics"
+        component={NetworkAnalyticsScreen}
+        options={{ headerTitle: "Network Analytics" }}
+      />
+      <Stack.Screen
+        name="CommunityPrestige"
+        component={CommunityPrestigeScreen}
+        options={{ headerTitle: "Community Prestige" }}
+      />
+      <Stack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{ headerTitle: "Share Feedback" }}
       />
     </Stack.Navigator>
   );
