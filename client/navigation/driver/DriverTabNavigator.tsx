@@ -70,7 +70,7 @@ export default function DriverTabNavigator() {
         name="DriverEarningsTab"
         component={DriverEarningsStackNavigator}
         options={{
-          title: "Earnings",
+          title: "Yield",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="cash-outline" size={size} color={color} />
           ),
