@@ -3,7 +3,7 @@
     "name": "T Driver",
     "slug": "trav-ride",
     "owner": "travoney_1",
-    "version": "4.3.0",
+    "version": "4.5.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon-driver.png",
     "scheme": "travony-driver",
@@ -29,7 +29,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.driver",
-      "versionCode": 44,
+      "versionCode": 46,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"
