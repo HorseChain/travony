@@ -11,40 +11,40 @@ import { Spacing, BorderRadius, Typography } from "@/constants/theme";
 
 const faqs = [
   {
-    question: "How do I book a ride?",
-    answer: "Open the app, enter your pickup and drop-off locations, select your preferred vehicle type and ride priority (Fastest, Cheapest, or Most Reliable), and tap 'Find a Ride'. Our Intent-Based Mobility system will match you with the best available driver. Once a driver accepts, you'll see their details and can track their arrival in real time.",
+    question: "How do I request a vehicle?",
+    answer: "Open the app, enter your pickup and destination, select your preferred vehicle type and priority (Fastest, Cheapest, or Most Reliable), and tap 'Request Movement'. Our intelligent matching system will connect you with the best available vehicle. Once assigned, you'll see the driver's details and can track their arrival in real time.",
   },
   {
     question: "How is my fare calculated?",
-    answer: "Your fare is calculated based on a base fare, distance traveled, and time taken. Dynamic pricing may apply during high-demand periods (capped at 1.5x during Growth phase and 2x during Mature phase). Weather and emergency boosts may also affect pricing. You always see the guaranteed fare before confirming your ride, and it will never increase after confirmation.",
+    answer: "Your fare is calculated based on a base fare, distance, and time. Dynamic pricing may apply during high-demand periods (capped at reasonable limits). Weather and emergency conditions may also affect pricing. You always see the guaranteed fare before confirming, and it will never increase after confirmation.",
   },
   {
     question: "What payment methods are accepted?",
-    answer: "We accept credit/debit cards via Stripe, Travony wallet balance, and USDT stablecoin cryptocurrency payments. You can manage your payment methods from the Wallet tab. All transactions are processed securely with industry-standard encryption.",
+    answer: "We accept cash, credit/debit cards, Travony wallet balance, and USDT stablecoin cryptocurrency payments. You can manage your payment methods from the Wallet tab. All transactions are processed securely.",
   },
   {
-    question: "How can I cancel a ride?",
-    answer: "You can cancel a ride from the active ride screen before the driver arrives. Cancellation charges may apply based on timing and distance. If a driver cancels on you, our Auto-Rematch system will automatically find you a new driver at the same guaranteed fare, with up to 3 rematch attempts.",
+    question: "How can I cancel a request?",
+    answer: "You can cancel from the active route screen before the vehicle arrives. Cancellation charges may apply based on timing and distance. If a driver cancels, our Auto-Rematch system will automatically find you a new vehicle at the same guaranteed fare, with up to 3 rematch attempts.",
   },
   {
     question: "What is the OTP for?",
-    answer: "The OTP (One-Time Password) is a security feature. Share it with your driver at pickup to verify you're entering the correct vehicle. This adds an extra layer of safety to every ride.",
+    answer: "The OTP (One-Time Password) is a security feature. Share it with your driver at pickup to verify you're entering the correct vehicle. This adds an extra layer of safety to every journey.",
   },
   {
     question: "What is the Ride Truth Engine?",
-    answer: "The Ride Truth Engine lets you compare ride-hailing platforms based on real user experiences. You can log rides from any provider (Uber, Careem, Bolt, etc.) and contribute to crowd-sourced reliability scores. Each provider is scored on price accuracy, pickup reliability, cancellation rates, route integrity, and support quality. Your data is always anonymous and you can delete it at any time.",
+    answer: "The Ride Truth Engine lets you compare mobility platforms based on real user experiences. You can log journeys from any provider (Uber, Careem, Bolt, etc.) and contribute to crowd-sourced reliability scores. Each provider is scored on price accuracy, pickup reliability, cancellation rates, route integrity, and support quality. Your data is always anonymous and you can delete it at any time.",
   },
   {
     question: "What is Ghost Mode?",
-    answer: "Ghost Mode enables ride-hailing even when you have no internet connection. It uses Bluetooth mesh networking to connect nearby riders and drivers. Fares are pre-calculated from cached pricing, and once you're back online, all ghost rides automatically sync with the server for payment processing and record keeping.",
+    answer: "Ghost Mode enables mobility access even when you have no internet connection. It uses Bluetooth mesh networking to connect nearby riders and vehicle owners. Fares are pre-calculated from cached pricing, and once you're back online, all ghost routes automatically sync with the server for payment processing and record keeping.",
   },
   {
-    question: "How does the 'Pay Me to Go Home' feature work?",
-    answer: "Drivers heading home can activate 'Going Home' mode. The system only sends them rides going in their direction. As a rider, you may see a 'Faster Pickup' option with a small premium for these direction-aligned drivers. The driver receives 80% of this premium.",
+    question: "How does direction-aligned routing work?",
+    answer: "Drivers heading home can activate 'Going Home' mode. The network only sends them requests going in their direction. As a rider, you may see a 'Faster Pickup' option with a small premium for these direction-aligned drivers. The driver receives 80% of this premium.",
   },
   {
     question: "What happens if I have a fare dispute?",
-    answer: "Our Fare Guardian AI system reviews disputes fairly and automatically. Go to your ride history, select the ride in question, and tap 'Report Issue'. You'll receive a resolution within 24 hours. If the dispute finds in your favour, you'll receive compensation credits directly to your wallet.",
+    answer: "Our Fare Guardian AI system reviews disputes fairly and automatically. Go to your movement history, select the journey in question, and tap 'Report Issue'. You'll receive a resolution within 24 hours. If the dispute finds in your favour, you'll receive compensation credits directly to your wallet.",
   },
   {
     question: "How do I delete my account and data?",
