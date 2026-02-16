@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travony - Facebook Posts</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+        .header {
+            background: linear-gradient(135deg, #1877F2, #0d5bbd);
+            padding: 24px 20px;
+            text-align: center;
+        }
+        .header h1 { color: white; font-size: 1.5rem; }
+        .header p { color: rgba(255,255,255,0.8); font-size: 0.9rem; margin-top: 6px; }
+        .container { max-width: 700px; margin: 0 auto; padding: 20px; }
+        .post-btn-main {
+            display: block;
+            width: 100%;
+            padding: 16px;
+            background: #1877F2;
+            color: white;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            cursor: pointer;
+            margin-bottom: 24px;
+            text-decoration: none;
+            text-align: center;
+        }
+        .post-btn-main:hover { background: #1565c0; }
+        .post-card {
+            background: #1a1a1a;
+            border-radius: 14px;
+            border: 1px solid #2a2a2a;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+        .post-card-header {
+            padding: 14px 18px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .post-card-header h3 { color: white; font-size: 0.95rem; }
+        .post-tag {
+            font-size: 0.7rem;
+            padding: 3px 10px;
+            border-radius: 6px;
+            background: rgba(24,119,242,0.2);
+            color: #5b9ef5;
+            font-weight: 600;
+        }
+        .post-body { padding: 18px; }
+        .post-text {
+            background: #111;
+            border-radius: 10px;
+            padding: 16px;
+            font-size: 0.9rem;
+            line-height: 1.8;
+            white-space: pre-wrap;
+            border: 1px solid #222;
+            color: #d0d0d0;
+            margin-bottom: 14px;
+        }
+        .post-footer {
+            padding: 12px 18px;
+            border-top: 1px solid #2a2a2a;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            flex: 1;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.3s;
+        }
+        .btn-copy { background: #333; color: white; }
+        .btn-copy:hover { background: #444; }
+        .btn-copy.copied { background: #166534; color: #4ade80; }
+        .btn-post { background: #1877F2; color: white; text-decoration: none; text-align: center; display: flex; align-items: center; justify-content: center; }
+        .btn-post:hover { background: #1565c0; }
+        .tip {
+            background: rgba(24,119,242,0.08);
+            border: 1px solid rgba(24,119,242,0.2);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+            font-size: 0.85rem;
+            color: #9ca3af;
+        }
+        .tip strong { color: #5b9ef5; }
+        .section-label {
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #666;
+            margin-bottom: 12px;
+            padding-left: 4px;
+        }
+        .toast {
+            position: fixed;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #166534;
+            color: #4ade80;
+            padding: 12px 28px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            display: none;
+            z-index: 999;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+        }
+        @media (max-width: 600px) {
+            .post-footer { flex-direction: column; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Facebook Posts for travoney</h1>
+        <p>Copy any post below, then paste it on your page</p>
+    </div>
+
+    <div class="container">
+        <div class="tip">
+            <strong>How to post:</strong> Click "Copy" on any post below, then click "Open Facebook Page" to go straight to your travoney page. Just paste and publish!
+        </div>
+
+        <a href="https://www.facebook.com/1830858107148476" target="_blank" class="post-btn-main">Open travoney Facebook Page</a>
+
+        <div class="section-label">Driver Recruitment Posts</div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>90% Earnings - The Hook</h3>
+                <span class="post-tag">HIGH IMPACT</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post1">Attention all drivers in UAE!
+
+What if I told you that you're giving away 25% of every fare you earn?
+
+Every ride. Every day. Every week. Other platforms take 20-25% commission.
+
+Travony takes just 10%. You keep 90%.
+
+Same rides. Same hours. Way more money.
+
+Do the math:
+15 rides/day x 35 AED avg x 6 days = 3,150 AED gross
+Other apps (75%): 2,362 AED/week
+Travony (90%): 2,835 AED/week
+
+That's 473 AED MORE every week. Over 24,000 AED extra per year!
+
+Download T Driver now and start keeping what you earn.
+
+https://travony.replit.app
+
+#Travony #DriverEarnings #UAE #Dubai #RideHailing #Keep90Percent #DriverLife #FairPay #GigEconomy #DriveAndEarn</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post1', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Pay Transparency</h3>
+                <span class="post-tag">TRUST BUILDER</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post2">Would you accept a job without knowing the pay?
+
+On other apps, you accept rides BLIND. You find out what you earned AFTER.
+
+On Travony, you see EVERYTHING before you tap accept:
+- Base fare
+- Distance pay
+- Time pay
+- Surge (if any)
+- YOUR exact 90% share
+
+No hidden fees. No surprises. No algorithms working against you.
+
+This is what fair looks like.
+
+Download T Driver today: https://travony.replit.app
+
+#Travony #PayTransparency #FairPay #DriverRights #NoHiddenFees #RideshareDriver #KnowYourWorth #UAE #Dubai</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post2', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Founding Driver Program</h3>
+                <span class="post-tag">EXCLUSIVE</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post3">FOUNDING DRIVERS WANTED - Limited spots!
+
+Be among the FIRST drivers on Travony. The perks last FOREVER:
+
+1. Priority matching - you get rides first
+2. Signup bonus - earn extra on your first rides  
+3. Permanent "Founding Driver" badge
+4. Referral earnings - get paid for every driver you bring in
+5. 90% of every fare - always
+
+This isn't a temporary promo. It's a permanent status for early believers.
+
+Early drivers built every platform. This time, the platform rewards them for it.
+
+Spots are limited. Join now: https://travony.replit.app
+
+#Travony #FoundingDriver #EarlyAdopter #DriverCommunity #BeFirst #UAE #Dubai #RideHailing #Opportunity</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post3', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Going Home Mode Feature</h3>
+                <span class="post-tag">FEATURE</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post4">What if you could get PAID to drive home?
+
+Travony's "Going Home" mode:
+1. Done for the day? Tap "Going Home"
+2. Set your destination
+3. Get matched with riders going YOUR direction
+4. Earn a premium fare on the way!
+
+You were driving home anyway. Now you get paid for it.
+
+80% of the direction premium goes straight to YOU.
+
+No other app has this. Only Travony.
+
+Download T Driver: https://travony.replit.app
+
+#Travony #GoingHome #SmartDriving #DriverFeatures #EarnMore #UAE #Dubai #Innovation</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post4', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Weekly Earnings Comparison</h3>
+                <span class="post-tag">NUMBERS</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post5">Let's do the math. Real numbers, no tricks.
+
+Driver doing 15 rides/day, 35 AED average, 6 days/week:
+
+WEEKLY:
+Other apps (75%): 2,362 AED
+Travony (90%): 2,835 AED
+Difference: +473 AED
+
+MONTHLY:
+Other apps: 9,450 AED
+Travony: 11,340 AED
+Difference: +1,890 AED
+
+YEARLY:
+Other apps: 113,400 AED
+Travony: 136,080 AED
+Difference: +22,680 AED
+
+Same car. Same hours. Same roads. 22,680 AED more in your pocket.
+
+The only difference? We take 10%, not 25%.
+
+Start earning what you deserve: https://travony.replit.app
+
+#Travony #EarningsComparison #DriverMath #MoreMoney #FairCommission #UAE #Dubai #RideHailing</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post5', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Driver Referral Program</h3>
+                <span class="post-tag">VIRAL</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post6">Earn money without even driving!
+
+Travony's Driver Referral Program:
+
+1. Share your referral code with other drivers
+2. They sign up and complete their first rides
+3. YOU earn a referral bonus!
+
+Your friends earn 90% of every fare.
+You earn a bonus for bringing them in.
+Everyone wins.
+
+The more drivers you refer, the more you earn. Simple.
+
+Join now and get your referral code: https://travony.replit.app
+
+#Travony #ReferralProgram #EarnMore #DriverCommunity #PassiveIncome #UAE #Dubai #ShareAndEarn</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post6', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>Crypto Payments (USDT)</h3>
+                <span class="post-tag">UNIQUE</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post7">Get paid in USDT - no bank delays!
+
+Travony is the first ride-hailing app to offer crypto payouts.
+
+Choose how YOU want to get paid:
+- Bank transfer (weekly)
+- USDT stablecoin (instant)
+
+Your money, your choice. No waiting. No bank fees.
+
+Blockchain-verified rides mean complete transparency. Every fare is recorded and verifiable.
+
+The future of ride-hailing is here.
+
+Join Travony: https://travony.replit.app
+
+#Travony #CryptoPayments #USDT #Blockchain #InstantPay #DriverPay #UAE #Dubai #FutureOfTransport</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post7', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div class="section-label" style="margin-top:30px;">Rider-Focused Posts</div>
+
+        <div class="post-card">
+            <div class="post-card-header">
+                <h3>For Riders - Better Drivers</h3>
+                <span class="post-tag">RIDERS</span>
+            </div>
+            <div class="post-body">
+                <div class="post-text" id="post8">What happens when drivers earn more?
+
+They're happier. They maintain their cars better. They provide better service. They stay on the platform.
+
+That's Travony.
+
+Our drivers keep 90% of every fare. So they're motivated to give you the best ride possible.
+
+Fair prices for riders. Fair pay for drivers. Everyone wins.
+
+Download T Ride and experience the difference: https://travony.replit.app
+
+#Travony #BetterRides #FairPricing #HappyDrivers #BetterService #UAE #Dubai #RideHailing</div>
+            </div>
+            <div class="post-footer">
+                <button class="btn btn-copy" onclick="copyPost('post8', this)">Copy Post</button>
+                <a href="https://www.facebook.com/1830858107148476" target="_blank" class="btn btn-post">Open Page & Paste</a>
+            </div>
+        </div>
+
+        <div style="text-align:center;padding:30px 0;color:#555;font-size:0.8rem;">
+            <a href="/campaign" style="color:#1877F2;text-decoration:none;">Back to Campaign Hub</a>
+        </div>
+    </div>
+
+    <div class="toast" id="toast">Copied to clipboard!</div>
+
+    <script>
+        function copyPost(id, btn) {
+            const text = document.getElementById(id).textContent.trim();
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                const toast = document.getElementById('toast');
+                toast.style.display = 'block';
+                setTimeout(() => {
+                    toast.style.display = 'none';
+                    btn.textContent = 'Copy Post';
+                    btn.classList.remove('copied');
+                }, 2500);
+            }).catch(() => {
+                const textarea = document.createElement('textarea');
+                textarea.value = text;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = 'Copy Post';
+                    btn.classList.remove('copied');
+                }, 2500);
+            });
+        }
+    </script>
+</body>
+</html>
