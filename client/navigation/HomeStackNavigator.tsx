@@ -6,6 +6,8 @@ import ConfirmRideScreen from "@/screens/ConfirmRideScreen";
 import ActiveRideScreen from "@/screens/ActiveRideScreen";
 import RatingScreen from "@/screens/RatingScreen";
 import InvoiceScreen from "@/screens/InvoiceScreen";
+import OpenClawScreen from "@/screens/OpenClawScreen";
+import HubDetailScreen from "@/screens/HubDetailScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type HomeStackParamList = {
@@ -25,6 +27,8 @@ export type HomeStackParamList = {
   ActiveRide: { rideId: string };
   Rating: { rideId: string; driverId: string; driverName: string };
   Invoice: { rideId: string };
+  OpenClaw: { variant: "rider" };
+  HubDetail: { hubId: string; hubName: string };
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -69,6 +73,16 @@ export default function HomeStackNavigator() {
           headerTitle: "Payment Receipt",
           presentation: "modal"
         }}
+      />
+      <Stack.Screen
+        name="OpenClaw"
+        component={OpenClawScreen}
+        options={{ headerTitle: "Network Hubs" }}
+      />
+      <Stack.Screen
+        name="HubDetail"
+        component={HubDetailScreen}
+        options={({ route }: any) => ({ headerTitle: route.params?.hubName || "Hub" })}
       />
     </Stack.Navigator>
   );
