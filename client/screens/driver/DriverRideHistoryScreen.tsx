@@ -139,10 +139,10 @@ export default function DriverRideHistoryScreen() {
     <View style={styles.emptyState}>
       <Ionicons name="time-outline" size={48} color={theme.textMuted} />
       <ThemedText style={[styles.emptyTitle, { color: theme.textSecondary }]}>
-        No ride history yet
+        No route history yet
       </ThemedText>
       <ThemedText style={[styles.emptySubtitle, { color: theme.textMuted }]}>
-        Your completed rides will appear here
+        Completed routes will appear here
       </ThemedText>
     </View>
   );
