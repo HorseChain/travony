@@ -252,6 +252,28 @@ export default function DriverHomeScreen() {
         </View>
       </View>
 
+      <Pressable
+        style={({ pressed }) => [
+          styles.networkHubsButton,
+          {
+            top: insets.top + Spacing.md + 100,
+            backgroundColor: theme.backgroundElevated,
+            borderColor: theme.border,
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+        onPress={() => navigation.navigate("OpenClaw", { variant: "driver" })}
+      >
+        <Ionicons name="grid-outline" size={20} color={Colors.travonyGreen} />
+        <View style={styles.networkHubsTextContainer}>
+          <ThemedText style={styles.networkHubsTitle}>Network Hubs</ThemedText>
+          <ThemedText style={[styles.networkHubsSubtitle, { color: theme.textMuted }]}>
+            Demand hubs & yield estimates
+          </ThemedText>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+      </Pressable>
+
       {isOnline && !incomingRequest && (
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
           <View style={styles.goingHomeContainer}>
@@ -767,5 +789,29 @@ const styles = StyleSheet.create({
     color: "rgba(255, 255, 255, 0.4)",
     letterSpacing: 2,
     textTransform: "uppercase",
+  },
+  networkHubsButton: {
+    position: "absolute",
+    left: Spacing.lg,
+    right: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: Spacing.md,
+  },
+  networkHubsTextContainer: {
+    flex: 1,
+  },
+  networkHubsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  networkHubsSubtitle: {
+    fontSize: 11,
+    fontWeight: "400",
+    marginTop: 2,
   },
 });
