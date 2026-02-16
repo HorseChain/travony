@@ -10,6 +10,71 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+interface QueuedEmail {
+  id: string;
+  to: string;
+  subject: string;
+  html: string;
+  text: string;
+  attempts: number;
+  maxAttempts: number;
+  lastError?: string;
+  createdAt: Date;
+}
+
+const emailQueue: QueuedEmail[] = [];
+let isProcessingQueue = false;
+
+async function processEmailQueue(): Promise<void> {
+  if (isProcessingQueue || emailQueue.length === 0) return;
+  isProcessingQueue = true;
+  
+  while (emailQueue.length > 0) {
+    const email = emailQueue[0];
+    try {
+      await transporter.sendMail({
+        from: `"Travony" <${process.env.SMTP_USER || 'noreply@travony.app'}>`,
+        to: email.to,
+        subject: email.subject,
+        html: email.html,
+        text: email.text,
+      });
+      emailQueue.shift();
+      console.log(`Email sent: ${email.subject} -> ${email.to}`);
+    } catch (error: any) {
+      email.attempts++;
+      email.lastError = error.message;
+      if (email.attempts >= email.maxAttempts) {
+        emailQueue.shift();
+        console.error(`Email permanently failed after ${email.maxAttempts} attempts: ${email.subject} -> ${email.to}: ${error.message}`);
+      } else {
+        const delay = Math.min(1000 * Math.pow(2, email.attempts), 30000);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+  }
+  isProcessingQueue = false;
+}
+
+function queueEmail(to: string, subject: string, html: string, text: string, maxAttempts: number = 3): string {
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  emailQueue.push({ id, to, subject, html, text, attempts: 0, maxAttempts, createdAt: new Date() });
+  processEmailQueue().catch(console.error);
+  return id;
+}
+
+function htmlToPlainText(html: string): string {
+  return html
+    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/\n\s*\n\s*\n/g, '\n\n')
+    .trim();
+}
+
 interface RideReceiptData {
   customerName: string;
   customerEmail: string;
@@ -551,4 +616,144 @@ export async function sendWeeklyFeedbackEmail(data: WeeklyFeedbackData): Promise
     console.error("Failed to send weekly feedback email:", error);
     return false;
   }
+}
+
+export async function sendDriverOnboardingEmail(data: {
+  driverName: string;
+  driverEmail: string;
+  cityName: string;
+  vehicleType: string;
+}): Promise<boolean> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
+  
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
+<tr><td style="background:#00B14F;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#fff;font-size:28px;">Travony</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Welcome to the Network</p>
+</td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="margin:0 0 24px;color:#333;font-size:18px;font-weight:600;">Congratulations, ${data.driverName}!</p>
+<p style="margin:0 0 16px;color:#666;font-size:14px;">Your vehicle has been verified and you're now part of the Travony Mobility Network in <strong>${data.cityName}</strong>.</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#E8F5E9;border-radius:12px;padding:20px;margin:24px 0;">
+<tr><td style="text-align:center;">
+<p style="margin:0 0 8px;color:#666;font-size:12px;">YOUR VEHICLE ASSET</p>
+<p style="margin:0;color:#00B14F;font-size:24px;font-weight:700;">${data.vehicleType}</p>
+<p style="margin:8px 0 0;color:#666;font-size:13px;">Ready for network activation</p>
+</td></tr></table>
+<p style="margin:0 0 16px;color:#333;font-size:14px;font-weight:600;">What's Next:</p>
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">1. Open the T Driver app</td></tr>
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">2. Activate your vehicle to join the network</td></tr>
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">3. Start earning yield from your first route</td></tr>
+</table>
+<p style="margin:24px 0 0;color:#999;font-size:12px;">90% of every fare goes directly to you. Always.</p>
+</td></tr>
+<tr><td style="background:#f5f5f5;padding:24px;text-align:center;">
+<p style="margin:0;color:#999;font-size:11px;">Travony Mobility Network - Movement has value.</p>
+</td></tr></table></body></html>`;
+
+  const text = htmlToPlainText(html);
+  queueEmail(data.driverEmail, `Welcome to Travony, ${data.driverName}!`, html, text);
+  return true;
+}
+
+export async function sendAccountVerificationEmail(data: {
+  userName: string;
+  userEmail: string;
+  verificationCode: string;
+}): Promise<boolean> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
+<tr><td style="background:#00B14F;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#fff;font-size:28px;">Travony</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Account Verification</p>
+</td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="margin:0 0 24px;color:#333;font-size:16px;">Hi ${data.userName},</p>
+<p style="margin:0 0 24px;color:#666;font-size:14px;">Use the code below to verify your Travony account:</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f0f0;border-radius:12px;padding:24px;margin:24px 0;text-align:center;">
+<tr><td>
+<p style="margin:0;color:#333;font-size:36px;font-weight:700;letter-spacing:8px;">${data.verificationCode}</p>
+</td></tr></table>
+<p style="margin:0 0 8px;color:#666;font-size:13px;">This code expires in 10 minutes.</p>
+<p style="margin:0;color:#999;font-size:12px;">If you didn't request this, please ignore this email.</p>
+</td></tr>
+<tr><td style="background:#f5f5f5;padding:24px;text-align:center;">
+<p style="margin:0;color:#999;font-size:11px;">Travony Mobility Network</p>
+</td></tr></table></body></html>`;
+
+  const text = htmlToPlainText(html);
+  queueEmail(data.userEmail, `Travony Verification Code: ${data.verificationCode}`, html, text);
+  return true;
+}
+
+export async function sendWeeklyYieldSummary(data: {
+  driverName: string;
+  driverEmail: string;
+  weekLabel: string;
+  totalYield: string;
+  totalRoutes: number;
+  avgYieldPerRoute: string;
+  topDay: string;
+  topDayYield: string;
+  networkRank?: number;
+  currency: string;
+}): Promise<boolean> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
+
+  const rankHtml = data.networkRank ? `<p style="margin:16px 0 0;color:#666;font-size:13px;">Network Rank: <strong>#${data.networkRank}</strong> in your city</p>` : '';
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
+<tr><td style="background:#00B14F;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#fff;font-size:28px;">Travony</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Weekly Yield Report - ${data.weekLabel}</p>
+</td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="margin:0 0 24px;color:#333;font-size:16px;">Hi ${data.driverName},</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#E8F5E9;border-radius:12px;padding:20px;margin:0 0 24px;text-align:center;">
+<tr><td>
+<p style="margin:0 0 4px;color:#666;font-size:12px;">TOTAL WEEKLY YIELD</p>
+<p style="margin:0;color:#00B14F;font-size:36px;font-weight:700;">${data.currency} ${data.totalYield}</p>
+${rankHtml}
+</td></tr></table>
+<table width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 24px;">
+<tr>
+<td width="33%" style="padding:8px;"><div style="background:#f9f9f9;border-radius:8px;padding:12px;text-align:center;">
+<p style="margin:0 0 4px;color:#666;font-size:11px;">Routes</p>
+<p style="margin:0;color:#333;font-size:20px;font-weight:700;">${data.totalRoutes}</p>
+</div></td>
+<td width="33%" style="padding:8px;"><div style="background:#f9f9f9;border-radius:8px;padding:12px;text-align:center;">
+<p style="margin:0 0 4px;color:#666;font-size:11px;">Avg/Route</p>
+<p style="margin:0;color:#333;font-size:20px;font-weight:700;">${data.currency} ${data.avgYieldPerRoute}</p>
+</div></td>
+<td width="33%" style="padding:8px;"><div style="background:#f9f9f9;border-radius:8px;padding:12px;text-align:center;">
+<p style="margin:0 0 4px;color:#666;font-size:11px;">Best Day</p>
+<p style="margin:0;color:#333;font-size:14px;font-weight:700;">${data.topDay}</p>
+<p style="margin:2px 0 0;color:#00B14F;font-size:12px;">${data.currency} ${data.topDayYield}</p>
+</div></td>
+</tr></table>
+<p style="margin:0;color:#999;font-size:12px;text-align:center;">Keep activating your vehicle to maximize weekly yield.</p>
+</td></tr>
+<tr><td style="background:#f5f5f5;padding:24px;text-align:center;">
+<p style="margin:0;color:#999;font-size:11px;">Travony - 90% to Vehicle Owners, Always</p>
+</td></tr></table></body></html>`;
+
+  const text = htmlToPlainText(html);
+  queueEmail(data.driverEmail, `Weekly Yield: ${data.currency} ${data.totalYield} from ${data.totalRoutes} routes`, html, text);
+  return true;
+}
+
+export function getEmailQueueStatus() {
+  return {
+    queueLength: emailQueue.length,
+    isProcessing: isProcessingQueue,
+    pending: emailQueue.map(e => ({ id: e.id, to: e.to, subject: e.subject, attempts: e.attempts, createdAt: e.createdAt })),
+  };
 }
