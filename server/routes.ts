@@ -84,6 +84,7 @@ import * as truthAggregation from "./truthAggregation";
 import * as truthRecommendation from "./truthRecommendation";
 import * as truthFraud from "./truthFraud";
 import * as ghostRideService from "./ghostRideService";
+import { openClawRouter } from "./hubRoutes";
 import type { Ride } from "@shared/schema";
 import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue } from "@shared/schema";
 import { db } from "./db";
@@ -482,10 +483,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Include userId and userRole in the stored object for finalize step
       pendingRegistrations.set(sessionToken, {
         ...pending,
-        userId: user.id,
-        userRole: user.role,
         expiresAt: new Date(Date.now() + 5 * 60 * 1000), // Extend for biometric setup
-      });
+      } as any);
 
       const token = await createSession(user.id, user.role);
 
@@ -2292,6 +2291,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/drivers/monthly-yield", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) {
+        return res.status(404).json({ message: "Driver not found" });
+      }
+      const earnings = await storage.getDriverEarnings(driver.id, "month");
+      const monthlyYield = earnings?.totalEarnings || "0.00";
+      res.json({ monthlyYield });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Admin routes - require admin role
   app.get("/api/admin/stats", requireAuth, requireRole("admin"), async (_req: any, res) => {
     try {
@@ -2640,7 +2653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
       
       const bonuses = transactions
-        .filter(t => t.type === "bonus" && t.status === "completed")
+        .filter(t => (t.type as string) === "bonus" && t.status === "completed")
         .reduce((sum, t) => sum + parseFloat(t.amount || "0"), 0);
       
       const withdrawals = payouts
@@ -2648,7 +2661,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
       
       const pendingPayouts = payouts
-        .filter(p => p.status === "pending" || p.status === "pending_bank_setup")
+        .filter(p => p.status === "pending" || (p.status as string) === "pending_bank_setup")
         .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
       
       res.json({
@@ -2732,7 +2745,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      let payoutStatus = "pending";
+      let payoutStatus: "pending" | "completed" | "failed" | "processing" = "pending";
 
       if (method === "usdt") {
         payoutStatus = "processing";
@@ -2960,12 +2973,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         photoFront,
         photoSide,
         verificationStatus,
-        aiConfidenceScore: aiResult?.overallConfidence,
-        aiVerificationNotes: aiResult?.notes?.join("; "),
+        aiConfidenceScore: aiResult?.confidence,
+        aiVerificationNotes: aiResult?.issues?.join("; "),
       };
 
       if (vehicle) {
-        vehicle = await storage.updateVehicle(vehicle.id, vehicleData);
+        vehicle = await storage.updateVehicle(vehicle.id!, vehicleData);
       } else {
         const { v4: uuidv4 } = await import("uuid");
         vehicle = await storage.createVehicle({
@@ -2980,8 +2993,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         verificationStatus,
         aiResult: aiResult ? {
           isValid: aiResult.isValid,
-          confidence: aiResult.overallConfidence,
-          notes: aiResult.notes,
+          confidence: aiResult.confidence,
+          notes: aiResult.issues,
         } : null,
       });
     } catch (error: any) {
@@ -4750,7 +4763,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Weekly feedback emails for drivers
   app.post("/api/admin/send-weekly-feedback", requireAuth, requireRole("admin"), async (req: any, res) => {
     try {
-      const drivers = await storage.getAllDrivers();
+      const driversResult = await storage.getAllDrivers();
       const weekEnd = new Date();
       const weekStart = new Date();
       weekStart.setDate(weekStart.getDate() - 7);
@@ -4758,7 +4771,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let sent = 0;
       let failed = 0;
       
-      for (const driver of drivers) {
+      for (const driver of driversResult.drivers) {
         if (driver.status !== "approved") continue;
         
         const user = await storage.getUser(driver.userId);
@@ -5156,6 +5169,489 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/admin", (req, res) => {
     res.sendFile("admin-dashboard.html", { root: "./server/templates" });
+  });
+
+  app.get("/delete-account", (req, res) => {
+    res.sendFile("data-deletion.html", { root: "./server/templates" });
+  });
+
+  app.get("/data-deletion", (req, res) => {
+    res.sendFile("data-deletion.html", { root: "./server/templates" });
+  });
+
+  app.get("/privacy", (req, res) => {
+    res.sendFile("privacy-policy.html", { root: "./server/templates" });
+  });
+
+  app.get("/terms", (req, res) => {
+    res.sendFile("terms-of-service.html", { root: "./server/templates" });
+  });
+
+  app.get("/support", (req, res) => {
+    res.sendFile("support.html", { root: "./server/templates" });
+  });
+
+  app.get("/drive", (req, res) => {
+    res.sendFile("drive-with-us.html", { root: "./server/templates" });
+  });
+
+  app.get("/drive-with-us", (req, res) => {
+    res.sendFile("drive-with-us.html", { root: "./server/templates" });
+  });
+
+  app.post("/api/driver-interest", async (req, res) => {
+    try {
+      const { name, phone, city, vehicleType, currentPlatform, referralCode } = req.body;
+      console.log("[Driver Interest]", { name, phone, city, vehicleType, currentPlatform, referralCode });
+      res.json({ success: true, message: "Interest registered successfully" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/telegram/setup", async (req, res) => {
+    try {
+      const telegramBot = await import("./telegramBot");
+      const webhookUrl = `https://travony.replit.app/api/webhook/telegram`;
+      const webhookSet = await telegramBot.setWebhook(webhookUrl);
+      const commandsSet = await telegramBot.setBotCommands();
+      res.json({ success: true, webhook: webhookSet, commands: commandsSet });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/telegram/broadcast", async (req, res) => {
+    try {
+      const { message } = req.body;
+      if (!message) return res.status(400).json({ message: "Message required" });
+      const telegramBot = await import("./telegramBot");
+      const sent = await telegramBot.broadcastCampaignMessage(message);
+      res.json({ success: true, sent });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/campaign", (req, res) => {
+    res.sendFile("campaign-hub.html", { root: "./server/templates" });
+  });
+
+  app.get("/api/meta/status", async (req, res) => {
+    const GRAPH_API_URL = "https://graph.facebook.com/v21.0";
+    const token = process.env.META_ACCESS_TOKEN;
+    const appId = process.env.META_APP_ID;
+    const appSecret = process.env.META_APP_SECRET;
+    const requiredPermissions = ["instagram_basic", "instagram_content_publish", "pages_show_list", "pages_read_engagement"];
+
+    if (!token) {
+      return res.json({
+        tokenValid: false,
+        tokenExpires: null,
+        userName: null,
+        pages: [],
+        instagramConnected: false,
+        instagramAccountId: null,
+        permissions: [],
+        missingPermissions: requiredPermissions,
+      });
+    }
+
+    try {
+      const [meRes, permRes, pagesRes] = await Promise.all([
+        fetch(`${GRAPH_API_URL}/me?fields=id,name&access_token=${token}`),
+        fetch(`${GRAPH_API_URL}/me/permissions?access_token=${token}`),
+        fetch(`${GRAPH_API_URL}/me/accounts?fields=id,name,instagram_business_account{id,username}&access_token=${token}`),
+      ]);
+
+      const meData = await meRes.json();
+      const permData = await permRes.json();
+      const pagesData = await pagesRes.json();
+
+      const tokenValid = !meData.error;
+      const userName = meData.name || null;
+
+      const grantedPermissions: string[] = [];
+      if (permData.data) {
+        for (const p of permData.data) {
+          if (p.status === "granted") grantedPermissions.push(p.permission);
+        }
+      }
+      const missingPermissions = requiredPermissions.filter(
+        (p) => !grantedPermissions.includes(p)
+      );
+
+      const pages: any[] = [];
+      let instagramConnected = false;
+      let instagramAccountId: string | null = null;
+
+      if (pagesData.data) {
+        for (const page of pagesData.data) {
+          const hasInstagram = !!page.instagram_business_account;
+          const igUsername = page.instagram_business_account?.username || null;
+          if (hasInstagram) {
+            instagramConnected = true;
+            instagramAccountId = page.instagram_business_account.id;
+          }
+          pages.push({ id: page.id, name: page.name, hasInstagram, igUsername });
+        }
+      }
+
+      let tokenExpires: string | null = null;
+      if (appId && appSecret) {
+        try {
+          const debugRes = await fetch(
+            `${GRAPH_API_URL}/debug_token?input_token=${token}&access_token=${appId}|${appSecret}`
+          );
+          const debugData = await debugRes.json();
+          if (debugData.data?.expires_at) {
+            tokenExpires = new Date(debugData.data.expires_at * 1000).toISOString();
+          }
+        } catch (e) {}
+      }
+
+      res.json({
+        appId: appId || null,
+        tokenValid,
+        tokenExpires,
+        userName,
+        pages,
+        instagramConnected,
+        instagramAccountId,
+        permissions: grantedPermissions,
+        missingPermissions,
+      });
+    } catch (error: any) {
+      res.json({
+        appId: appId || null,
+        tokenValid: false,
+        tokenExpires: null,
+        userName: null,
+        pages: [],
+        instagramConnected: false,
+        instagramAccountId: null,
+        permissions: [],
+        missingPermissions: requiredPermissions,
+        error: error.message,
+      });
+    }
+  });
+
+  app.get("/connect-instagram", (req, res) => {
+    res.sendFile("instagram-connect.html", { root: "./server/templates" });
+  });
+
+  app.get("/facebook-posts", (req, res) => {
+    res.sendFile("facebook-post.html", { root: "./server/templates" });
+  });
+
+  app.get("/facebook-login", (req, res) => {
+    const appId = process.env.META_APP_ID;
+    if (!appId) return res.send("META_APP_ID not configured");
+    const redirectUri = `https://travony.replit.app/facebook-callback`;
+    const scopes = "pages_show_list,pages_manage_posts,pages_read_engagement";
+    const url = `https://www.facebook.com/v21.0/dialog/oauth?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${scopes}&response_type=code&auth_type=rerequest`;
+    res.redirect(url);
+  });
+
+  app.get("/facebook-callback", async (req, res) => {
+    const code = req.query.code as string;
+    const error = req.query.error as string;
+    if (error) {
+      return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;"><h2 style="color:#ff6b6b;">Facebook Login Error</h2><p>${req.query.error_description || error}</p><a href="/facebook-login" style="color:#1877F2;">Try Again</a></body></html>`);
+    }
+    if (!code) {
+      return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;"><h2 style="color:#ff6b6b;">No authorization code received</h2><a href="/facebook-login" style="color:#1877F2;">Try Again</a></body></html>`);
+    }
+    const appId = process.env.META_APP_ID;
+    const appSecret = process.env.META_APP_SECRET;
+    if (!appId || !appSecret) {
+      return res.send("META_APP_ID or META_APP_SECRET not configured");
+    }
+    const redirectUri = `https://travony.replit.app/facebook-callback`;
+    try {
+      const tokenRes = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?client_id=${appId}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${appSecret}&code=${code}`);
+      const tokenData = await tokenRes.json() as any;
+      if (tokenData.error) {
+        return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;"><h2 style="color:#ff6b6b;">Token Error</h2><p>${tokenData.error.message}</p><a href="/facebook-login" style="color:#1877F2;">Try Again</a></body></html>`);
+      }
+      const userToken = tokenData.access_token;
+      const longRes = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${userToken}`);
+      const longData = await longRes.json() as any;
+      const longToken = longData.access_token || userToken;
+      const pagesRes = await fetch(`https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,fan_count,category&limit=100&access_token=${longToken}`);
+      const pagesData = await pagesRes.json() as any;
+      const ig = await import("./instagramService");
+      if (pagesData.data && pagesData.data.length > 0) {
+        const travoneyPage = pagesData.data.find((p: any) => p.name?.toLowerCase().includes("travon")) || pagesData.data[0];
+        let pageToken = travoneyPage.access_token;
+        try {
+          const longPageRes = await fetch(`https://graph.facebook.com/v21.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${pageToken}`);
+          const longPageData = await longPageRes.json() as any;
+          if (longPageData.access_token) pageToken = longPageData.access_token;
+        } catch (e) {}
+        ig.setPageToken(pageToken);
+        ig.setPageInfo(travoneyPage.id, travoneyPage.name);
+        const allPages = pagesData.data.map((p: any) => `${p.name} (${p.id}) - ${p.fan_count || 0} fans`).join("<br>");
+        return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;">
+          <h2 style="color:#4ade80;">Connected Successfully!</h2>
+          <p style="color:#b0b0b0;">Page: <strong style="color:white;">${travoneyPage.name}</strong> (ID: ${travoneyPage.id})</p>
+          <p style="color:#b0b0b0;">Fans: ${travoneyPage.fan_count || 'N/A'}</p>
+          <p style="color:#888;font-size:0.85rem;">All pages found:<br>${allPages}</p>
+          <br><a href="/campaign" style="color:#1877F2;font-size:1.1rem;">Go to Campaign Hub</a>
+        </body></html>`);
+      } else {
+        return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;">
+          <h2 style="color:#ff6b6b;">No Pages Found</h2>
+          <p style="color:#b0b0b0;">Your Facebook account doesn't have any pages, or you didn't select a page during login.</p>
+          <p style="color:#888;">Make sure you're logged into the Facebook account that manages the <strong>travoney</strong> page, and select it when prompted.</p>
+          <br><a href="/facebook-login" style="color:#1877F2;">Try Again</a>
+        </body></html>`);
+      }
+    } catch (err: any) {
+      return res.send(`<html><body style="background:#0f0f0f;color:white;font-family:sans-serif;padding:40px;text-align:center;"><h2 style="color:#ff6b6b;">Error</h2><p>${err.message}</p><a href="/facebook-login" style="color:#1877F2;">Try Again</a></body></html>`);
+    }
+  });
+
+  app.post("/api/facebook/save-page-token", async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token) return res.status(400).json({ success: false, error: "Token is required" });
+      const ig = await import("./instagramService");
+      const result = await ig.saveAndValidatePageToken(token);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/facebook/page-status", async (req, res) => {
+    try {
+      const ig = await import("./instagramService");
+      const result = await ig.getPageStatus();
+      res.json(result);
+    } catch (error: any) {
+      res.json({ connected: false, error: error.message });
+    }
+  });
+
+  app.post("/api/facebook/test-post", async (req, res) => {
+    try {
+      const { message } = req.body;
+      if (!message) return res.status(400).json({ success: false, error: "Message is required" });
+      const ig = await import("./instagramService");
+      const result = await ig.postToFacebookPage(message);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/facebook/post", async (req, res) => {
+    try {
+      const { message, link, imageUrl } = req.body;
+      if (!message) return res.status(400).json({ success: false, error: "Message is required" });
+      const ig = await import("./instagramService");
+      const result = await ig.postToFacebookPage(message, link, imageUrl);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/instagram/save-token", async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token) return res.status(400).json({ success: false, error: "Token is required" });
+      const ig = await import("./instagramService");
+      ig.setToken(token);
+
+      const refreshResult = await ig.refreshAccessToken();
+      const discoverResult = await ig.discoverInstagramAccount();
+
+      res.json({
+        success: true,
+        tokenExchanged: refreshResult.success,
+        instagramDiscovered: discoverResult.success,
+        igAccountId: discoverResult.igAccountId || null,
+        message: discoverResult.success
+          ? `Connected! Instagram account ${discoverResult.igAccountId} linked.`
+          : `Token saved but: ${discoverResult.error || "Could not find Instagram Business Account"}`
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/instagram/post", async (req, res) => {
+    try {
+      const { imageUrl, caption } = req.body;
+      if (!imageUrl || !caption) return res.status(400).json({ message: "imageUrl and caption required" });
+      const ig = await import("./instagramService");
+      const result = await ig.postImageToInstagram(imageUrl, caption);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/instagram/carousel", async (req, res) => {
+    try {
+      const { imageUrls, caption } = req.body;
+      if (!imageUrls || !caption) return res.status(400).json({ message: "imageUrls and caption required" });
+      const ig = await import("./instagramService");
+      const result = await ig.postCarouselToInstagram(imageUrls, caption);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/instagram/reel", async (req, res) => {
+    try {
+      const { videoUrl, caption } = req.body;
+      if (!videoUrl || !caption) return res.status(400).json({ message: "videoUrl and caption required" });
+      const ig = await import("./instagramService");
+      const result = await ig.postReelToInstagram(videoUrl, caption);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/instagram/refresh-token", async (req, res) => {
+    try {
+      const ig = await import("./instagramService");
+      const result = await ig.refreshAccessToken();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.get("/api/instagram/auth", async (req, res) => {
+    try {
+      const ig = await import("./instagramService");
+      const redirectUri = `https://travony.replit.app/api/instagram/callback`;
+      const authUrl = ig.getOAuthUrl(redirectUri);
+      if (!authUrl) return res.status(500).json({ error: "Meta App ID not configured" });
+      res.redirect(authUrl);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/instagram/callback", async (req, res) => {
+    try {
+      const { code, error: oauthError } = req.query;
+      if (oauthError) return res.status(400).send(`OAuth error: ${oauthError}`);
+      if (!code) return res.status(400).send("No authorization code received");
+
+      const ig = await import("./instagramService");
+      const redirectUri = `https://travony.replit.app/api/instagram/callback`;
+      const result = await ig.exchangeCodeForToken(code as string, redirectUri);
+
+      if (result.success && result.accessToken) {
+        const pageResult = await ig.saveAndValidatePageToken(result.accessToken);
+        const pageName = pageResult.pageName || "your account";
+
+        res.send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px;background:#f5f7fa;">
+          <div style="max-width:500px;margin:0 auto;background:white;padding:40px;border-radius:16px;box-shadow:0 2px 12px rgba(0,0,0,0.08);">
+          <h1 style="color:#25D366;font-size:1.5rem;">Facebook Connected!</h1>
+          <p style="color:#666;margin:12px 0;">Connected to <strong>${pageName}</strong></p>
+          <p style="color:#888;font-size:0.9rem;">${pageResult.error || "Page token saved and ready for posting."}</p>
+          <a href="/connect-instagram" style="display:inline-block;padding:12px 24px;background:#25D366;color:white;text-decoration:none;border-radius:8px;margin-top:20px;font-weight:600;">View Status</a>
+          <a href="/campaign" style="display:inline-block;padding:12px 24px;background:#1877F2;color:white;text-decoration:none;border-radius:8px;margin-top:20px;margin-left:8px;font-weight:600;">Campaign Hub</a>
+          </div>
+        </body></html>`);
+      } else {
+        res.status(500).send(`<html><body style="font-family:sans-serif;text-align:center;padding:60px;">
+          <h1 style="color:red;">Connection Failed</h1>
+          <p>${result.error}</p>
+          <a href="/connect-instagram">Try Again</a>
+        </body></html>`);
+      }
+    } catch (error: any) {
+      res.status(500).send(`Error: ${error.message}`);
+    }
+  });
+
+  app.get("/api/instagram/insights", async (req, res) => {
+    try {
+      const ig = await import("./instagramService");
+      const result = await ig.getInstagramInsights();
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/auth/tiktok", async (req, res) => {
+    try {
+      const tt = await import("./tiktokService");
+      const redirectUri = `https://travony.replit.app/api/auth/tiktok/callback`;
+      const authUrl = tt.getAuthUrl(redirectUri);
+      if (!authUrl) return res.status(500).json({ error: "TikTok not configured" });
+      res.json({ authUrl });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.get("/api/auth/tiktok/callback", async (req, res) => {
+    try {
+      const { code, error: authError } = req.query;
+      if (authError || !code) {
+        return res.redirect("/campaign?tiktok=error&msg=" + encodeURIComponent(String(authError || "No code")));
+      }
+      const tt = await import("./tiktokService");
+      const redirectUri = `https://travony.replit.app/api/auth/tiktok/callback`;
+      const result = await tt.exchangeCodeForToken(String(code), redirectUri);
+      if (result.success) {
+        res.redirect("/campaign?tiktok=connected");
+      } else {
+        res.redirect("/campaign?tiktok=error&msg=" + encodeURIComponent(result.error || "Failed"));
+      }
+    } catch (error: any) {
+      res.redirect("/campaign?tiktok=error&msg=" + encodeURIComponent(error.message));
+    }
+  });
+
+  app.get("/api/tiktok/status", async (req, res) => {
+    try {
+      const tt = await import("./tiktokService");
+      if (!tt.isConnected()) {
+        return res.json({ connected: false });
+      }
+      const info = await tt.getUserInfo();
+      res.json(info);
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.post("/api/tiktok/post-photo", async (req, res) => {
+    try {
+      const { imageUrls, title } = req.body;
+      if (!imageUrls || !title) return res.status(400).json({ error: "imageUrls and title required" });
+      const tt = await import("./tiktokService");
+      const result = await tt.postPhotoToTikTok(imageUrls, title);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  app.post("/api/tiktok/post-video", async (req, res) => {
+    try {
+      const { videoUrl, title } = req.body;
+      if (!videoUrl || !title) return res.status(400).json({ error: "videoUrl and title required" });
+      const tt = await import("./tiktokService");
+      const result = await tt.postVideoToTikTok(videoUrl, title);
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: error.message });
+    }
   });
 
   // Telegram Bot Webhook
@@ -6177,6 +6673,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: error.message });
     }
   });
+
+  app.use(openClawRouter);
 
   const httpServer = createServer(app);
 
