@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { View, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, RefreshControl } from "react-native";
+import { View, StyleSheet, FlatList, TextInput, Pressable, KeyboardAvoidingView, Platform, RefreshControl, ScrollView } from "react-native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import Animated, { FadeInDown, FadeInUp, SlideInRight } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -53,6 +53,13 @@ interface PrestigeInfo {
   rank: number;
 }
 
+interface CarpoolMatch {
+  id: string;
+  name: string;
+  direction: string;
+  compatibilityScore: number;
+}
+
 const TIER_COLORS: Record<string, string> = {
   bronze: "#CD7F32",
   silver: "#C0C0C0",
@@ -94,6 +101,8 @@ export default function HubDetailScreen() {
   const { hubId, hubName } = route.params as { hubId: string; hubName: string };
   const [activeTab, setActiveTab] = useState<TabKey>("messages");
   const [messageText, setMessageText] = useState("");
+  const [carpoolMatches, setCarpoolMatches] = useState<CarpoolMatch[]>([]);
+  const [showNotifications, setShowNotifications] = useState(true);
 
   const messagesQueryKey = [`/api/openclaw/hubs/${hubId}/messages`];
   const metricsQueryKey = [`/api/openclaw/hubs/${hubId}/metrics`];
@@ -184,6 +193,26 @@ export default function HubDetailScreen() {
       queryClient.invalidateQueries({ queryKey: messagesQueryKey });
     },
   });
+
+  const carpoolMutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest("/api/openclaw/carpool/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hubId, lat: 0, lng: 0 }),
+      });
+    },
+    onSuccess: (data: CarpoolMatch[]) => {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      setCarpoolMatches(Array.isArray(data) ? data : []);
+    },
+  });
+
+  useEffect(() => {
+    if (!showNotifications) return;
+    const timer = setTimeout(() => setShowNotifications(false), 8000);
+    return () => clearTimeout(timer);
+  }, [showNotifications]);
 
   const handleSendMessage = useCallback(() => {
     const trimmed = messageText.trim();
@@ -454,6 +483,95 @@ export default function HubDetailScreen() {
               </View>
             </View>
           ) : null}
+
+          <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+            <View style={[styles.metricCard, { backgroundColor: theme.backgroundDefault }]}>
+              <ThemedText style={[styles.metricTitle, { color: theme.textSecondary }]}>
+                Route Collaborations
+              </ThemedText>
+              <Pressable
+                onPress={() => carpoolMutation.mutate()}
+                disabled={carpoolMutation.isPending}
+                style={[styles.findMatchesButton, { backgroundColor: theme.primary }]}
+              >
+                <Ionicons name="git-compare-outline" size={16} color="#FFFFFF" />
+                <ThemedText style={styles.findMatchesText}>
+                  {carpoolMutation.isPending ? "Searching..." : "Find Matches"}
+                </ThemedText>
+              </Pressable>
+
+              {carpoolMatches.length > 0 ? (
+                <View style={styles.carpoolList}>
+                  {carpoolMatches.map((match, idx) => (
+                    <Animated.View key={match.id} entering={SlideInRight.delay(idx * 80).duration(300)}>
+                      <View style={[styles.carpoolCard, { backgroundColor: theme.backgroundSecondary }]}>
+                        <View style={[styles.carpoolAvatar, { backgroundColor: theme.primary + "20" }]}>
+                          <ThemedText style={[styles.carpoolAvatarText, { color: theme.primary }]}>
+                            {match.name.charAt(0).toUpperCase()}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.carpoolInfo}>
+                          <ThemedText style={[styles.carpoolName, { color: theme.text }]}>
+                            {match.name}
+                          </ThemedText>
+                          <ThemedText style={[styles.carpoolDirection, { color: theme.textMuted }]}>
+                            {match.direction}
+                          </ThemedText>
+                        </View>
+                        <View style={styles.carpoolRight}>
+                          <ThemedText style={[styles.carpoolScore, { color: Colors.travonyGreen }]}>
+                            {Math.round(match.compatibilityScore * 100)}%
+                          </ThemedText>
+                          <Pressable
+                            onPress={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
+                            style={[styles.connectButton, { backgroundColor: theme.primary + "15" }]}
+                          >
+                            <ThemedText style={[styles.connectButtonText, { color: theme.primary }]}>
+                              Connect
+                            </ThemedText>
+                          </Pressable>
+                        </View>
+                      </View>
+                    </Animated.View>
+                  ))}
+                </View>
+              ) : null}
+            </View>
+          </Animated.View>
+
+          <Animated.View entering={FadeInDown.delay(450).duration(400)}>
+            <View style={[styles.metricCard, { backgroundColor: theme.backgroundDefault }]}>
+              <ThemedText style={[styles.metricTitle, { color: theme.textSecondary }]}>
+                Vehicle Intelligence
+              </ThemedText>
+              <View style={[styles.vehicleIntelCard, { backgroundColor: Colors.travonyGreen + "08" }]}>
+                <View style={[styles.vehicleIntelIcon, { backgroundColor: Colors.travonyGreen + "15" }]}>
+                  <Ionicons name="construct-outline" size={18} color={Colors.travonyGreen} />
+                </View>
+                <View style={styles.vehicleIntelInfo}>
+                  <ThemedText style={[styles.vehicleIntelTitle, { color: theme.text }]}>
+                    Maintenance Reminder
+                  </ThemedText>
+                  <ThemedText style={[styles.vehicleIntelDesc, { color: theme.textMuted }]}>
+                    Next service in 2,400 km
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={[styles.vehicleIntelCard, { backgroundColor: "#2196F3" + "08" }]}>
+                <View style={[styles.vehicleIntelIcon, { backgroundColor: "#2196F3" + "15" }]}>
+                  <Ionicons name="battery-charging-outline" size={18} color="#2196F3" />
+                </View>
+                <View style={styles.vehicleIntelInfo}>
+                  <ThemedText style={[styles.vehicleIntelTitle, { color: theme.text }]}>
+                    Charging Alert
+                  </ThemedText>
+                  <ThemedText style={[styles.vehicleIntelDesc, { color: theme.textMuted }]}>
+                    Nearby charging station 0.5km away
+                  </ThemedText>
+                </View>
+              </View>
+            </View>
+          </Animated.View>
         </Animated.View>
       </KeyboardAwareScrollViewCompat>
     );
@@ -591,6 +709,41 @@ export default function HubDetailScreen() {
           );
         })}
       </View>
+
+      {showNotifications ? (
+        <Animated.View entering={FadeInDown.duration(300)}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.notificationStrip}
+          >
+            {metrics?.activeCheckIns && metrics.activeCheckIns > 3 ? (
+              <View style={[styles.notificationChip, { backgroundColor: Colors.travonyGreen + "15" }]}>
+                <View style={[styles.notificationDot, { backgroundColor: Colors.travonyGreen }]} />
+                <ThemedText style={[styles.notificationText, { color: Colors.travonyGreen }]}>
+                  {metrics.activeCheckIns} people checked in - active hub!
+                </ThemedText>
+              </View>
+            ) : null}
+            {metrics?.demandScore && metrics.demandScore > 0.7 ? (
+              <View style={[styles.notificationChip, { backgroundColor: Colors.travonyGold + "15" }]}>
+                <View style={[styles.notificationDot, { backgroundColor: Colors.travonyGold }]} />
+                <ThemedText style={[styles.notificationText, { color: Colors.travonyGold }]}>
+                  High demand zone - premium rides available
+                </ThemedText>
+              </View>
+            ) : null}
+            {yieldEstimate?.estimatedYieldPerHour && yieldEstimate.estimatedYieldPerHour > 20 ? (
+              <View style={[styles.notificationChip, { backgroundColor: "#2196F3" + "15" }]}>
+                <View style={[styles.notificationDot, { backgroundColor: "#2196F3" }]} />
+                <ThemedText style={[styles.notificationText, { color: "#2196F3" }]}>
+                  Strong earnings potential: ${yieldEstimate.estimatedYieldPerHour.toFixed(0)}/hr
+                </ThemedText>
+              </View>
+            ) : null}
+          </ScrollView>
+        </Animated.View>
+      ) : null}
 
       {activeTab === "messages" ? renderMessagesTab() : null}
       {activeTab === "activity" ? renderActivityTab() : null}
@@ -907,5 +1060,118 @@ const styles = StyleSheet.create({
   leaderPoints: {
     fontSize: 13,
     fontWeight: "600",
+  },
+  notificationStrip: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  notificationChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+    gap: 6,
+  },
+  notificationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  notificationText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  findMatchesButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.sm,
+    gap: 6,
+    marginBottom: Spacing.md,
+  },
+  findMatchesText: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  carpoolList: {
+    gap: Spacing.sm,
+  },
+  carpoolCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.sm,
+  },
+  carpoolAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  carpoolAvatarText: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  carpoolInfo: {
+    flex: 1,
+    marginLeft: Spacing.sm,
+  },
+  carpoolName: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  carpoolDirection: {
+    fontSize: 11,
+    fontWeight: "400",
+    marginTop: 1,
+  },
+  carpoolRight: {
+    alignItems: "flex-end",
+    gap: 4,
+  },
+  carpoolScore: {
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  connectButton: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.xs,
+  },
+  connectButtonText: {
+    fontSize: 11,
+    fontWeight: "600",
+  },
+  vehicleIntelCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.sm,
+  },
+  vehicleIntelIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  vehicleIntelInfo: {
+    flex: 1,
+    marginLeft: Spacing.md,
+  },
+  vehicleIntelTitle: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  vehicleIntelDesc: {
+    fontSize: 11,
+    fontWeight: "400",
+    marginTop: 2,
   },
 });
