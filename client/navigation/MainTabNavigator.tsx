@@ -69,7 +69,7 @@ export default function MainTabNavigator() {
         name="BookingsTab"
         component={BookingsStackNavigator}
         options={{
-          title: "Bookings",
+          title: "Movements",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="calendar-outline" size={size} color={color} />
           ),
