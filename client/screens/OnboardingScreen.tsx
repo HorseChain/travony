@@ -37,7 +37,7 @@ interface PhoneCode {
   name: string;
 }
 
-type OnboardingStep = "role" | "location" | "phone" | "otp" | "name";
+type OnboardingStep = "perspective" | "role" | "location" | "phone" | "otp" | "name";
 type UserRole = "customer" | "driver";
 
 export default function OnboardingScreen() {
@@ -46,10 +46,7 @@ export default function OnboardingScreen() {
   const insets = useSafeAreaInsets();
 
   const getInitialStep = (): OnboardingStep => {
-    if (APP_VARIANT === 'rider' || APP_VARIANT === 'driver') {
-      return "location";
-    }
-    return "role";
+    return "perspective";
   };
   
   const getInitialRole = (): UserRole => {
@@ -209,7 +206,7 @@ export default function OnboardingScreen() {
 
   const handleBack = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const stepOrder: OnboardingStep[] = APP_VARIANT ? ["location", "phone", "otp", "name"] : ["role", "location", "phone", "otp", "name"];
+    const stepOrder: OnboardingStep[] = ["perspective", "location", "phone", "otp", "name"];
     const currentIndex = stepOrder.indexOf(step);
     if (currentIndex > 0) {
       setStep(stepOrder[currentIndex - 1]);
@@ -217,8 +214,13 @@ export default function OnboardingScreen() {
   };
 
   const canGoBack = () => {
-    const firstStep = APP_VARIANT ? "location" : "role";
-    return step !== firstStep && !isLoading;
+    return step !== "perspective" && !isLoading;
+  };
+
+  const handlePerspectiveSelect = (role: UserRole) => {
+    setUserRole(role);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setStep("location");
   };
 
   const handleRoleSelect = (role: UserRole) => {
@@ -226,6 +228,62 @@ export default function OnboardingScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setStep("location");
   };
+
+  const getPerspectiveHeadline = () => {
+    if (APP_VARIANT === 'driver') return 'Your vehicle is an asset.';
+    if (APP_VARIANT === 'rider') return 'Movement has value.';
+    return 'Movement has value.';
+  };
+
+  const getPerspectiveSubtext = () => {
+    if (APP_VARIANT === 'driver') return 'Activate your vehicle on the Travony Network.';
+    if (APP_VARIANT === 'rider') return 'Welcome to the Travony Mobility Network.';
+    return 'Welcome to the Travony Mobility Network.';
+  };
+
+  const renderPerspectiveStep = () => (
+    <Animated.View entering={FadeIn.duration(800)} exiting={FadeOut.duration(300)} style={styles.perspectiveContainer}>
+      <View style={styles.perspectiveContent}>
+        <Animated.View entering={FadeIn.delay(300).duration(1000)}>
+          <ThemedText style={styles.perspectiveHeadline}>
+            {getPerspectiveHeadline()}
+          </ThemedText>
+        </Animated.View>
+        <Animated.View entering={FadeIn.delay(1000).duration(800)}>
+          <ThemedText style={styles.perspectiveSubtext}>
+            {getPerspectiveSubtext()}
+          </ThemedText>
+        </Animated.View>
+      </View>
+      <Animated.View entering={FadeIn.delay(1500).duration(800)} style={styles.perspectiveButtons}>
+        {(APP_VARIANT === 'driver' || APP_VARIANT === 'unified') ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.perspectiveButton,
+              { opacity: pressed ? 0.6 : 1 },
+            ]}
+            onPress={() => handlePerspectiveSelect("driver")}
+          >
+            <ThemedText style={styles.perspectiveButtonText}>Activate Your Vehicle</ThemedText>
+          </Pressable>
+        ) : null}
+        {(APP_VARIANT === 'rider' || APP_VARIANT === 'unified') ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.perspectiveButton,
+              APP_VARIANT === 'unified' ? styles.perspectiveButtonSecondary : {},
+              { opacity: pressed ? 0.6 : 1 },
+            ]}
+            onPress={() => handlePerspectiveSelect("customer")}
+          >
+            <ThemedText style={APP_VARIANT === 'unified' ? styles.perspectiveButtonTextSecondary : styles.perspectiveButtonText}>
+              Access the Network
+            </ThemedText>
+          </Pressable>
+        ) : null}
+      </Animated.View>
+    </Animated.View>
+  );
 
   const renderRoleStep = () => (
     <Animated.View entering={FadeIn} exiting={SlideOutLeft} style={styles.stepContainer}>
@@ -245,8 +303,8 @@ export default function OnboardingScreen() {
           onPress={() => handleRoleSelect("customer")}
         >
           <Ionicons name="person" size={32} color="#FFFFFF" style={{ marginBottom: 8 }} />
-          <ThemedText style={styles.roleButtonTitle}>Ride with Travony</ThemedText>
-          <ThemedText style={styles.roleButtonSubtitle}>Book rides quickly</ThemedText>
+          <ThemedText style={styles.roleButtonTitle}>Access the Network</ThemedText>
+          <ThemedText style={styles.roleButtonSubtitle}>Intelligent mobility</ThemedText>
         </Pressable>
         <Pressable
           style={({ pressed }) => [
@@ -256,8 +314,8 @@ export default function OnboardingScreen() {
           onPress={() => handleRoleSelect("driver")}
         >
           <Ionicons name="car-sport" size={32} color={Colors.travonyGreen} style={{ marginBottom: 8 }} />
-          <ThemedText style={[styles.roleButtonTitle, { color: theme.text }]}>Drive with Travony</ThemedText>
-          <ThemedText style={[styles.roleButtonSubtitle, { color: theme.textSecondary }]}>Earn on your terms</ThemedText>
+          <ThemedText style={[styles.roleButtonTitle, { color: theme.text }]}>Activate Your Vehicle</ThemedText>
+          <ThemedText style={[styles.roleButtonSubtitle, { color: theme.textSecondary }]}>Vehicle as asset</ThemedText>
         </Pressable>
       </View>
     </Animated.View>
@@ -270,7 +328,7 @@ export default function OnboardingScreen() {
       </View>
       <ThemedText style={styles.stepTitle}>Enable Location</ThemedText>
       <ThemedText style={[styles.stepDescription, { color: theme.textSecondary }]}>
-        We need your location to find nearby drivers and show you on the map
+        Location access enables intelligent vehicle matching and network optimization
       </ThemedText>
       <Pressable
         style={({ pressed }) => [
@@ -491,9 +549,9 @@ export default function OnboardingScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
+    <ThemedView style={[styles.container, step === "perspective" && { backgroundColor: "#000000" }]}>
       <View style={[styles.content, { paddingTop: insets.top + Spacing["3xl"], paddingBottom: insets.bottom + Spacing["2xl"] }]}>
-        {canGoBack() && (
+        {canGoBack() && step !== "perspective" && (
           <Pressable 
             style={[styles.backButton, { top: insets.top + Spacing.md }]} 
             onPress={handleBack}
@@ -501,16 +559,19 @@ export default function OnboardingScreen() {
             <Ionicons name="arrow-back" size={24} color={theme.text} />
           </Pressable>
         )}
-        <View style={styles.logoContainer}>
-          <Image
-            source={require("../../assets/images/icon.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-          <ThemedText style={styles.appName}>Travony</ThemedText>
-        </View>
+        {step !== "perspective" ? (
+          <View style={styles.logoContainer}>
+            <Image
+              source={require("../../assets/images/icon.png")}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <ThemedText style={styles.appName}>Travony</ThemedText>
+          </View>
+        ) : null}
 
         <View style={styles.stepContent}>
+          {step === "perspective" && renderPerspectiveStep()}
           {step === "role" && renderRoleStep()}
           {step === "location" && renderLocationStep()}
           {step === "phone" && renderPhoneStep()}
@@ -518,22 +579,24 @@ export default function OnboardingScreen() {
           {step === "name" && renderNameStep()}
         </View>
 
-        <View style={styles.progressContainer}>
-          {["role", "location", "phone", "otp", "name"].map((s, index) => (
-            <View
-              key={s}
-              style={[
-                styles.progressDot,
-                {
-                  backgroundColor:
-                    ["location", "phone", "otp", "name"].indexOf(step) >= index
-                      ? Colors.travonyGreen
-                      : theme.border,
-                },
-              ]}
-            />
-          ))}
-        </View>
+        {step !== "perspective" ? (
+          <View style={styles.progressContainer}>
+            {["location", "phone", "otp", "name"].map((s, index) => (
+              <View
+                key={s}
+                style={[
+                  styles.progressDot,
+                  {
+                    backgroundColor:
+                      ["location", "phone", "otp", "name"].indexOf(step) >= index
+                        ? Colors.travonyGreen
+                        : theme.border,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+        ) : null}
       </View>
     </ThemedView>
   );
@@ -748,5 +811,65 @@ const styles = StyleSheet.create({
   roleButtonSubtitle: {
     ...Typography.small,
     color: "rgba(255, 255, 255, 0.8)",
+  },
+  perspectiveContainer: {
+    flex: 1,
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: Spacing["3xl"],
+  },
+  perspectiveContent: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: Spacing.xl,
+  },
+  perspectiveHeadline: {
+    fontSize: 32,
+    fontWeight: "200",
+    color: "#FFFFFF",
+    textAlign: "center",
+    letterSpacing: 1.5,
+    lineHeight: 44,
+    marginBottom: Spacing["2xl"],
+  },
+  perspectiveSubtext: {
+    fontSize: 13,
+    fontWeight: "400",
+    color: "rgba(255, 255, 255, 0.35)",
+    textAlign: "center",
+    letterSpacing: 2,
+    textTransform: "uppercase",
+  },
+  perspectiveButtons: {
+    width: "100%",
+    paddingHorizontal: Spacing.lg,
+    gap: 12,
+  },
+  perspectiveButton: {
+    width: "100%",
+    height: 54,
+    borderRadius: 4,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.15)",
+  },
+  perspectiveButtonText: {
+    fontSize: 13,
+    fontWeight: "500",
+    color: "#FFFFFF",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  perspectiveButtonSecondary: {
+    borderColor: "rgba(255, 255, 255, 0.06)",
+  },
+  perspectiveButtonTextSecondary: {
+    fontSize: 13,
+    fontWeight: "400",
+    color: "rgba(255, 255, 255, 0.45)",
+    letterSpacing: 1,
+    textTransform: "uppercase",
   },
 });
