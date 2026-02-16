@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Facebook Page Setup - Travony</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #1a1a2e;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            padding: 36px 20px 32px;
+            text-align: center;
+            color: white;
+            position: relative;
+            overflow: hidden;
+        }
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -60%;
+            left: -30%;
+            width: 160%;
+            height: 200%;
+            background: radial-gradient(ellipse at 30% 50%, rgba(255,255,255,0.12) 0%, transparent 60%);
+            pointer-events: none;
+        }
+        .header h1 { font-size: 1.75rem; font-weight: 800; position: relative; }
+        .header p { font-size: 0.95rem; opacity: 0.9; margin-top: 6px; position: relative; }
+        .container { max-width: 720px; margin: 0 auto; padding: 24px 16px 60px; }
+        .back-link {
+            display: inline-flex; align-items: center; gap: 6px;
+            color: #8e8e8e; text-decoration: none; font-size: 0.88rem; margin-bottom: 20px;
+        }
+        .back-link:hover { color: #25D366; }
+        .card {
+            background: white; border-radius: 14px;
+            box-shadow: 0 1px 6px rgba(0,0,0,0.07);
+            margin-bottom: 20px; overflow: hidden;
+        }
+        .card-header {
+            padding: 18px 22px 14px;
+            border-bottom: 1px solid #eef0f2;
+        }
+        .card-header h2 { font-size: 1.1rem; font-weight: 700; }
+        .card-body { padding: 20px 22px 24px; }
+        .status-row {
+            display: flex; align-items: center; gap: 10px;
+            padding: 10px 0;
+        }
+        .status-dot {
+            width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+        }
+        .status-dot.green { background: #25D366; }
+        .status-dot.red { background: #e53935; }
+        .status-dot.gray { background: #ccc; animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:0.3;} }
+        .status-label { font-size: 0.9rem; font-weight: 600; }
+        .steps-list { list-style: none; padding: 0; }
+        .steps-list li {
+            display: flex; gap: 14px; padding: 14px 0;
+            border-bottom: 1px solid #f0f1f3; align-items: flex-start;
+        }
+        .steps-list li:last-child { border-bottom: none; }
+        .step-num {
+            width: 30px; height: 30px; border-radius: 50%;
+            background: linear-gradient(135deg, #25D366, #128C7E);
+            color: white; font-size: 0.8rem; font-weight: 800;
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0; margin-top: 2px;
+        }
+        .step-content { flex: 1; }
+        .step-content strong { font-weight: 700; }
+        .step-content a { color: #25D366; font-weight: 600; text-decoration: none; }
+        .step-content a:hover { text-decoration: underline; }
+        .step-content code {
+            background: #f0f1f3; padding: 2px 6px; border-radius: 4px;
+            font-size: 0.82rem; font-weight: 600;
+        }
+        .important-note {
+            background: #fff8e1; border-left: 4px solid #ff9800;
+            padding: 10px 14px; border-radius: 0 8px 8px 0;
+            font-size: 0.88rem; color: #e65100; margin: 4px 0;
+        }
+        .token-input {
+            width: 100%; padding: 14px; border: 2px solid #e0e0e0;
+            border-radius: 10px; font-size: 0.9rem; font-family: monospace;
+            outline: none; transition: border-color 0.2s; margin-bottom: 12px;
+        }
+        .token-input:focus { border-color: #25D366; }
+        .token-input::placeholder { font-family: -apple-system, sans-serif; color: #bbb; }
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+            padding: 13px 26px; border-radius: 10px;
+            font-size: 0.95rem; font-weight: 700; border: none;
+            cursor: pointer; text-decoration: none; transition: all 0.2s;
+            width: 100%;
+        }
+        .btn-green {
+            background: #25D366; color: white;
+            box-shadow: 0 4px 12px rgba(37,211,102,0.3);
+        }
+        .btn-green:hover { background: #1fba58; transform: translateY(-1px); }
+        .btn-blue {
+            background: #1877F2; color: white;
+            box-shadow: 0 4px 14px rgba(24,119,242,0.3);
+        }
+        .btn-blue:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(24,119,242,0.4); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none !important; }
+        .alert {
+            padding: 12px 16px; border-radius: 10px;
+            font-size: 0.85rem; margin-top: 12px; display: none;
+        }
+        .alert.visible { display: block; }
+        .alert-success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+        .alert-error { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .alert-info { background: #e3f2fd; color: #1565c0; border: 1px solid #bbdefb; }
+        .test-post-area {
+            width: 100%; padding: 14px; border: 2px solid #e0e0e0;
+            border-radius: 10px; font-size: 0.9rem; font-family: -apple-system, sans-serif;
+            outline: none; transition: border-color 0.2s; resize: vertical;
+            min-height: 100px; margin-bottom: 12px;
+        }
+        .test-post-area:focus { border-color: #25D366; }
+        .test-post-area::placeholder { color: #bbb; }
+        .share-input {
+            width: 100%; padding: 14px; border: 2px solid #e0e0e0;
+            border-radius: 10px; font-size: 0.9rem;
+            outline: none; transition: border-color 0.2s; margin-bottom: 12px;
+        }
+        .share-input:focus { border-color: #1877F2; }
+        .share-input::placeholder { color: #bbb; }
+        .note-text { font-size: 0.82rem; color: #888; margin-top: 8px; }
+        @media (max-width: 600px) {
+            .header h1 { font-size: 1.35rem; }
+            .header { padding: 28px 16px 24px; }
+            .card-body { padding: 16px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Facebook Page Setup</h1>
+        <p>Travony Social Media Dashboard</p>
+    </div>
+
+    <div class="container">
+        <a href="/campaign" class="back-link">&larr; Back to Campaign Hub</a>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Current Status</h2>
+            </div>
+            <div class="card-body">
+                <div class="status-row">
+                    <div class="status-dot gray" id="statusDotPage"></div>
+                    <span class="status-label" id="statusLabelPage">Page Connected: checking...</span>
+                </div>
+                <div class="status-row">
+                    <div class="status-dot gray" id="statusDotToken"></div>
+                    <span class="status-label" id="statusLabelToken">Token Valid: checking...</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Connect Your Page</h2>
+            </div>
+            <div class="card-body">
+                <p style="font-size:0.9rem;color:#555;margin-bottom:14px;">
+                    Your <strong>travoney</strong> page needs a Page Access Token to enable automated posting.
+                </p>
+                <ol class="steps-list">
+                    <li>
+                        <div class="step-num">1</div>
+                        <div class="step-content">
+                            Open <a href="https://developers.facebook.com/tools/explorer/" target="_blank">Graph API Explorer</a>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="step-num">2</div>
+                        <div class="step-content">
+                            In the top dropdown, select your <strong>Facebook App</strong>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="step-num">3</div>
+                        <div class="step-content">
+                            Click <strong>"Add a Permission"</strong> and add: <code>pages_show_list</code>, <code>pages_manage_posts</code>, <code>pages_read_engagement</code>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="step-num">4</div>
+                        <div class="step-content">
+                            Click <strong>"Generate Access Token"</strong> &mdash; a Facebook login popup will appear
+                        </div>
+                    </li>
+                    <li>
+                        <div class="step-num">5</div>
+                        <div class="step-content">
+                            <div class="important-note">
+                                IMPORTANT: Select your <strong>"travoney"</strong> page when asked which pages to share
+                            </div>
+                        </div>
+                    </li>
+                    <li>
+                        <div class="step-num">6</div>
+                        <div class="step-content">
+                            Copy the token and paste it below
+                        </div>
+                    </li>
+                </ol>
+
+                <div style="margin-top:16px;">
+                    <input type="text" class="token-input" id="tokenInput" placeholder="Paste your Page Access Token here...">
+                    <button class="btn btn-green" onclick="savePageToken()">Save & Connect</button>
+                </div>
+                <div class="alert" id="tokenAlert"></div>
+            </div>
+        </div>
+
+        <div class="card" id="quickPostCard" style="display:none;">
+            <div class="card-header">
+                <h2>Quick Post</h2>
+            </div>
+            <div class="card-body">
+                <textarea class="test-post-area" id="postMessage" placeholder="Type your message..."></textarea>
+                <button class="btn btn-blue" onclick="sendTestPost()">Post to Facebook</button>
+                <div class="alert" id="postAlert"></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
+                <h2>Alternative: Share Dialog</h2>
+            </div>
+            <div class="card-body">
+                <p style="font-size:0.9rem;color:#555;margin-bottom:14px;">
+                    Can't get the token? Use Facebook's Share Dialog instead &mdash; no token needed!
+                </p>
+                <input type="text" class="share-input" id="shareMessage" placeholder="Enter your message...">
+                <button class="btn btn-blue" onclick="shareOnFacebook()">Share on Facebook</button>
+                <p class="note-text">This opens Facebook's share popup where you can post to your page directly.</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function showAlert(id, type, msg) {
+            var el = document.getElementById(id);
+            el.className = 'alert alert-' + type + ' visible';
+            el.textContent = msg;
+        }
+
+        function checkStatus() {
+            document.getElementById('statusDotPage').className = 'status-dot gray';
+            document.getElementById('statusDotToken').className = 'status-dot gray';
+            document.getElementById('statusLabelPage').textContent = 'Page Connected: checking...';
+            document.getElementById('statusLabelToken').textContent = 'Token Valid: checking...';
+
+            fetch('/api/facebook/page-status')
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var pageOk = data.connected || false;
+                    var tokenOk = data.tokenValid || false;
+
+                    document.getElementById('statusDotPage').className = 'status-dot ' + (pageOk ? 'green' : 'red');
+                    document.getElementById('statusLabelPage').textContent = 'Page Connected: ' + (pageOk ? 'Yes' : 'No');
+
+                    document.getElementById('statusDotToken').className = 'status-dot ' + (tokenOk ? 'green' : 'red');
+                    document.getElementById('statusLabelToken').textContent = 'Token Valid: ' + (tokenOk ? 'Yes' : 'No');
+
+                    document.getElementById('quickPostCard').style.display = (pageOk && tokenOk) ? 'block' : 'none';
+                })
+                .catch(function() {
+                    document.getElementById('statusDotPage').className = 'status-dot red';
+                    document.getElementById('statusDotToken').className = 'status-dot red';
+                    document.getElementById('statusLabelPage').textContent = 'Page Connected: Error';
+                    document.getElementById('statusLabelToken').textContent = 'Token Valid: Error';
+                });
+        }
+
+        function savePageToken() {
+            var token = document.getElementById('tokenInput').value.trim();
+            if (!token) {
+                showAlert('tokenAlert', 'error', 'Please paste a token first.');
+                return;
+            }
+            fetch('/api/facebook/save-page-token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: token })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    showAlert('tokenAlert', 'success', data.message || 'Token saved successfully!');
+                    checkStatus();
+                } else {
+                    showAlert('tokenAlert', 'error', data.error || data.message || 'Failed to save token.');
+                }
+            })
+            .catch(function(err) {
+                showAlert('tokenAlert', 'error', 'Network error: ' + err.message);
+            });
+        }
+
+        function sendTestPost() {
+            var message = document.getElementById('postMessage').value.trim();
+            if (!message) {
+                showAlert('postAlert', 'error', 'Please enter a message.');
+                return;
+            }
+            fetch('/api/facebook/test-post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: message })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.success) {
+                    showAlert('postAlert', 'success', data.message || 'Posted successfully!');
+                } else {
+                    showAlert('postAlert', 'error', data.error || data.message || 'Failed to post.');
+                }
+            })
+            .catch(function(err) {
+                showAlert('postAlert', 'error', 'Network error: ' + err.message);
+            });
+        }
+
+        function shareOnFacebook() {
+            var message = document.getElementById('shareMessage').value.trim();
+            var url = 'https://www.facebook.com/dialog/share?app_id=1592384871885693&display=popup&href=https://travony.replit.app&quote=' + encodeURIComponent(message) + '&redirect_uri=https://travony.replit.app/connect-instagram';
+            window.open(url, 'fb_share', 'width=600,height=500,scrollbars=yes');
+        }
+
+        checkStatus();
+    </script>
+</body>
+</html>
