@@ -3,7 +3,9 @@ import {
   View,
   StyleSheet,
   Alert,
+  Pressable,
 } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import * as Location from "expo-location";
@@ -119,6 +121,27 @@ export default function HomeScreen() {
         </View>
       </View>
 
+      <Pressable
+        style={({ pressed }) => [
+          styles.networkHubsButton,
+          {
+            backgroundColor: theme.backgroundElevated,
+            borderColor: theme.border,
+            opacity: pressed ? 0.85 : 1,
+          },
+        ]}
+        onPress={() => navigation.navigate("OpenClaw", { variant: "rider" })}
+      >
+        <Ionicons name="grid-outline" size={20} color={Colors.travonyGreen} />
+        <View style={styles.networkHubsText}>
+          <ThemedText style={styles.networkHubsTitle}>Network Hubs</ThemedText>
+          <ThemedText style={[styles.networkHubsSubtitle, { color: theme.textMuted }]}>
+            Discover nearby hubs & vehicle density
+          </ThemedText>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+      </Pressable>
+
       <View style={styles.bottomSheetContainer}>
         <BookingBottomSheet
           currentLocation={currentLocation}
@@ -179,5 +202,30 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
+  },
+  networkHubsButton: {
+    position: "absolute",
+    top: 120,
+    left: Spacing.lg,
+    right: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.md,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: Spacing.md,
+  },
+  networkHubsText: {
+    flex: 1,
+  },
+  networkHubsTitle: {
+    fontSize: 14,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  networkHubsSubtitle: {
+    fontSize: 11,
+    fontWeight: "400",
+    marginTop: 2,
   },
 });
