@@ -117,7 +117,7 @@ export default function InvoiceScreen() {
     
     const fare = ride.actualFare || ride.estimatedFare || "0";
     const currency = invoice?.currency || ride.currencySymbol || "AED";
-    const message = `Travony Ride Receipt\n\nInvoice: ${invoice.invoiceNumber}\nDate: ${formatDate(ride.completedAt || ride.createdAt)}\n\nFrom: ${ride.pickupAddress}\nTo: ${ride.dropoffAddress}\n\nDistance: ${ride.distance || "0"} km\nDuration: ${formatDuration(ride.duration)}\n\nTotal: ${currency} ${fare}\nPayment: ${getPaymentMethodLabel(ride.paymentMethod)}\n\n${ride.blockchainHash ? `Blockchain Verified: ${ride.blockchainHash.slice(0, 20)}...` : ""}`;
+    const message = `Travony Route Receipt\n\nInvoice: ${invoice.invoiceNumber}\nDate: ${formatDate(ride.completedAt || ride.createdAt)}\n\nFrom: ${ride.pickupAddress}\nTo: ${ride.dropoffAddress}\n\nDistance: ${ride.distance || "0"} km\nDuration: ${formatDuration(ride.duration)}\n\nTotal: ${currency} ${fare}\nPayment: ${getPaymentMethodLabel(ride.paymentMethod)}\n\n${ride.blockchainHash ? `Blockchain Verified: ${ride.blockchainHash.slice(0, 20)}...` : ""}`;
     
     try {
       await Share.share({ message });
@@ -147,7 +147,7 @@ export default function InvoiceScreen() {
     return (
       <ThemedView style={styles.container}>
         <View style={[styles.loadingContainer, { paddingTop: headerHeight }]}>
-          <ThemedText>Ride not found</ThemedText>
+          <ThemedText>Route not found</ThemedText>
         </View>
       </ThemedView>
     );
@@ -246,7 +246,7 @@ export default function InvoiceScreen() {
             </ThemedText>
             
             <View style={styles.paymentRow}>
-              <ThemedText style={styles.paymentLabel}>Ride Fare</ThemedText>
+              <ThemedText style={styles.paymentLabel}>Route Fare</ThemedText>
               <ThemedText style={styles.paymentValue}>{currencySymbol} {fare}</ThemedText>
             </View>
 
@@ -325,7 +325,7 @@ export default function InvoiceScreen() {
               </View>
             </View>
             <ThemedText style={styles.carbonNote}>
-              By ridesharing, you saved CO2 emissions compared to driving alone.
+              By using shared mobility, you saved CO2 emissions compared to driving alone.
             </ThemedText>
           </View>
 
