@@ -112,6 +112,34 @@ export default function DriverProfileScreen() {
     ],
     [
       {
+        icon: "analytics-outline",
+        label: "Network Analytics",
+        subtitle: "View network insights",
+        onPress: () => navigation.navigate("NetworkAnalytics" as any),
+      },
+      {
+        icon: "trophy-outline",
+        label: "Community Prestige",
+        subtitle: "Your community standing",
+        onPress: () => navigation.navigate("CommunityPrestige" as any),
+      },
+      {
+        icon: "chatbox-outline",
+        label: "Share Feedback",
+        subtitle: "Help us improve",
+        onPress: () => navigation.navigate("Feedback" as any),
+      },
+    ],
+    [
+      {
+        icon: "globe-outline",
+        label: "About the Network",
+        subtitle: "Distributed mobility infrastructure",
+        onPress: () => navigation.navigate("AboutNetwork" as any),
+      },
+    ],
+    [
+      {
         icon: "shield-checkmark-outline",
         label: "Ride Truth Engine",
         subtitle: "Cross-platform ride scoring",
@@ -202,7 +230,7 @@ export default function DriverProfileScreen() {
               {driverData?.totalTrips || 0}
             </ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
-              Total Trips
+              Routes Completed
             </ThemedText>
           </View>
           <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
@@ -211,7 +239,27 @@ export default function DriverProfileScreen() {
               AED {driverData?.totalEarnings || "0.00"}
             </ThemedText>
             <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
-              Total Earnings
+              Vehicle Contribution (Year)
+            </ThemedText>
+          </View>
+        </View>
+
+        <View style={[styles.statsCard, { backgroundColor: theme.backgroundElevated }]}>
+          <View style={styles.statItem}>
+            <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
+              AED {driverData?.totalEarnings || "0.00"}
+            </ThemedText>
+            <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
+              Lifetime Yield
+            </ThemedText>
+          </View>
+          <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+          <View style={styles.statItem}>
+            <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
+              {driverData?.totalTrips || 0}
+            </ThemedText>
+            <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
+              Network Participation
             </ThemedText>
           </View>
         </View>
@@ -228,7 +276,7 @@ export default function DriverProfileScreen() {
         ))}
 
         <ThemedText style={[styles.version, { color: theme.textMuted }]}>
-          Travony Driver v1.0.0
+          T Driver v4.3.0
         </ThemedText>
       </ScrollView>
     </ThemedView>
