@@ -378,19 +378,38 @@ function configureExpoAndLanding(app: express.Application) {
 }
 
 function setupErrorHandler(app: express.Application) {
-  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const error = err as {
-      status?: number;
-      statusCode?: number;
-      message?: string;
+  app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const { AppError, isAppError } = require("./errors");
+    
+    let statusCode = 500;
+    let errorResponse: Record<string, any> = {
+      error: "InternalServerError",
+      code: "INTERNAL_ERROR",
+      message: "An unexpected error occurred",
     };
 
-    const status = error.status || error.statusCode || 500;
-    const message = error.message || "Internal Server Error";
+    if (isAppError(err)) {
+      statusCode = err.statusCode;
+      errorResponse = err.toJSON();
+    } else if (err instanceof Error) {
+      errorResponse.message = err.message;
+    }
 
-    res.status(status).json({ message });
+    const timestamp = new Date().toISOString();
+    if (statusCode >= 500) {
+      console.error(`[${timestamp}] ERROR ${req.method} ${req.path} [${errorResponse.code}]: ${errorResponse.message}`);
+      if (err instanceof Error && err.stack) {
+        console.error(err.stack);
+      }
+    } else {
+      console.warn(`[${timestamp}] WARN ${req.method} ${req.path} [${errorResponse.code}]: ${errorResponse.message}`);
+    }
 
-    throw err;
+    if (process.env.NODE_ENV !== "production" && err instanceof Error) {
+      errorResponse.stack = err.stack;
+    }
+
+    res.status(statusCode).json(errorResponse);
   });
 }
 
