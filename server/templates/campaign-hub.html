@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Travony Campaign Hub - Social Media Content</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0f0f0f;
+            color: #e0e0e0;
+            line-height: 1.6;
+        }
+        .header {
+            background: linear-gradient(135deg, #0a0a0a, #1a1a2e);
+            padding: 30px 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(0,177,79,0.3);
+        }
+        .header h1 { color: white; font-size: 1.8rem; }
+        .header p { color: rgba(255,255,255,0.6); margin-top: 8px; }
+
+        .container { max-width: 1100px; margin: 0 auto; padding: 30px 20px; }
+
+        .section { margin-bottom: 40px; }
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .section-header h2 { font-size: 1.4rem; color: white; }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .badge-insta { background: linear-gradient(45deg, #f09433, #e6683c, #dc2743, #cc2366, #bc1888); color: white; }
+        .badge-tiktok { background: #010101; color: white; border: 1px solid #25F4EE; }
+        .badge-snap { background: #FFFC00; color: #000; }
+        .badge-telegram { background: #0088cc; color: white; }
+
+        .content-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+        }
+
+        .content-card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid #2a2a2a;
+            transition: border-color 0.3s;
+        }
+        .content-card:hover { border-color: #00B14F; }
+
+        .card-header {
+            padding: 16px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2a2a2a;
+        }
+        .card-header h3 { font-size: 1rem; color: white; }
+        .card-type {
+            font-size: 0.7rem;
+            padding: 3px 8px;
+            border-radius: 6px;
+            background: rgba(0,177,79,0.2);
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        .card-body { padding: 20px; }
+
+        .caption-box {
+            background: #111;
+            border-radius: 10px;
+            padding: 16px;
+            margin-bottom: 16px;
+            font-size: 0.9rem;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            border: 1px solid #222;
+        }
+
+        .hashtags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 16px;
+        }
+        .hashtag {
+            background: rgba(0,177,79,0.15);
+            color: #4ade80;
+            padding: 4px 10px;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 500;
+        }
+
+        .card-footer {
+            padding: 12px 20px;
+            border-top: 1px solid #2a2a2a;
+            display: flex;
+            gap: 10px;
+        }
+        .copy-btn {
+            flex: 1;
+            padding: 10px;
+            background: #00B14F;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: background 0.3s;
+        }
+        .copy-btn:hover { background: #009940; }
+        .copy-btn.copied { background: #166534; }
+
+        .visual-prompt {
+            background: #0d1117;
+            border-left: 3px solid #00B14F;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.82rem;
+            color: #9ca3af;
+        }
+        .visual-prompt strong { color: #4ade80; }
+
+        .strategy-card {
+            background: #1a1a1a;
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid #2a2a2a;
+            margin-bottom: 16px;
+        }
+        .strategy-card h3 {
+            color: white;
+            margin-bottom: 12px;
+            font-size: 1.05rem;
+        }
+        .strategy-card ul {
+            list-style: none;
+            padding: 0;
+        }
+        .strategy-card li {
+            padding: 6px 0;
+            padding-left: 20px;
+            position: relative;
+            font-size: 0.9rem;
+            color: #b0b0b0;
+        }
+        .strategy-card li::before {
+            content: '';
+            position: absolute;
+            left: 0;
+            top: 14px;
+            width: 8px;
+            height: 8px;
+            background: #00B14F;
+            border-radius: 50%;
+        }
+
+        .telegram-setup {
+            background: linear-gradient(135deg, #0088cc22, #0088cc11);
+            border: 1px solid #0088cc44;
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+        .telegram-setup h3 { color: #54b3e8; margin-bottom: 12px; }
+        .tg-btn {
+            display: inline-block;
+            padding: 12px 24px;
+            background: #0088cc;
+            color: white;
+            border: none;
+            border-radius: 10px;
+            font-weight: 600;
+            cursor: pointer;
+            font-size: 0.9rem;
+            margin-top: 12px;
+            text-decoration: none;
+        }
+        .tg-btn:hover { background: #006da3; }
+        .tg-status {
+            margin-top: 12px;
+            padding: 10px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            display: none;
+        }
+
+        .schedule-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 16px;
+        }
+        .schedule-table th, .schedule-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #2a2a2a;
+            font-size: 0.85rem;
+        }
+        .schedule-table th {
+            color: #4ade80;
+            font-weight: 600;
+        }
+
+        @media (max-width: 600px) {
+            .content-grid { grid-template-columns: 1fr; }
+            .header h1 { font-size: 1.4rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Travony Campaign Hub</h1>
+        <p>Ready-to-post content for Facebook, Instagram, TikTok, Snapchat & Telegram</p>
+    </div>
+
+    <div class="container">
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Facebook Page</h2>
+                <span class="badge" style="background:#1877F2;color:white;" id="fbBadge">CHECKING</span>
+            </div>
+            <div class="telegram-setup" style="background:linear-gradient(135deg, rgba(24,119,242,0.12), rgba(66,103,178,0.08));border-color:rgba(24,119,242,0.3);">
+                <h3 style="color:#1877F2;">travoney - 8K+ Followers</h3>
+                <p style="color:#b0b0b0;font-size:0.9rem;" id="fbStatusText">Checking Facebook Page connection...</p>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">
+                    <button class="tg-btn" style="background:#1877F2;" onclick="checkFacebook()">Check Connection</button>
+                    <a href="/connect-instagram" class="tg-btn" style="background:#333;text-decoration:none;display:inline-flex;align-items:center;">Setup Page Token</a>
+                </div>
+                <div id="fbQuickPost" style="display:none;margin-top:16px;padding-top:16px;border-top:1px solid rgba(24,119,242,0.2);">
+                    <textarea id="fbPostMsg" placeholder="Write a post for your travoney page..." style="width:100%;min-height:80px;padding:10px;border-radius:8px;border:1px solid #333;background:#1a1a1a;color:#e0e0e0;font-size:0.9rem;resize:vertical;margin-bottom:8px;"></textarea>
+                    <button class="tg-btn" style="background:#1877F2;" onclick="postToFacebook()">Post to Facebook</button>
+                </div>
+                <div class="tg-status" id="fbStatus"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Instagram Connection</h2>
+                <span class="badge badge-insta">CONNECTED</span>
+            </div>
+            <div class="telegram-setup" style="background:linear-gradient(135deg, rgba(225,48,108,0.12), rgba(131,58,180,0.08));border-color:rgba(225,48,108,0.3);">
+                <h3 style="color:#e1306c;">Instagram Account Status</h3>
+                <p style="color:#b0b0b0;font-size:0.9rem;">Your Instagram Business account is connected. You can post content directly from this dashboard.</p>
+                <button class="tg-btn" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);" onclick="checkInstagram()">Check Connection</button>
+                <div class="tg-status" id="igStatus"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>TikTok Connection</h2>
+                <span class="badge badge-tiktok">TIKTOK</span>
+            </div>
+            <div class="telegram-setup" style="background:linear-gradient(135deg, rgba(37,244,238,0.08), rgba(254,44,85,0.08));border-color:rgba(37,244,238,0.3);">
+                <h3 style="color:#25F4EE;">TikTok Account</h3>
+                <p style="color:#b0b0b0;font-size:0.9rem;">Connect your TikTok account to post content directly from this dashboard. Click below to authorize Travony to post on your behalf.</p>
+                <button class="tg-btn" style="background:#010101;border:1px solid #25F4EE;" onclick="connectTikTok()">Connect TikTok Account</button>
+                <button class="tg-btn" style="background:#010101;border:1px solid #FE2C55;margin-left:8px;" onclick="checkTikTok()">Check Status</button>
+                <div class="tg-status" id="ttStatus"></div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Telegram Driver Community</h2>
+                <span class="badge badge-telegram">SETUP</span>
+            </div>
+            <div class="telegram-setup">
+                <h3>Activate Your Telegram Bot</h3>
+                <p style="color:#b0b0b0;font-size:0.9rem;">Your Telegram bot is configured and ready. Click below to set up the webhook and register all bot commands. Once active, drivers can join your community by messaging the bot.</p>
+                <button class="tg-btn" onclick="setupTelegram()">Activate Bot & Commands</button>
+                <div class="tg-status" id="tgStatus"></div>
+                <div style="margin-top:16px;">
+                    <p style="font-size:0.85rem;color:#888;">Share your bot link with drivers. They'll get an interactive welcome with earnings calculator, referral codes, driving tips, FAQ, and more.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Posting Strategy</h2>
+            </div>
+            <div class="strategy-card">
+                <h3>7-Day Launch Campaign Schedule</h3>
+                <table class="schedule-table">
+                    <thead>
+                        <tr><th>Day</th><th>Platform</th><th>Content</th><th>Goal</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>Day 1</td><td>All</td><td>90% Earnings Announcement</td><td>Awareness</td></tr>
+                        <tr><td>Day 2</td><td>TikTok, Reels</td><td>Earnings Comparison Video</td><td>Engagement</td></tr>
+                        <tr><td>Day 3</td><td>Stories, Snap</td><td>Behind-the-Scenes / Day in Life</td><td>Authenticity</td></tr>
+                        <tr><td>Day 4</td><td>All</td><td>Founding Driver Spotlight</td><td>Social proof</td></tr>
+                        <tr><td>Day 5</td><td>TikTok, Reels</td><td>"Going Home Mode" Feature</td><td>Feature awareness</td></tr>
+                        <tr><td>Day 6</td><td>Stories, Snap</td><td>Referral Code Challenge</td><td>Viral growth</td></tr>
+                        <tr><td>Day 7</td><td>All</td><td>Weekly Earnings Recap</td><td>Conversion</td></tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="content-grid">
+                <div class="strategy-card">
+                    <h3>Best Posting Times</h3>
+                    <ul>
+                        <li>Instagram: 11 AM - 1 PM and 7 PM - 9 PM</li>
+                        <li>TikTok: 7 AM - 9 AM and 5 PM - 7 PM</li>
+                        <li>Snapchat: 10 PM - 1 AM (late night engagement)</li>
+                        <li>Telegram: 8 AM and 6 PM (shift start/end)</li>
+                    </ul>
+                </div>
+                <div class="strategy-card">
+                    <h3>Content Mix Rule</h3>
+                    <ul>
+                        <li>40% Value content (tips, calculator, comparisons)</li>
+                        <li>30% Social proof (driver stories, earnings screenshots)</li>
+                        <li>20% Feature demos (Going Home, pay transparency)</li>
+                        <li>10% Direct CTA (download now, join today)</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Instagram Content</h2>
+                <span class="badge badge-insta">INSTAGRAM</span>
+            </div>
+            <div class="content-grid">
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Post 1: The 90% Hook</h3>
+                        <span class="card-type">CAROUSEL / REEL</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> Split-screen comparison. Left side dark/red showing "Other Apps: 75%" with money flying away. Right side green showing "Travony: 90%" with money stacking up. Use bold typography.</div>
+                        <div class="caption-box">What if I told you that you're giving away 25% of your hard-earned money?
+
+Every ride. Every day. Every week.
+
+Other platforms take 20-25% of YOUR fare. That's thousands per month that should be in YOUR pocket.
+
+Travony takes just 10%. You keep 90%.
+
+Same rides. Same hours. Way more money.
+
+Do the math. Then download T Driver.
+
+Link in bio.</div>
+                        <div class="hashtags">
+                            <span class="hashtag">#Travony</span>
+                            <span class="hashtag">#DriverEarnings</span>
+                            <span class="hashtag">#RideHailing</span>
+                            <span class="hashtag">#Keep90Percent</span>
+                            <span class="hashtag">#DriverLife</span>
+                            <span class="hashtag">#FairPay</span>
+                            <span class="hashtag">#GigEconomy</span>
+                            <span class="hashtag">#DriveAndEarn</span>
+                            <span class="hashtag">#UberAlternative</span>
+                            <span class="hashtag">#MoreMoney</span>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'insta1')">Copy Caption</button>
+                        <button class="copy-btn" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);" onclick="postToInstagram(this, 'https://travony.replit.app/campaign/earnings-comparison.png')">Post to Instagram</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Post 2: Pay Transparency</h3>
+                        <span class="card-type">REEL / STORY</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> Screen recording style showing the T Driver app with fare breakdown visible BEFORE accepting. Highlight: base fare, distance, time, surge, driver's 90% share. Contrast with blurred/hidden fares on other apps.</div>
+                        <div class="caption-box">Would you accept a job without knowing the pay?
+
+On other apps, you accept rides BLIND. You find out what you earned AFTER.
+
+On Travony, you see EVERYTHING before you tap accept:
+- Base fare
+- Distance pay
+- Time pay
+- Surge (if any)
+- YOUR exact 90% share
+
+No hidden fees. No surprises. No algorithms working against you.
+
+This is what fair looks like.
+
+Download T Driver - link in bio.</div>
+                        <div class="hashtags">
+                            <span class="hashtag">#PayTransparency</span>
+                            <span class="hashtag">#FairPay</span>
+                            <span class="hashtag">#DriverRights</span>
+                            <span class="hashtag">#Travony</span>
+                            <span class="hashtag">#NoHiddenFees</span>
+                            <span class="hashtag">#RideshareDriver</span>
+                            <span class="hashtag">#KnowYourWorth</span>
+                            <span class="hashtag">#GigWorker</span>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'insta2')">Copy Caption</button>
+                        <button class="copy-btn" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);" onclick="postToInstagram(this, 'https://travony.replit.app/campaign/pay-transparency.png')">Post to Instagram</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Post 3: Founding Driver</h3>
+                        <span class="card-type">CAROUSEL</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> Premium-looking dark card with gold/green accents showing "Founding Driver" badge. List perks on separate slides. Final slide: download CTA.</div>
+                        <div class="caption-box">Founding Drivers wanted.
+
+Be among the FIRST in your city. The perks last forever:
+
+1. Priority matching - you get rides first
+2. Signup bonus - earn extra on your first rides
+3. Permanent Founding Driver badge
+4. Referral earnings - get paid for every driver you bring
+
+This isn't a promo. It's a permanent status.
+
+Early drivers built every platform. This time, the platform rewards them for it.
+
+Spots are limited. Link in bio to apply.</div>
+                        <div class="hashtags">
+                            <span class="hashtag">#FoundingDriver</span>
+                            <span class="hashtag">#Travony</span>
+                            <span class="hashtag">#EarlyAdopter</span>
+                            <span class="hashtag">#DriverCommunity</span>
+                            <span class="hashtag">#BeFirst</span>
+                            <span class="hashtag">#RideHailing</span>
+                            <span class="hashtag">#PriorityAccess</span>
+                        </div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'insta3')">Copy Caption</button>
+                        <button class="copy-btn" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);" onclick="postToInstagram(this, 'https://travony.replit.app/campaign/founding-driver-badge.png')">Post to Instagram</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Story Series: Earnings Calc</h3>
+                        <span class="card-type">STORY SERIES (5 slides)</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> Interactive poll stickers + typing animation. Slide 1: "How many rides do you do per day?" (poll). Slide 2: "Here's how much you're losing" (calculator result). Slide 3-4: Comparison. Slide 5: Swipe up to download.</div>
+                        <div class="caption-box">STORY 1: "Quick question" - Poll: How many rides per day? 5-10 / 10-15 / 15-20 / 20+
+
+STORY 2: If you do 15 rides at 35 AED avg, 6 days/week...
+Other app: 2,362 AED/week
+Travony: 2,835 AED/week
+That's 473 AED MORE per week.
+
+STORY 3: Per month? +1,890 AED extra.
+Per year? +24,570 AED extra.
+Same rides. Same hours.
+
+STORY 4: "But is it real?" YES. 90% driver share. 10% platform fee. No hidden charges. See your earnings BEFORE accepting.
+
+STORY 5: Download T Driver now. Swipe up. Founding Driver spots filling fast.</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'insta4')">Copy Caption</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>TikTok Content</h2>
+                <span class="badge badge-tiktok">TIKTOK</span>
+            </div>
+            <div class="content-grid">
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Video 1: The Math Doesn't Lie</h3>
+                        <span class="card-type">60s VIDEO</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Script direction:</strong> Person sitting in car. "Let me show you something." Pulls out phone, shows calculator. Calculates 15 rides x 35 AED x 6 days = 3,150 AED gross. Other app: 2,362. Travony: 2,835. Shows the 473 AED difference. "That's 24,000+ AED per year. For doing the EXACT same job." End with download CTA.</div>
+                        <div class="caption-box">POV: you find out you've been giving away 24,000 AED/year for no reason
+
+#Travony #DriverEarnings #Keep90Percent #RideshareDriver #UberAlternative #GigEconomy #DriverLife #Money #FYP #Viral</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tiktok1')">Copy Caption</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Video 2: Going Home Mode</h3>
+                        <span class="card-type">30-45s VIDEO</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Script direction:</strong> Driver tired after long shift. "Done for the day. Going home." Activates "Going Home" mode. Gets matched with rider going same direction. "Wait... I just got PAID to go HOME?" Shows premium earnings. Mind-blown reaction.</div>
+                        <div class="caption-box">They're paying me to drive home. No literally.
+
+Travony's "Going Home" mode matches you with riders going YOUR direction. You earn a premium. While heading home.
+
+Name another app that does this. I'll wait.
+
+#Travony #GoingHome #DriverHack #EarnMore #SmartDriving #RideShare #FYP</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tiktok2')">Copy Caption</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Video 3: The Blind Acceptance</h3>
+                        <span class="card-type">45s VIDEO</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Script direction:</strong> "Would you accept a job offer without knowing the salary?" - cut to driver accepting blind ride on other app. "That's what you do EVERY SINGLE RIDE." Cut to Travony showing full breakdown before accept. "On Travony, you see everything. Base, distance, time, surge, YOUR share. Before you tap accept."</div>
+                        <div class="caption-box">Imagine accepting a job without knowing the pay. That's literally what you do every ride on [other apps].
+
+On Travony, you see your EXACT earnings BEFORE accepting. Wild concept, right?
+
+#Travony #PayTransparency #DriverEarnings #KnowYourWorth #FairPay #RideshareLife #FYP</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tiktok3')">Copy Caption</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Video 4: Referral Challenge</h3>
+                        <span class="card-type">30s VIDEO</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Script direction:</strong> "Challenge: Tell 3 drivers about Travony today. Here's why:" Show referral code. "They sign up, they complete 10 rides, you BOTH get paid." Show earning potential. "The more drivers, the more rides for everyone."</div>
+                        <div class="caption-box">Travony Referral Challenge: Tag 3 drivers who deserve to keep 90%
+
+Every driver you bring = bonus for BOTH of you.
+
+Download T Driver. Get your referral code. Share it everywhere.
+
+#TravonyChallenge #ReferralBonus #DriverCommunity #Keep90Percent #FYP #Viral</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tiktok4')">Copy Caption</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Snapchat Content</h2>
+                <span class="badge badge-snap">SNAPCHAT</span>
+            </div>
+            <div class="content-grid">
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Snap 1: Daily Earnings Reveal</h3>
+                        <span class="card-type">STORY / SPOTLIGHT</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> "Day in the life" driver story. Morning: "Starting my shift." Throughout day: quick clips of rides. End of day: earnings screen reveal. "12 rides. 420 AED. On Travony that's 378 in my pocket. On [other app] it'd be 315. That's 63 more. Every. Single. Day."</div>
+                        <div class="caption-box">12 rides today. Let me show you what I actually take home...
+
+Travony: 378 AED (90%)
+Other apps: 315 AED (75%)
+
+63 AED more. EVERY day. That's 1,890/month extra.
+
+Download T Driver - search "T Driver" on Play Store</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'snap1')">Copy Caption</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Snap 2: Quick Tips Series</h3>
+                        <span class="card-type">STORY SERIES</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="visual-prompt"><strong>Visual idea:</strong> Quick-cut, energetic tips. Each tip on screen for 3-4 seconds with bold text overlay. Camera talking head between tips. Informal, authentic feel.</div>
+                        <div class="caption-box">SNAP 1: "3 things I wish I knew before driving for ride apps"
+
+SNAP 2: "1. You're losing 25% of every fare to the platform" (shocked face)
+
+SNAP 3: "2. You accept rides BLIND - you don't know what you'll earn" (frustrated)
+
+SNAP 4: "3. There's an app where you keep 90% and see everything upfront" (smile)
+
+SNAP 5: "Travony. Download T Driver. Thank me later." (CTA)</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'snap2')">Copy Caption</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>Telegram Broadcast Messages</h2>
+                <span class="badge badge-telegram">TELEGRAM</span>
+            </div>
+            <div class="content-grid">
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Weekly Motivation</h3>
+                        <span class="card-type">BROADCAST</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="caption-box">Weekly Driver Update
+
+Top earners this week are keeping 90% and maximizing with these strategies:
+
+1. Peak hours: 7-9 AM and 5-8 PM
+2. Going Home mode at end of shift
+3. High acceptance rate = priority matching
+
+New feature coming: Weather boost automatically adds 20-30% to fares during bad weather. Stay online when it rains!
+
+Have questions? Use /faq or /support
+
+Keep driving, keep earning. Travony has your back.</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tg1')">Copy Message</button>
+                        <button class="copy-btn" style="background:#0088cc;" onclick="broadcastMessage(this, 'tg1')">Send to All Drivers</button>
+                    </div>
+                </div>
+
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Referral Push</h3>
+                        <span class="card-type">BROADCAST</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="caption-box">Driver Referral Challenge
+
+Know a driver who's tired of giving away 25% of their earnings?
+
+Share Travony with them! Use /referral to get your personal code.
+
+When they sign up and complete 10 rides, you BOTH earn a bonus.
+
+More drivers = more rides for everyone. Let's grow this community together.
+
+Download link to share:
+https://play.google.com/store/apps/details?id=com.travony.driver
+
+Learn more: https://travony.replit.app/drive</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'tg2')">Copy Message</button>
+                        <button class="copy-btn" style="background:#0088cc;" onclick="broadcastMessage(this, 'tg2')">Send to All Drivers</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <div class="section-header">
+                <h2>WhatsApp / Driver Group Messages</h2>
+            </div>
+            <div class="content-grid">
+                <div class="content-card">
+                    <div class="card-header">
+                        <h3>Group Share Message</h3>
+                        <span class="card-type">WHATSAPP</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="caption-box">Drivers - have you heard about Travony?
+
+Quick comparison:
+- Other apps take 20-25%. Travony takes only 10%
+- You see your exact earnings BEFORE accepting
+- 100% of tips go to you
+- Crypto (USDT) or bank payouts
+- "Going Home" mode: earn while commuting
+
+They're looking for Founding Drivers right now. Early drivers get permanent priority matching and a signup bonus.
+
+Download T Driver: https://play.google.com/store/apps/details?id=com.travony.driver
+
+More info: https://travony.replit.app/drive</div>
+                    </div>
+                    <div class="card-footer">
+                        <button class="copy-btn" onclick="copyContent(this, 'wa1')">Copy Message</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function copyContent(btn, id) {
+            const card = btn.closest('.content-card');
+            const caption = card.querySelector('.caption-box').textContent.trim();
+            const hashtagEls = card.querySelectorAll('.hashtag');
+            let text = caption;
+            if (hashtagEls.length > 0) {
+                const hashtags = Array.from(hashtagEls).map(el => el.textContent).join(' ');
+                text += '\n\n' + hashtags;
+            }
+            navigator.clipboard.writeText(text).then(() => {
+                btn.textContent = 'Copied!';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = btn.textContent.includes('Message') ? 'Copy Message' : 'Copy Caption';
+                    btn.classList.remove('copied');
+                }, 2000);
+            });
+        }
+
+        function checkFacebook() {
+            const status = document.getElementById('fbStatus');
+            const badge = document.getElementById('fbBadge');
+            const text = document.getElementById('fbStatusText');
+            const quickPost = document.getElementById('fbQuickPost');
+            status.style.display = 'block';
+            status.style.background = 'rgba(24,119,242,0.1)';
+            status.style.color = '#54a8f5';
+            status.textContent = 'Checking connection...';
+
+            fetch('/api/facebook/page-status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.connected) {
+                        badge.textContent = 'CONNECTED';
+                        badge.style.background = '#25D366';
+                        text.textContent = 'Page connected! You can post directly from here.';
+                        status.style.background = 'rgba(37,211,102,0.1)';
+                        status.style.color = '#4ade80';
+                        status.textContent = 'Connected to ' + (data.pageName || 'Facebook Page') + (data.followersCount ? ' (' + data.followersCount.toLocaleString() + ' followers)' : '');
+                        quickPost.style.display = 'block';
+                    } else {
+                        badge.textContent = 'NOT CONNECTED';
+                        badge.style.background = '#e53935';
+                        text.textContent = 'Page not connected. Click "Setup Page Token" to connect your travoney page.';
+                        status.style.background = 'rgba(229,57,53,0.1)';
+                        status.style.color = '#ff6b6b';
+                        status.textContent = data.error || 'No page token configured. Set up your page token first.';
+                        quickPost.style.display = 'none';
+                    }
+                })
+                .catch(err => {
+                    badge.textContent = 'ERROR';
+                    status.style.background = 'rgba(229,57,53,0.1)';
+                    status.style.color = '#ff6b6b';
+                    status.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        function postToFacebook() {
+            const msg = document.getElementById('fbPostMsg').value.trim();
+            if (!msg) return;
+            const status = document.getElementById('fbStatus');
+            status.style.display = 'block';
+            status.style.background = 'rgba(24,119,242,0.1)';
+            status.style.color = '#54a8f5';
+            status.textContent = 'Posting to Facebook...';
+
+            fetch('/api/facebook/post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message: msg })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    status.style.background = 'rgba(37,211,102,0.1)';
+                    status.style.color = '#4ade80';
+                    status.textContent = 'Posted successfully! Post ID: ' + data.postId;
+                    document.getElementById('fbPostMsg').value = '';
+                } else {
+                    status.style.background = 'rgba(229,57,53,0.1)';
+                    status.style.color = '#ff6b6b';
+                    status.textContent = 'Error: ' + (data.error || 'Failed to post');
+                }
+            })
+            .catch(err => {
+                status.style.background = 'rgba(229,57,53,0.1)';
+                status.style.color = '#ff6b6b';
+                status.textContent = 'Error: ' + err.message;
+            });
+        }
+
+        checkFacebook();
+
+        function setupTelegram() {
+            const status = document.getElementById('tgStatus');
+            status.style.display = 'block';
+            status.style.background = 'rgba(0,136,204,0.1)';
+            status.style.color = '#54b3e8';
+            status.textContent = 'Setting up bot...';
+
+            fetch('/api/telegram/setup', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success) {
+                        status.style.background = 'rgba(0,177,79,0.1)';
+                        status.style.color = '#4ade80';
+                        status.textContent = 'Bot activated! Webhook: ' + (data.webhook ? 'Set' : 'Failed') + ' | Commands: ' + (data.commands ? 'Registered' : 'Failed');
+                    } else {
+                        status.style.background = 'rgba(220,38,38,0.1)';
+                        status.style.color = '#f87171';
+                        status.textContent = 'Setup failed: ' + (data.message || 'Unknown error');
+                    }
+                })
+                .catch(err => {
+                    status.style.background = 'rgba(220,38,38,0.1)';
+                    status.style.color = '#f87171';
+                    status.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        function broadcastMessage(btn, id) {
+            const card = btn.closest('.content-card');
+            const message = card.querySelector('.caption-box').textContent.trim();
+            if (!confirm('Send this message to ALL connected drivers via Telegram?')) return;
+
+            btn.textContent = 'Sending...';
+            btn.disabled = true;
+
+            fetch('/api/telegram/broadcast', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message })
+            })
+            .then(r => r.json())
+            .then(data => {
+                btn.textContent = data.success ? `Sent to ${data.sent} drivers` : 'Failed';
+                setTimeout(() => {
+                    btn.textContent = 'Send to All Drivers';
+                    btn.disabled = false;
+                }, 3000);
+            })
+            .catch(() => {
+                btn.textContent = 'Failed to send';
+                setTimeout(() => {
+                    btn.textContent = 'Send to All Drivers';
+                    btn.disabled = false;
+                }, 3000);
+            });
+        }
+
+        function checkInstagram() {
+            const status = document.getElementById('igStatus');
+            status.style.display = 'block';
+            status.style.background = 'rgba(225,48,108,0.1)';
+            status.style.color = '#e1306c';
+            status.textContent = 'Checking connection...';
+
+            fetch('/api/instagram/insights')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.success && data.profile) {
+                        const p = data.profile;
+                        status.style.background = 'rgba(0,177,79,0.1)';
+                        status.style.color = '#4ade80';
+                        status.innerHTML = '<b>Connected!</b> Account: @' + (p.username || 'unknown') +
+                            ' | Followers: ' + (p.followers_count || 0) +
+                            ' | Posts: ' + (p.media_count || 0);
+                    } else {
+                        status.style.background = 'rgba(220,38,38,0.1)';
+                        status.style.color = '#f87171';
+                        status.textContent = 'Connection issue: ' + (data.error || data.profile?.error?.message || 'Check your credentials');
+                    }
+                })
+                .catch(err => {
+                    status.style.background = 'rgba(220,38,38,0.1)';
+                    status.style.color = '#f87171';
+                    status.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        function connectTikTok() {
+            const status = document.getElementById('ttStatus');
+            status.style.display = 'block';
+            status.style.background = 'rgba(37,244,238,0.1)';
+            status.style.color = '#25F4EE';
+            status.textContent = 'Getting authorization URL...';
+
+            fetch('/api/auth/tiktok')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.authUrl) {
+                        status.innerHTML = 'Redirecting to TikTok...';
+                        window.location.href = data.authUrl;
+                    } else {
+                        status.style.background = 'rgba(220,38,38,0.1)';
+                        status.style.color = '#f87171';
+                        status.textContent = 'Error: ' + (data.error || 'Could not generate auth URL');
+                    }
+                })
+                .catch(err => {
+                    status.style.background = 'rgba(220,38,38,0.1)';
+                    status.style.color = '#f87171';
+                    status.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        function checkTikTok() {
+            const status = document.getElementById('ttStatus');
+            status.style.display = 'block';
+            status.style.background = 'rgba(37,244,238,0.1)';
+            status.style.color = '#25F4EE';
+            status.textContent = 'Checking connection...';
+
+            fetch('/api/tiktok/status')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.connected) {
+                        status.style.background = 'rgba(0,177,79,0.1)';
+                        status.style.color = '#4ade80';
+                        status.innerHTML = '<b>Connected!</b> Account: ' + (data.user?.display_name || 'TikTok User');
+                    } else {
+                        status.style.background = 'rgba(254,44,85,0.1)';
+                        status.style.color = '#FE2C55';
+                        status.textContent = 'Not connected. Click "Connect TikTok Account" to authorize.';
+                    }
+                })
+                .catch(err => {
+                    status.style.background = 'rgba(220,38,38,0.1)';
+                    status.style.color = '#f87171';
+                    status.textContent = 'Error: ' + err.message;
+                });
+        }
+
+        (function() {
+            const params = new URLSearchParams(window.location.search);
+            if (params.get('tiktok') === 'connected') {
+                const status = document.getElementById('ttStatus');
+                if (status) {
+                    status.style.display = 'block';
+                    status.style.background = 'rgba(0,177,79,0.1)';
+                    status.style.color = '#4ade80';
+                    status.innerHTML = '<b>TikTok connected successfully!</b> You can now post content.';
+                }
+            } else if (params.get('tiktok') === 'error') {
+                const status = document.getElementById('ttStatus');
+                if (status) {
+                    status.style.display = 'block';
+                    status.style.background = 'rgba(220,38,38,0.1)';
+                    status.style.color = '#f87171';
+                    status.textContent = 'TikTok connection failed: ' + (params.get('msg') || 'Unknown error');
+                }
+            }
+        })();
+
+        function postToInstagram(btn, imageUrl) {
+            const card = btn.closest('.content-card');
+            const caption = card.querySelector('.caption-box').textContent.trim();
+            const hashtagEls = card.querySelectorAll('.hashtag');
+            let fullCaption = caption;
+            if (hashtagEls.length > 0) {
+                fullCaption += '\n\n' + Array.from(hashtagEls).map(el => el.textContent).join(' ');
+            }
+
+            if (!confirm('Post this content to your Instagram account?')) return;
+
+            btn.textContent = 'Posting...';
+            btn.disabled = true;
+
+            fetch('/api/instagram/post', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ imageUrl, caption: fullCaption })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.success) {
+                    btn.textContent = 'Posted!';
+                    btn.style.background = '#166534';
+                } else {
+                    btn.textContent = 'Failed: ' + (data.error || 'Unknown error').substring(0, 40);
+                    btn.style.background = '#dc2626';
+                }
+                setTimeout(() => {
+                    btn.textContent = 'Post to Instagram';
+                    btn.style.background = '';
+                    btn.disabled = false;
+                }, 5000);
+            })
+            .catch(err => {
+                btn.textContent = 'Error: ' + err.message;
+                setTimeout(() => {
+                    btn.textContent = 'Post to Instagram';
+                    btn.style.background = '';
+                    btn.disabled = false;
+                }, 3000);
+            });
+        }
+    </script>
+</body>
+</html>
