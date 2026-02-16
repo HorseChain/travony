@@ -7,6 +7,10 @@ import EmergencyContactsScreen from "@/screens/EmergencyContactsScreen";
 import HelpScreen from "@/screens/HelpScreen";
 import RideTruthScreen from "@/screens/RideTruthScreen";
 import GhostModeScreen from "@/screens/GhostModeScreen";
+import AboutNetworkScreen from "@/screens/AboutNetworkScreen";
+import NetworkAnalyticsScreen from "@/screens/NetworkAnalyticsScreen";
+import CommunityPrestigeScreen from "@/screens/CommunityPrestigeScreen";
+import FeedbackScreen from "@/screens/FeedbackScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type ProfileStackParamList = {
@@ -17,6 +21,10 @@ export type ProfileStackParamList = {
   Help: undefined;
   RideTruth: undefined;
   GhostMode: undefined;
+  AboutNetwork: undefined;
+  NetworkAnalytics: undefined;
+  CommunityPrestige: undefined;
+  Feedback: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -60,6 +68,26 @@ export default function ProfileStackNavigator() {
         name="GhostMode"
         component={GhostModeScreen}
         options={{ headerTitle: "Ghost Mode" }}
+      />
+      <Stack.Screen
+        name="AboutNetwork"
+        component={AboutNetworkScreen}
+        options={{ headerTitle: "About the Network" }}
+      />
+      <Stack.Screen
+        name="NetworkAnalytics"
+        component={NetworkAnalyticsScreen}
+        options={{ headerTitle: "Network Analytics" }}
+      />
+      <Stack.Screen
+        name="CommunityPrestige"
+        component={CommunityPrestigeScreen}
+        options={{ headerTitle: "Community Prestige" }}
+      />
+      <Stack.Screen
+        name="Feedback"
+        component={FeedbackScreen}
+        options={{ headerTitle: "Share Feedback" }}
       />
     </Stack.Navigator>
   );
