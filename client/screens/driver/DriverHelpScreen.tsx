@@ -30,40 +30,40 @@ export default function DriverHelpScreen() {
 
   const faqs: FAQ[] = [
     {
-      question: "How do I receive ride requests?",
-      answer: "Make sure you're online and in an active service area. Ride requests will appear automatically when customers nearby request a ride. Our Intent-Based Mobility system matches you with riders whose direction and preferences align with yours, leading to better trips and fewer cancellations.",
+      question: "How do I receive route requests?",
+      answer: "Ensure your vehicle is activated and you're in an active service area. Route requests appear automatically when riders nearby request movement. The intelligent matching system connects you with riders whose direction and preferences align with yours, leading to better utilization and fewer cancellations.",
     },
     {
-      question: "When do I get paid?",
-      answer: "Earnings from completed rides are added to your wallet immediately. You can withdraw to your bank account or as USDT cryptocurrency anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut.",
+      question: "When are payouts processed?",
+      answer: "Yield from completed routes is added to your asset balance immediately. You can withdraw to your bank account or as USDT cryptocurrency anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut.",
     },
     {
-      question: "What if a customer cancels?",
-      answer: "If a customer cancels after you've arrived at the pickup location, you will receive a cancellation fee. The fee depends on your wait time and distance traveled. Our Trust-First framework ensures fair protection for drivers against cancellations that aren't your fault.",
+      question: "What if a rider cancels?",
+      answer: "If a rider cancels after you've arrived at the pickup location, you receive a cancellation fee. The fee depends on your wait time and distance traveled. The Trust-First framework ensures fair protection for operators against cancellations that aren't your fault.",
     },
     {
       question: "How are fares calculated?",
-      answer: "Fares include a base fare, distance-based charge, and time-based charge. During high demand, dynamic pricing may apply (capped based on the city's launch phase). You receive 90% of each fare - Travony only takes a flat 10% platform fee. You always see the full earnings breakdown before accepting a ride.",
+      answer: "Fares include a base fare, distance-based charge, and time-based charge. During high demand, dynamic pricing may apply (capped based on the city's launch phase). You retain 90% of each fare - Travony only takes a flat 10% platform fee. You always see the full yield breakdown before accepting a route.",
     },
     {
       question: "How do I update my vehicle information?",
-      answer: "Go to Profile > Vehicle Details to update your vehicle information. Our AI Vehicle Verification system will review your photos and can provide instant approval. Make sure to keep your documents current for uninterrupted service.",
+      answer: "Go to Profile > Vehicle Details to update your vehicle information. The AI Vehicle Verification system reviews your photos and can provide instant approval. Keep your documents current for uninterrupted service.",
     },
     {
-      question: "What if I have an issue during a ride?",
-      answer: "For emergencies, contact local authorities immediately (999 for Police, 998 for Ambulance). For ride-related issues, you can report them through the app after completing the ride or email driver-support@travony.com.",
+      question: "What if I have an issue during a route?",
+      answer: "For emergencies, contact local authorities immediately (999 for Police, 998 for Ambulance). For route-related issues, you can report them through the app after completion or email driver-support@travony.com.",
     },
     {
-      question: "What is 'Pay Me to Go Home' mode?",
-      answer: "When heading home, activate 'Going Home' mode. The system will only send you ride requests from passengers going in your direction. You earn an additional 80% of the direction premium that riders pay for the 'Faster Pickup' option. This feature has built-in protections against misuse.",
+      question: "How does direction-aligned routing work?",
+      answer: "When heading home, activate 'Going Home' mode. The network only sends you requests from riders going in your direction. You earn an additional 80% of the direction premium that riders pay for the 'Faster Pickup' option. This feature has built-in protections against misuse.",
     },
     {
       question: "What is Ghost Mode?",
-      answer: "Ghost Mode lets you accept and complete rides even without internet. It uses Bluetooth mesh networking to connect with nearby riders. Fares are pre-calculated from cached pricing. Once you're back online, rides automatically sync for payment processing. This is especially useful in areas with unreliable connectivity.",
+      answer: "Ghost Mode lets you accept and complete routes even without internet. It uses Bluetooth mesh networking to connect with nearby riders. Fares are pre-calculated from cached pricing. Once you're back online, routes automatically sync for payment processing. This is especially useful in areas with unreliable connectivity.",
     },
     {
       question: "What is the Ride Truth Engine?",
-      answer: "The Ride Truth Engine is a crowd-sourced reliability scoring system. Both riders and drivers can log their experiences on any platform. Scores are based on price accuracy, pickup reliability, cancellation rates, route integrity, and support quality. Your participation is voluntary and all data is anonymous.",
+      answer: "The Ride Truth Engine is a crowd-sourced reliability scoring system. Both riders and operators can log their experiences on any platform. Scores are based on price accuracy, pickup reliability, cancellation rates, route integrity, and support quality. Your participation is voluntary and all data is anonymous.",
     },
     {
       question: "How does driver trust protection work?",
