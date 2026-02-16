@@ -102,15 +102,15 @@ export default function DriverAppSettingsScreen() {
     {
       icon: "notifications-outline",
       label: "Push Notifications",
-      subtitle: "Receive ride requests and updates",
+      subtitle: "Receive route requests and updates",
       type: "toggle",
       value: pushNotifications,
       onToggle: setPushNotifications,
     },
     {
       icon: "car-outline",
-      label: "Ride Alerts",
-      subtitle: "Get notified of new ride requests",
+      label: "Route Alerts",
+      subtitle: "Get notified of new route requests",
       type: "toggle",
       value: rideAlerts,
       onToggle: setRideAlerts,
@@ -291,7 +291,7 @@ export default function DriverAppSettingsScreen() {
           <View style={[styles.warningCard, { backgroundColor: theme.warning + "15" }]}>
             <Ionicons name="alert-circle-outline" size={16} color={theme.warning} />
             <ThemedText style={[styles.warningText, { color: theme.warning }]}>
-              Setting a high minimum may reduce ride requests
+              Setting a high minimum may reduce route requests
             </ThemedText>
           </View>
         </View>
