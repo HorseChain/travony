@@ -495,7 +495,7 @@ export default function BookingBottomSheet({
     },
     onError: (error: any) => {
       console.error("Ride booking error:", error);
-      const errorMessage = error.message || "Failed to book ride";
+      const errorMessage = error.message || "Failed to request route";
       const showError = (title: string, message: string) => {
         if (Platform.OS === "web") {
           window.alert(`${title}: ${message}`);
@@ -732,7 +732,7 @@ export default function BookingBottomSheet({
         onPress={handleNextTab}
         disabled={!pickupLocation || !dropoffLocation}
       >
-        <ThemedText style={styles.nextButtonText}>Choose Ride</ThemedText>
+        <ThemedText style={styles.nextButtonText}>Choose Route</ThemedText>
         <Ionicons name="arrow-forward-outline" size={20} color="#FFFFFF" />
       </Pressable>
     </View>
@@ -888,7 +888,7 @@ export default function BookingBottomSheet({
           </View>
           <View style={styles.transparencyItem}>
             <Ionicons name="person-outline" size={14} color={theme.success} />
-            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Driver (90%)</ThemedText>
+            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Vehicle Owner (90%)</ThemedText>
             <ThemedText style={[styles.transparencyValue, { color: theme.success }]}>AED {Number(driverEarnings).toFixed(2)}</ThemedText>
           </View>
         </View>
@@ -997,7 +997,7 @@ export default function BookingBottomSheet({
       <View style={styles.tabBar}>
         {[
           { key: "location", label: "Where?", icon: "location-outline" },
-          { key: "rides", label: "Rides", icon: "car-outline" },
+          { key: "rides", label: "Routes", icon: "car-outline" },
           { key: "confirm", label: "Confirm", icon: "checkmark-circle-outline" },
         ].map((tab, index) => (
           <Pressable
