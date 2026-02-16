@@ -293,7 +293,7 @@ export default function DriverEarningsScreen() {
           <>
             <View style={[styles.summaryCard, { backgroundColor: Colors.travonyGreen }]}>
               <View style={styles.balanceSection}>
-                <ThemedText style={styles.balanceLabel}>Available Balance</ThemedText>
+                <ThemedText style={styles.balanceLabel}>Asset Balance</ThemedText>
                 <ThemedText style={styles.balanceAmount}>AED {balance.toFixed(2)}</ThemedText>
                 <Pressable
                   style={styles.withdrawButton}
@@ -309,19 +309,19 @@ export default function DriverEarningsScreen() {
                 <View style={styles.statItem}>
                   <Ionicons name="navigate-outline" size={20} color="rgba(255,255,255,0.8)" />
                   <ThemedText style={styles.statValue}>{todayTrips}</ThemedText>
-                  <ThemedText style={styles.statLabel}>Today Trips</ThemedText>
+                  <ThemedText style={styles.statLabel}>Today Routes</ThemedText>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
                   <Ionicons name="cash-outline" size={20} color="rgba(255,255,255,0.8)" />
                   <ThemedText style={styles.statValue}>AED {todayEarnings.toFixed(0)}</ThemedText>
-                  <ThemedText style={styles.statLabel}>Today Earnings</ThemedText>
+                  <ThemedText style={styles.statLabel}>Today Yield</ThemedText>
                 </View>
                 <View style={styles.statDivider} />
                 <View style={styles.statItem}>
                   <Ionicons name="trending-up-outline" size={20} color="rgba(255,255,255,0.8)" />
                   <ThemedText style={styles.statValue}>AED {totalEarnings.toFixed(0)}</ThemedText>
-                  <ThemedText style={styles.statLabel}>Total</ThemedText>
+                  <ThemedText style={styles.statLabel}>Total Yield</ThemedText>
                 </View>
               </View>
             </View>
@@ -334,9 +334,9 @@ export default function DriverEarningsScreen() {
                     <ThemedText style={styles.cryptoIconText}>USDT</ThemedText>
                   </View>
                   <View>
-                    <ThemedText style={styles.cryptoTitle}>Crypto Earnings</ThemedText>
+                    <ThemedText style={styles.cryptoTitle}>Crypto Yield</ThemedText>
                     <ThemedText style={[styles.cryptoSubtitle, { color: theme.textSecondary }]}>
-                      From USDT ride payments
+                      From USDT route payments
                     </ThemedText>
                   </View>
                 </View>
@@ -389,7 +389,7 @@ export default function DriverEarningsScreen() {
                   No transactions yet
                 </ThemedText>
                 <ThemedText style={[styles.emptySubtext, { color: theme.textMuted }]}>
-                  Complete rides to start earning
+                  Complete routes to start yielding
                 </ThemedText>
               </View>
             ) : null}
@@ -415,7 +415,7 @@ export default function DriverEarningsScreen() {
 
             <View style={[styles.balanceInfo, { backgroundColor: theme.backgroundDefault }]}>
               <ThemedText style={[styles.availableLabel, { color: theme.textSecondary }]}>
-                Available Balance
+                Asset Balance
               </ThemedText>
               <ThemedText style={[styles.availableAmount, { color: Colors.travonyGreen }]}>
                 AED {balance.toFixed(2)}
