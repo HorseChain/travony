@@ -28,6 +28,7 @@ interface Ride {
   dropoffLng: string | number;
   estimatedFare: string;
   actualFare?: string;
+  paymentMethod?: string;
   customer?: {
     name: string;
     phone?: string;
@@ -144,7 +145,22 @@ export default function DriverActiveRideScreen() {
   };
 
   const handleStatusUpdate = () => {
-    if (statusInfo.nextStatus) {
+    if (!statusInfo.nextStatus) return;
+    
+    if (statusInfo.nextStatus === "completed" && ride?.paymentMethod === "cash") {
+      const fare = ride.actualFare || ride.estimatedFare || "0.00";
+      Alert.alert(
+        "Collect Cash Payment",
+        `Please collect AED ${fare} from the customer before completing the ride.`,
+        [
+          { text: "Cancel", style: "cancel" },
+          { 
+            text: "Cash Collected", 
+            onPress: () => updateStatusMutation.mutate("completed"),
+          }
+        ]
+      );
+    } else {
       updateStatusMutation.mutate(statusInfo.nextStatus);
     }
   };
@@ -279,9 +295,26 @@ export default function DriverActiveRideScreen() {
               <ThemedText style={styles.customerName}>
                 {ride.customer?.name || "Customer"}
               </ThemedText>
-              <ThemedText style={[styles.fareAmount, { color: Colors.travonyGreen }]}>
-                AED {ride.estimatedFare || "0.00"}
-              </ThemedText>
+              <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
+                <ThemedText style={[styles.fareAmount, { color: Colors.travonyGreen }]}>
+                  AED {ride.estimatedFare || "0.00"}
+                </ThemedText>
+                {ride.paymentMethod === "cash" ? (
+                  <View style={[styles.paymentBadge, { backgroundColor: "#F59E0B20" }]}>
+                    <Ionicons name="cash-outline" size={12} color="#F59E0B" />
+                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#F59E0B" }}>Cash</ThemedText>
+                  </View>
+                ) : ride.paymentMethod === "card" ? (
+                  <View style={[styles.paymentBadge, { backgroundColor: "#4F46E520" }]}>
+                    <Ionicons name="card-outline" size={12} color="#4F46E5" />
+                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#4F46E5" }}>Card</ThemedText>
+                  </View>
+                ) : ride.paymentMethod === "usdt" ? (
+                  <View style={[styles.paymentBadge, { backgroundColor: "#26A17B20" }]}>
+                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#26A17B" }}>USDT</ThemedText>
+                  </View>
+                ) : null}
+              </View>
             </View>
             <View style={styles.customerActions}>
               <Pressable
@@ -480,5 +513,13 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     ...Typography.button,
+  },
+  paymentBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
   },
 });
