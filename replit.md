@@ -1,8 +1,33 @@
-# Travony - Ride Booking Platform
+# Travony - Intelligent Mobility Network (v4.4.0)
 
 ## Overview
 
-Travony is a ride-booking platform inspired by Careem and Uber, connecting passengers and drivers through React Native mobile apps and an Express.js backend. It supports multiple user roles (customers, drivers, admins, fleet owners) and operates on a peer-to-peer model with a 10% platform fee. Key features include AI-powered driver matching, dynamic pricing, blockchain verification of ride records on Polygon Amoy Testnet, and a robust system for international expansion. The project aims to deliver a seamless, fair, and globally scalable ride-sharing experience.
+Travony is a smart mobility network where private vehicles operate as intelligent economic assets. It connects riders and vehicle owners through React Native mobile apps (T Ride / T Driver) and an Express.js backend. The platform operates on a peer-to-peer model with a 10% platform fee. Key features include AI-powered intent-based matching, dynamic pricing, blockchain verification on Polygon Amoy Testnet, and a robust system for international expansion.
+
+## Brand Identity & Language Guidelines (Consolidated Feb 2026)
+
+Travoney is NOT a ride-hailing app, side hustle tool, or cheaper Uber. It IS distributed mobility infrastructure where private vehicles operate as programmable economic assets.
+
+**Terminology Map:**
+- Driver → Vehicle Owner (internal: driver)
+- Go Online → Activate Vehicle
+- Go Offline → Deactivate
+- Trip/Ride → Route/Access
+- Earnings → Yield
+- Completed Trips → Completed Routes
+- Wallet Balance → Asset Balance
+
+**Never use:** "Earn extra cash", "Make money fast", "Side income", "Flexible job", "Gig"
+**Instead use:** Intelligent Yield, Asset Participation, Network Optimization, Autonomous Activation
+
+**Premium Consolidation (Completed):**
+- Splash screen: "Movement has value." / "Welcome to the Travoney Mobility Network."
+- Driver Home: 3 core elements only (Vehicle Status, Current Route, Monthly Yield)
+- Rider Home: Destination input + Network Status: Optimal
+- Signature moment on Vehicle Activation (haptic + overlay animation)
+- About the Network page in both apps
+- Long-term metrics in driver profile (Lifetime Yield, Network Participation)
+- Network Efficiency indicator for drivers, Network Status for riders
 
 ## User Preferences
 
@@ -44,6 +69,27 @@ A web-based admin dashboard provides real-time statistics, driver and rider mana
 - `rejected`: Vehicle not suitable for platform
 
 **Driver Vehicle Screen**: Drivers can upload vehicle photos and select from region-appropriate vehicle types. AI verification provides instant feedback, with fallback to admin queue for manual review.
+
+### OpenClaw - AI-Powered Hub & Hotspot System
+OpenClaw is an intelligent mobility hub system that transforms high-activity areas into community gathering points with AI-powered insights.
+
+**Backend Services:**
+- `server/openClawService.ts`: 10 AI functions for hotspot detection (spatial bucketing ~500m grid), hub recommendations, yield estimates, carpool matching, smart prompts
+- `server/hubRoutes.ts`: Full REST API with 15+ endpoints for hubs, hotspots, messaging, check-ins, feedback
+- `server/communityPrestigeService.ts`: Prestige tier calculation (bronze/silver/gold/platinum/diamond) based on participation, contributions, efficiency
+
+**Database Tables (8 new):** hubs, hotspots, hubMessages, hubReactions, hubCheckIns, communityPrestige, userFeedback, carpoolSuggestions
+
+**Frontend Screens (5 new):**
+- `OpenClawScreen.tsx`: Main hub/hotspot map with heatmap overlay, hub cards, AI prompts (variant: rider/driver)
+- `HubDetailScreen.tsx`: Hub detail with ephemeral messaging, check-ins, reactions, carpool suggestions
+- `NetworkAnalyticsScreen.tsx`: Analytics dashboard with stats, prestige card, hub activity, weekly trends
+- `CommunityPrestigeScreen.tsx`: Full prestige display with tier cards, leaderboard (top 20)
+- `FeedbackScreen.tsx`: In-app feedback with categories, star rating, text input
+
+**Components (3 new):** HeatmapOverlay (animated gradient grid), HubCard (hub preview card), SmartPromptBanner (contextual AI suggestions)
+
+**Navigation:** OpenClaw screens in both rider and driver home stacks; analytics/prestige/feedback in profile stacks; entry buttons on both home screens
 
 ### Pay Me to Go Home (PMGTH)
 This feature allows drivers to set a destination and receive only direction-compatible rides with transparent premium pricing. Drivers activate "Going Home" mode, and the system uses vector math for direction compatibility. Riders see a "Faster Pickup" option with a premium, of which the driver receives 80%. Abuse prevention mechanisms include session limits and detour manipulation detection.
