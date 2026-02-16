@@ -528,6 +528,12 @@ export const educationModuleStatusEnum = pgEnum("education_module_status", ["not
 export const intakeChannelEnum = pgEnum("intake_channel", ["facebook", "whatsapp", "telegram", "referral", "website", "other"]);
 export const pmgthSessionStatusEnum = pgEnum("pmgth_session_status", ["active", "completed", "expired", "cancelled"]);
 
+export const hubTypeEnum = pgEnum("hub_type", ["station", "park", "coworking", "coffee_shop", "mall", "airport", "university", "hospital", "custom"]);
+export const hubStatusEnum = pgEnum("hub_status", ["active", "inactive", "predicted"]);
+export const hubMessageStatusEnum = pgEnum("hub_message_status", ["active", "expired", "moderated"]);
+export const prestigeTierEnum = pgEnum("prestige_tier", ["bronze", "silver", "gold", "platinum", "diamond"]);
+export const feedbackTypeEnum = pgEnum("feedback_type", ["rating", "suggestion", "issue", "compliment"]);
+
 export const cities = pgTable("cities", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   regionCode: text("region_code").notNull(),
@@ -1116,3 +1122,135 @@ export const cachedPricing = pgTable("cached_pricing", {
 });
 
 export type CachedPricing = typeof cachedPricing.$inferSelect;
+
+export const hubs = pgTable("hubs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  type: hubTypeEnum("type").notNull(),
+  status: hubStatusEnum("status").default("active"),
+  lat: decimal("lat", { precision: 10, scale: 8 }).notNull(),
+  lng: decimal("lng", { precision: 11, scale: 8 }).notNull(),
+  radiusMeters: integer("radius_meters").default(300),
+  cityId: varchar("city_id").references(() => cities.id),
+  regionCode: text("region_code"),
+  description: text("description"),
+  address: text("address"),
+  avgDemandScore: decimal("avg_demand_score", { precision: 5, scale: 2 }).default("0.00"),
+  peakHours: text("peak_hours"),
+  isAiDetected: boolean("is_ai_detected").default(false),
+  lastActivityAt: timestamp("last_activity_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const hotspots = pgTable("hotspots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hubId: varchar("hub_id").references(() => hubs.id),
+  lat: decimal("lat", { precision: 10, scale: 8 }).notNull(),
+  lng: decimal("lng", { precision: 11, scale: 8 }).notNull(),
+  demandScore: decimal("demand_score", { precision: 5, scale: 2 }).notNull(),
+  supplyCount: integer("supply_count").default(0),
+  demandCount: integer("demand_count").default(0),
+  avgYieldEstimate: decimal("avg_yield_estimate", { precision: 10, scale: 2 }),
+  peakMultiplier: decimal("peak_multiplier", { precision: 3, scale: 2 }).default("1.00"),
+  isActive: boolean("is_active").default(true),
+  detectedAt: timestamp("detected_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at"),
+  cityId: varchar("city_id").references(() => cities.id),
+  regionCode: text("region_code"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const hubMessages = pgTable("hub_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hubId: varchar("hub_id").references(() => hubs.id).notNull(),
+  authorId: varchar("author_id").references(() => users.id).notNull(),
+  content: text("content").notNull(),
+  status: hubMessageStatusEnum("status").default("active"),
+  likesCount: integer("likes_count").default(0),
+  isCurated: boolean("is_curated").default(false),
+  moderationScore: decimal("moderation_score", { precision: 3, scale: 2 }),
+  moderationReason: text("moderation_reason"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const hubReactions = pgTable("hub_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  messageId: varchar("message_id").references(() => hubMessages.id).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  reactionType: text("reaction_type").default("like"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const hubCheckIns = pgTable("hub_check_ins", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hubId: varchar("hub_id").references(() => hubs.id).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  userRole: text("user_role").notNull(),
+  lat: decimal("lat", { precision: 10, scale: 8 }),
+  lng: decimal("lng", { precision: 11, scale: 8 }),
+  checkedInAt: timestamp("checked_in_at").defaultNow().notNull(),
+  checkedOutAt: timestamp("checked_out_at"),
+});
+
+export const communityPrestige = pgTable("community_prestige", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  driverId: varchar("driver_id").references(() => drivers.id),
+  tier: prestigeTierEnum("tier").default("bronze"),
+  totalContributions: integer("total_contributions").default(0),
+  networkParticipationScore: decimal("network_participation_score", { precision: 5, scale: 2 }).default("0.00"),
+  efficiencyRating: decimal("efficiency_rating", { precision: 5, scale: 2 }).default("0.00"),
+  lifetimeYield: decimal("lifetime_yield", { precision: 12, scale: 2 }).default("0.00"),
+  hubMessagesCount: integer("hub_messages_count").default(0),
+  helpfulReactionsReceived: integer("helpful_reactions_received").default(0),
+  monthlyActiveHubs: integer("monthly_active_hubs").default(0),
+  isTopContributor: boolean("is_top_contributor").default(false),
+  lastActivityAt: timestamp("last_activity_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const userFeedback = pgTable("user_feedback", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  feedbackType: feedbackTypeEnum("feedback_type").notNull(),
+  category: text("category"),
+  content: text("content").notNull(),
+  rating: integer("rating"),
+  screenName: text("screen_name"),
+  appVersion: text("app_version"),
+  deviceInfo: text("device_info"),
+  isResolved: boolean("is_resolved").default(false),
+  resolvedBy: varchar("resolved_by"),
+  resolution: text("resolution"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+});
+
+export const carpoolSuggestions = pgTable("carpool_suggestions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  hubId: varchar("hub_id").references(() => hubs.id),
+  riderId: varchar("rider_id").references(() => users.id).notNull(),
+  matchedRiderId: varchar("matched_rider_id").references(() => users.id),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }).notNull(),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }).notNull(),
+  dropoffLat: decimal("dropoff_lat", { precision: 10, scale: 8 }).notNull(),
+  dropoffLng: decimal("dropoff_lng", { precision: 11, scale: 8 }).notNull(),
+  routeOverlapPercent: decimal("route_overlap_percent", { precision: 5, scale: 2 }),
+  estimatedSavings: decimal("estimated_savings", { precision: 10, scale: 2 }),
+  status: text("status").default("suggested"),
+  acceptedAt: timestamp("accepted_at"),
+  expiresAt: timestamp("expires_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type Hub = typeof hubs.$inferSelect;
+export type Hotspot = typeof hotspots.$inferSelect;
+export type HubMessage = typeof hubMessages.$inferSelect;
+export type HubReaction = typeof hubReactions.$inferSelect;
+export type HubCheckIn = typeof hubCheckIns.$inferSelect;
+export type CommunityPrestige = typeof communityPrestige.$inferSelect;
+export type UserFeedback = typeof userFeedback.$inferSelect;
+export type CarpoolSuggestion = typeof carpoolSuggestions.$inferSelect;
