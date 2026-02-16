@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Pressable, Alert, Switch, Platform, ActivityIndicator } from "react-native";
+import { View, StyleSheet, Pressable, Alert, Switch, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -17,7 +17,9 @@ import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
 import { GoingHomeButton } from "@/components/driver/GoingHomeButton";
-import { GuaranteeBanner } from "@/components/driver/GuaranteeBanner";
+import { DriverHomeSkeleton } from "@/components/SkeletonLoader";
+import * as Haptics from "expo-haptics";
+import Animated, { FadeIn, FadeOut, SlideInUp, ZoomIn } from "react-native-reanimated";
 
 type NavigationProp = NativeStackNavigationProp<DriverHomeStackParamList>;
 
@@ -55,6 +57,7 @@ export default function DriverHomeScreen() {
   const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
   const [showHeatmap, setShowHeatmap] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [showActivationMoment, setShowActivationMoment] = useState(false);
 
   useEffect(() => {
     console.log("DriverHomeScreen: Mounting");
@@ -95,6 +98,12 @@ export default function DriverHomeScreen() {
     avgFare: string;
     demandLevel: "low" | "medium" | "high" | "surge";
   }
+
+  const { data: earningsData } = useQuery<{ monthlyYield: string }>({
+    queryKey: ["/api/drivers/monthly-yield"],
+    enabled: isOnline && !!user,
+    refetchInterval: 30000,
+  });
 
   const { data: heatmapData } = useQuery<{ zones: DemandZone[]; timestamp: string }>({
     queryKey: ["/api/drivers/heatmap"],
@@ -161,7 +170,12 @@ export default function DriverHomeScreen() {
   const handleToggleOnline = (value: boolean) => {
     setIsOnline(value);
     toggleOnlineMutation.mutate(value);
-    if (!value) {
+    if (value) {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowActivationMoment(true);
+      setTimeout(() => setShowActivationMoment(false), 2500);
+    } else {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setIncomingRequest(null);
     }
   };
@@ -185,9 +199,9 @@ export default function DriverHomeScreen() {
     } catch (error: any) {
       console.error("Error accepting ride:", error);
       if (Platform.OS === "web") {
-        window.alert(error.message || "Failed to accept ride");
+        window.alert(error.message || "Failed to accept route");
       } else {
-        Alert.alert("Error", error.message || "Failed to accept ride");
+        Alert.alert("Error", error.message || "Failed to accept route");
       }
     }
   };
@@ -197,14 +211,7 @@ export default function DriverHomeScreen() {
   };
 
   if (!isReady) {
-    return (
-      <ThemedView style={[styles.container, styles.loadingContainer]}>
-        <ActivityIndicator size="large" color={Colors.travonyGreen} />
-        <ThemedText style={[styles.loadingText, { color: theme.textSecondary }]}>
-          Loading...
-        </ThemedText>
-      </ThemedView>
-    );
+    return <DriverHomeSkeleton />;
   }
 
   return (
@@ -219,12 +226,12 @@ export default function DriverHomeScreen() {
       <View style={[styles.statusBar, { top: insets.top + Spacing.md }]}>
         <View style={[styles.statusCard, { backgroundColor: theme.backgroundRoot }]}>
           <View style={styles.statusContent}>
-            <View>
+            <View style={{ flex: 1 }}>
               <ThemedText style={styles.statusLabel}>
-                {isOnline ? "You're Online" : "You're Offline"}
+                {isOnline ? "Vehicle Active" : "Vehicle Inactive"}
               </ThemedText>
-              <ThemedText style={[styles.statusSubtitle, { color: theme.textSecondary }]}>
-                {isOnline ? "Accepting ride requests" : "Go online to receive requests"}
+              <ThemedText style={[styles.networkEfficiency, { color: isOnline ? Colors.travonyGreen : theme.textMuted }]}>
+                {isOnline ? "Network Efficiency: 94%" : "Activate to join the network"}
               </ThemedText>
             </View>
             <Switch
@@ -234,51 +241,16 @@ export default function DriverHomeScreen() {
               thumbColor={isOnline ? "#fff" : "#f4f3f4"}
             />
           </View>
-          <GuaranteeBanner isOnline={isOnline} />
+          {isOnline && earningsData ? (
+            <View style={styles.monthlyYieldRow}>
+              <ThemedText style={[styles.yieldLabel, { color: theme.textSecondary }]}>Monthly Yield</ThemedText>
+              <ThemedText style={[styles.yieldValue, { color: Colors.travonyGreen }]}>
+                AED {earningsData.monthlyYield || "0.00"}
+              </ThemedText>
+            </View>
+          ) : null}
         </View>
       </View>
-
-      {isOnline ? (
-        <Pressable
-          style={[
-            styles.heatmapToggle,
-            { 
-              top: insets.top + 100, 
-              backgroundColor: showHeatmap ? Colors.travonyGreen : theme.backgroundRoot 
-            }
-          ]}
-          onPress={() => setShowHeatmap(!showHeatmap)}
-        >
-          <Ionicons 
-            name="flame-outline" 
-            size={22} 
-            color={showHeatmap ? "#FFFFFF" : theme.textPrimary} 
-          />
-        </Pressable>
-      ) : null}
-
-      {showHeatmap && heatmapData?.zones && heatmapData.zones.length > 0 ? (
-        <View style={[styles.heatmapLegend, { top: insets.top + 160, backgroundColor: theme.backgroundRoot }]}>
-          <ThemedText style={[styles.heatmapTitle, { color: theme.textSecondary }]}>Demand</ThemedText>
-          <View style={styles.legendItems}>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: "#FF5722" }]} />
-              <ThemedText style={[styles.legendText, { color: theme.textMuted }]}>Surge</ThemedText>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: "#FF9800" }]} />
-              <ThemedText style={[styles.legendText, { color: theme.textMuted }]}>High</ThemedText>
-            </View>
-            <View style={styles.legendItem}>
-              <View style={[styles.legendDot, { backgroundColor: "#FFC107" }]} />
-              <ThemedText style={[styles.legendText, { color: theme.textMuted }]}>Medium</ThemedText>
-            </View>
-          </View>
-          <ThemedText style={[styles.heatmapSubtext, { color: theme.textMuted }]}>
-            {heatmapData.zones.length} active zones
-          </ThemedText>
-        </View>
-      ) : null}
 
       {isOnline && !incomingRequest && (
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
@@ -287,7 +259,7 @@ export default function DriverHomeScreen() {
           </View>
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
-            <ThemedText style={styles.searchingText}>Searching for ride requests...</ThemedText>
+            <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
           </View>
         </View>
       )}
@@ -296,7 +268,7 @@ export default function DriverHomeScreen() {
         <View style={[styles.requestCard, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
           <View style={styles.requestHeader}>
             <View style={styles.requestTitleRow}>
-              <ThemedText style={styles.requestTitle}>New Ride Request</ThemedText>
+              <ThemedText style={styles.requestTitle}>New Route Request</ThemedText>
               {incomingRequest.isPmgthRide ? (
                 <View style={[styles.pmgthBadge, { backgroundColor: Colors.travonyGreen + "20" }]}>
                   <Ionicons name="home" size={12} color={Colors.travonyGreen} />
@@ -405,10 +377,26 @@ export default function DriverHomeScreen() {
               style={[styles.acceptButton, { backgroundColor: Colors.travonyGreen }]}
               onPress={handleAcceptRide}
             >
-              <ThemedText style={styles.acceptButtonText}>Accept Ride</ThemedText>
+              <ThemedText style={styles.acceptButtonText}>Accept Route</ThemedText>
             </Pressable>
           </View>
         </View>
+      ) : null}
+
+      {showActivationMoment ? (
+        <Animated.View 
+          entering={FadeIn.duration(300)} 
+          exiting={FadeOut.duration(300)} 
+          style={styles.activationOverlay}
+        >
+          <Animated.View entering={ZoomIn.delay(200).duration(400)} style={styles.activationContent}>
+            <View style={styles.activationIcon}>
+              <Ionicons name="radio-outline" size={48} color={Colors.travonyGreen} />
+            </View>
+            <ThemedText style={styles.activationTitle}>Vehicle Activated</ThemedText>
+            <ThemedText style={styles.activationSubtitle}>Autonomous Yield: Enabled</ThemedText>
+          </Animated.View>
+        </Animated.View>
       ) : null}
     </ThemedView>
   );
@@ -417,14 +405,6 @@ export default function DriverHomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  loadingContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: Spacing.md,
-    fontSize: 16,
   },
   map: {
     flex: 1,
@@ -655,22 +635,32 @@ const styles = StyleSheet.create({
     borderRadius: 22,
     justifyContent: "center",
     alignItems: "center",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
   },
   heatmapLegend: {
     position: "absolute",
     right: Spacing.lg,
     padding: Spacing.sm,
     borderRadius: BorderRadius.md,
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 4,
+      },
+      android: { elevation: 3 },
+      default: {},
+    }),
   },
   heatmapTitle: {
     ...Typography.caption,
@@ -721,5 +711,61 @@ const styles = StyleSheet.create({
   },
   ridesCount: {
     ...Typography.caption,
+  },
+  networkEfficiency: {
+    ...Typography.small,
+    letterSpacing: 0.5,
+  },
+  monthlyYieldRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: Spacing.md,
+    paddingTop: Spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: "rgba(128, 128, 128, 0.15)",
+  },
+  yieldLabel: {
+    ...Typography.small,
+    letterSpacing: 0.5,
+    textTransform: "uppercase",
+  },
+  yieldValue: {
+    fontSize: 18,
+    fontWeight: "600",
+    letterSpacing: 0.3,
+  },
+  activationOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0, 0, 0, 0.85)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 200,
+  },
+  activationContent: {
+    alignItems: "center",
+    gap: Spacing.lg,
+  },
+  activationIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: "rgba(0, 177, 79, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: Spacing.md,
+  },
+  activationTitle: {
+    fontSize: 24,
+    fontWeight: "300",
+    color: "#FFFFFF",
+    letterSpacing: 1,
+  },
+  activationSubtitle: {
+    fontSize: 13,
+    fontWeight: "400",
+    color: "rgba(255, 255, 255, 0.4)",
+    letterSpacing: 2,
+    textTransform: "uppercase",
   },
 });
