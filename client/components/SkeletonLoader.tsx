@@ -76,6 +76,26 @@ export function DriverHomeSkeleton() {
   );
 }
 
+export function SkeletonLoader() {
+  const { theme } = useTheme();
+  return (
+    <View style={[skeletonStyles.container, { backgroundColor: theme.backgroundRoot }]}>
+      <View style={skeletonStyles.headerSkeleton}>
+        <View style={{ flexDirection: "row", gap: Spacing.sm }}>
+          <SkeletonBlock width="30%" height={80} borderRadius={BorderRadius.md} />
+          <SkeletonBlock width="30%" height={80} borderRadius={BorderRadius.md} />
+          <SkeletonBlock width="30%" height={80} borderRadius={BorderRadius.md} />
+        </View>
+      </View>
+      <SkeletonBlock width="100%" height={120} borderRadius={BorderRadius.md} style={{ marginBottom: Spacing.lg }} />
+      <SkeletonBlock width="40%" height={18} style={{ marginBottom: Spacing.md }} />
+      <SkeletonBlock width="100%" height={48} borderRadius={BorderRadius.sm} style={{ marginBottom: Spacing.sm }} />
+      <SkeletonBlock width="100%" height={48} borderRadius={BorderRadius.sm} style={{ marginBottom: Spacing.sm }} />
+      <SkeletonBlock width="100%" height={48} borderRadius={BorderRadius.sm} />
+    </View>
+  );
+}
+
 const skeletonStyles = StyleSheet.create({
   container: {
     flex: 1,
