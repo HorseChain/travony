@@ -302,7 +302,8 @@ export class DatabaseStorage implements IStorage {
         startDate.setDate(now.getDate() - 7);
         break;
       case "month":
-        startDate.setMonth(now.getMonth() - 1);
+        startDate.setDate(1);
+        startDate.setHours(0, 0, 0, 0);
         break;
       default:
         startDate.setHours(0, 0, 0, 0);
