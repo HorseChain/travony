@@ -3,7 +3,6 @@ import {
   View,
   StyleSheet,
   Alert,
-  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -17,6 +16,7 @@ import BookingBottomSheet from "@/components/BookingBottomSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Spacing, BorderRadius, Shadows, Colors } from "@/constants/theme";
+import { HomeScreenSkeleton } from "@/components/SkeletonLoader";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "Home">;
@@ -91,14 +91,7 @@ export default function HomeScreen() {
   };
 
   if (!isReady) {
-    return (
-      <View style={[styles.container, styles.loadingContainer, { backgroundColor: theme.backgroundRoot }]}>
-        <ActivityIndicator size="large" color={Colors.travonyGreen} />
-        <ThemedText style={[styles.loadingText, { color: theme.textSecondary }]}>
-          Loading...
-        </ThemedText>
-      </View>
-    );
+    return <HomeScreenSkeleton />;
   }
 
   return (
@@ -114,12 +107,15 @@ export default function HomeScreen() {
 
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <View style={[styles.greetingCard, { backgroundColor: theme.card }]}>
-          <ThemedText style={styles.greeting}>
-            Hello, {user?.name?.split(" ")[0] || "Guest"}
-          </ThemedText>
-          <ThemedText style={[styles.subGreeting, { color: theme.textSecondary }]}>
-            Where are you going today?
-          </ThemedText>
+          <View style={styles.greetingRow}>
+            <ThemedText style={styles.greeting}>
+              {user?.name?.split(" ")[0] || "Guest"}
+            </ThemedText>
+            <View style={styles.networkStatus}>
+              <View style={styles.networkDot} />
+              <ThemedText style={styles.networkText}>Network: Optimal</ThemedText>
+            </View>
+          </View>
         </View>
       </View>
 
@@ -139,14 +135,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  loadingContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  loadingText: {
-    marginTop: Spacing.md,
-    fontSize: 16,
-  },
   header: {
     position: "absolute",
     top: 0,
@@ -155,17 +143,36 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   greetingCard: {
-    padding: Spacing.lg,
+    padding: Spacing.md,
+    paddingHorizontal: Spacing.lg,
     borderRadius: BorderRadius.md,
     ...Shadows.card,
   },
-  greeting: {
-    fontSize: 20,
-    fontWeight: "600",
+  greetingRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
   },
-  subGreeting: {
-    fontSize: 14,
-    marginTop: Spacing.xs,
+  greeting: {
+    fontSize: 18,
+    fontWeight: "500",
+  },
+  networkStatus: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  networkDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.travonyGreen,
+  },
+  networkText: {
+    fontSize: 11,
+    fontWeight: "400",
+    color: Colors.travonyGreen,
+    letterSpacing: 0.5,
   },
   bottomSheetContainer: {
     position: "absolute",
