@@ -143,13 +143,13 @@ export default function ConfirmRideScreen() {
       navigation.navigate("ActiveRide", { rideId: data.id });
     },
     onError: (error: any) => {
-      Alert.alert("Error", error.message || "Failed to book ride");
+      Alert.alert("Error", error.message || "Failed to request movement");
     },
   });
 
   const handleBookRide = () => {
     if (!user?.id) {
-      Alert.alert("Sign In Required", "Please sign in to book a ride");
+      Alert.alert("Sign In Required", "Please sign in to request movement");
       return;
     }
     
@@ -375,7 +375,7 @@ export default function ConfirmRideScreen() {
         {bookRideMutation.isPending ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <ThemedText style={styles.bookButtonText}>Book Ride</ThemedText>
+          <ThemedText style={styles.bookButtonText}>Request Movement</ThemedText>
         )}
       </Pressable>
     </ScrollView>
