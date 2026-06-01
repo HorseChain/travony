@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -7,6 +7,7 @@ import {
   Alert,
   Share,
   Platform,
+  Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -48,6 +49,7 @@ interface Ride {
   otp?: string;
   driverId?: string;
   driverPhone?: string;
+  isEvRide?: boolean;
 }
 
 interface TelemetryData {
@@ -71,6 +73,7 @@ interface TelemetryData {
     vehicleModel?: string;
     vehicleColor?: string;
     vehicleVerified?: boolean;
+    isElectric?: boolean;
   } | null;
 }
 
@@ -81,6 +84,14 @@ export default function ActiveRideScreen() {
   const route = useRoute<RouteProps>();
 
   const { rideId } = route.params;
+
+  const [prevStatus, setPrevStatus] = useState<string | null>(null);
+  const [sharePromptShown, setSharePromptShown] = useState(false);
+  const [coffeePromptShown, setCoffeePromptShown] = useState(false);
+  const [showShareBanner, setShowShareBanner] = useState(false);
+  const [showCoffeeCard, setShowCoffeeCard] = useState(false);
+  const shareBannerAnim = useRef(new Animated.Value(0)).current;
+  const coffeeCardAnim = useRef(new Animated.Value(0)).current;
 
   const { data: ride, refetch } = useQuery<Ride>({
     queryKey: ["/api/rides", rideId],
@@ -102,6 +113,32 @@ export default function ActiveRideScreen() {
       });
     }
   }, [ride?.status]);
+
+  useEffect(() => {
+    if (!ride) return;
+    const status = ride.status;
+
+    if (status !== prevStatus) {
+      if (status === "accepted" && prevStatus === "pending" && !sharePromptShown) {
+        setSharePromptShown(true);
+        setShowShareBanner(true);
+        Animated.spring(shareBannerAnim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }).start();
+        setTimeout(() => {
+          Animated.timing(shareBannerAnim, { toValue: 0, duration: 400, useNativeDriver: true }).start(() => {
+            setShowShareBanner(false);
+          });
+        }, 8000);
+      }
+
+      if ((status === "in_progress" || status === "started") && !coffeePromptShown) {
+        setCoffeePromptShown(true);
+        setShowCoffeeCard(true);
+        Animated.spring(coffeeCardAnim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }).start();
+      }
+
+      setPrevStatus(status);
+    }
+  }, [ride?.status, prevStatus, sharePromptShown, coffeePromptShown]);
 
   const driverPhone = telemetry?.driver?.phone || ride?.driverPhone;
 
@@ -138,7 +175,6 @@ export default function ActiveRideScreen() {
     );
   };
 
-  // Trip Sharing functionality
   const shareMutation = useMutation({
     mutationFn: async () => {
       return apiRequest(`/api/rides/${rideId}/share`, {
@@ -163,6 +199,19 @@ export default function ActiveRideScreen() {
 
   const handleShareRide = () => {
     shareMutation.mutate();
+    setShowShareBanner(false);
+  };
+
+  const handleDismissShareBanner = () => {
+    Animated.timing(shareBannerAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+      setShowShareBanner(false);
+    });
+  };
+
+  const handleDismissCoffeeCard = () => {
+    Animated.timing(coffeeCardAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => {
+      setShowCoffeeCard(false);
+    });
   };
 
   const handleCancelRide = () => {
@@ -254,6 +303,14 @@ export default function ActiveRideScreen() {
               <ThemedText style={styles.etaBadgeText}>{eta} min</ThemedText>
             </View>
           ) : null}
+          {ride?.status === "accepted" && ride?.estimatedFare ? (
+            <View style={[styles.fareLockBadge, { borderColor: Colors.travonyGreen + "40" }]}>
+              <Ionicons name="shield-checkmark-outline" size={12} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.fareLockBadgeText, { color: Colors.travonyGreen }]}>
+                Your fare is locked at AED {ride.estimatedFare}
+              </ThemedText>
+            </View>
+          ) : null}
           {ride?.status !== "completed" && ride?.status !== "pending" ? (
             <View style={styles.etaIntelligence}>
               <View style={styles.etaIntelDot} />
@@ -262,6 +319,38 @@ export default function ActiveRideScreen() {
           ) : null}
         </Card>
       </View>
+
+      {showShareBanner ? (
+        <Animated.View
+          style={[
+            styles.shareBanner,
+            {
+              backgroundColor: theme.card,
+              top: insets.top + 210,
+              opacity: shareBannerAnim,
+              transform: [{ translateY: shareBannerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
+            },
+          ]}
+        >
+          <View style={styles.shareBannerContent}>
+            <Ionicons name="share-social-outline" size={18} color={theme.primary} />
+            <ThemedText style={[styles.shareBannerText, { color: theme.text }]}>
+              Want to share your journey? Your contact can follow along live.
+            </ThemedText>
+          </View>
+          <View style={styles.shareBannerActions}>
+            <Pressable
+              style={[styles.shareBannerBtn, { backgroundColor: theme.primary }]}
+              onPress={handleShareRide}
+            >
+              <ThemedText style={styles.shareBannerBtnText}>Share</ThemedText>
+            </Pressable>
+            <Pressable style={styles.shareBannerDismiss} onPress={handleDismissShareBanner}>
+              <Ionicons name="close-outline" size={18} color={theme.textMuted} />
+            </Pressable>
+          </View>
+        </Animated.View>
+      ) : null}
 
       {ride?.status !== "pending" && telemetry?.driver ? (
         <View style={[styles.driverCard, { backgroundColor: theme.card }]}>
@@ -298,6 +387,14 @@ export default function ActiveRideScreen() {
                 <Ionicons name="car-outline" size={14} color={theme.textSecondary} />
                 <ThemedText style={[styles.vehicleText, { color: theme.textSecondary }]}>
                   {[telemetry.driver.vehicleColor, telemetry.driver.vehicleMake, telemetry.driver.vehicleModel].filter(Boolean).join(" ")}
+                </ThemedText>
+              </View>
+            ) : null}
+            {(telemetry.driver.isElectric || ride?.isEvRide) ? (
+              <View style={[styles.evBadge, { backgroundColor: "#16a34a15" }]}>
+                <Ionicons name="flash" size={13} color="#16a34a" />
+                <ThemedText style={[styles.evBadgeText, { color: "#16a34a" }]}>
+                  {telemetry.driver.isElectric ? "Electric Vehicle" : "EV Requested"}
                 </ThemedText>
               </View>
             ) : null}
@@ -376,6 +473,38 @@ export default function ActiveRideScreen() {
           ) : null}
         </View>
 
+        {ride?.otp ? (
+          <ThemedText style={[styles.otpHint, { color: theme.textMuted }]}>
+            Show this 4-digit code to your driver to confirm boarding.
+          </ThemedText>
+        ) : null}
+
+        {showCoffeeCard ? (
+          <Animated.View
+            style={[
+              styles.coffeeCard,
+              { backgroundColor: "#FFF7ED", borderColor: "#F59E0B30", opacity: coffeeCardAnim, transform: [{ translateY: coffeeCardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+            ]}
+          >
+            <Ionicons name="cafe-outline" size={20} color="#92400E" />
+            <ThemedText style={styles.coffeeCardText}>
+              Want something delivered to your destination?
+            </ThemedText>
+            <Pressable
+              style={styles.coffeeOrderBtn}
+              onPress={() => {
+                handleDismissCoffeeCard();
+                navigation.navigate("Coffee");
+              }}
+            >
+              <ThemedText style={styles.coffeeOrderBtnText}>Order</ThemedText>
+            </Pressable>
+            <Pressable onPress={handleDismissCoffeeCard} style={styles.coffeeDismiss}>
+              <Ionicons name="close-outline" size={16} color="#92400E" />
+            </Pressable>
+          </Animated.View>
+        ) : null}
+
         {ride?.status === "pending" ? (
           <Pressable
             style={({ pressed }) => [
@@ -453,6 +582,58 @@ const styles = StyleSheet.create({
     ...Typography.small,
     color: "#FFFFFF",
     fontWeight: "600",
+  },
+  fareLockBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    marginTop: Spacing.sm,
+    gap: Spacing.xs,
+    paddingVertical: 4,
+    borderTopWidth: 1,
+    paddingTop: Spacing.sm,
+  },
+  fareLockBadgeText: {
+    ...Typography.small,
+    fontWeight: "500",
+  },
+  shareBanner: {
+    position: "absolute",
+    left: Spacing.lg,
+    right: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    ...Shadows.card,
+  },
+  shareBannerContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  shareBannerText: {
+    ...Typography.small,
+    flex: 1,
+    lineHeight: 18,
+  },
+  shareBannerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: Spacing.sm,
+  },
+  shareBannerBtn: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+  },
+  shareBannerBtnText: {
+    ...Typography.caption,
+    color: "#fff",
+    fontWeight: "700",
+  },
+  shareBannerDismiss: {
+    padding: 4,
   },
   driverCard: {
     position: "absolute",
@@ -611,7 +792,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     paddingTop: Spacing.lg,
     borderTopWidth: 1,
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.sm,
   },
   fareItem: {
     alignItems: "center",
@@ -627,6 +808,40 @@ const styles = StyleSheet.create({
     ...Typography.h3,
     fontWeight: "700",
     letterSpacing: 2,
+  },
+  otpHint: {
+    ...Typography.caption,
+    textAlign: "center",
+    marginBottom: Spacing.md,
+  },
+  coffeeCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  coffeeCardText: {
+    flex: 1,
+    fontSize: 12,
+    color: "#92400E",
+    fontWeight: "500",
+  },
+  coffeeOrderBtn: {
+    backgroundColor: "#92400E",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+  },
+  coffeeOrderBtnText: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+  coffeeDismiss: {
+    padding: 4,
   },
   cancelButton: {
     height: Spacing.buttonHeight,
@@ -655,5 +870,19 @@ const styles = StyleSheet.create({
     fontWeight: "400",
     letterSpacing: 0.8,
     textTransform: "uppercase",
+  },
+  evBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.sm,
+    marginTop: Spacing.sm,
+    alignSelf: "flex-start",
+  },
+  evBadgeText: {
+    ...Typography.small,
+    fontWeight: "600",
+    marginLeft: 4,
   },
 });

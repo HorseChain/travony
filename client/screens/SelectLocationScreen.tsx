@@ -17,7 +17,7 @@ import * as Location from "expo-location";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { MapView, Marker, PROVIDER_GOOGLE, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
+import { MapView, Marker, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
 
 type Region = {
   latitude: number;
@@ -139,7 +139,7 @@ const POPULAR_LOCATIONS: LocationResult[] = [
 export default function SelectLocationScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const mapRef = useRef<any>(null);
@@ -337,7 +337,7 @@ export default function SelectLocationScreen() {
   );
 
   const renderMap = () => {
-    if (Platform.OS === "web" || !mapsAvailable || !MapView) {
+    if (Platform.OS === "android" || Platform.OS === "web" || !mapsAvailable || !MapView) {
       return (
         <View style={[styles.map, styles.webMapFallback, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.webMapContent}>
@@ -355,7 +355,6 @@ export default function SelectLocationScreen() {
         <MapView
           ref={mapRef}
           style={styles.map}
-          provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
           showsUserLocation
           showsMyLocationButton={false}
           initialRegion={region}

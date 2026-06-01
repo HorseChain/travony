@@ -1,0 +1,2 @@
+file '/home/runner/workspace/attached_assets/generated_videos/adnoc_ev_os_platform_tour.mp4'
+file '/home/runner/workspace/attached_assets/generated_videos/adnoc_ev_os_real_platform.mp4'

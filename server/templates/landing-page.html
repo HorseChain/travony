@@ -187,8 +187,8 @@
         <p class="subtitle animate-in delay-2">Welcome to the Travony<br>Mobility Network.</p>
 
         <div class="buttons animate-in delay-3">
-          <a href="https://play.google.com/store/apps/details?id=com.travony.app" class="btn btn-primary" id="btn-driver" target="_blank" rel="noopener">Activate Your Vehicle</a>
-          <a href="https://play.google.com/store/apps/details?id=com.travony.app" class="btn btn-secondary" id="btn-rider" target="_blank" rel="noopener">Access the Network</a>
+          <a href="https://play.google.com/store/apps/details?id=com.travony.driver" class="btn btn-primary" id="btn-driver" target="_blank" rel="noopener">Activate Your Vehicle</a>
+          <a href="https://play.google.com/store/apps/details?id=com.travony.rider" class="btn btn-secondary" id="btn-rider" target="_blank" rel="noopener">Access the Network</a>
         </div>
       </div>
 
@@ -196,18 +196,19 @@
 
     <script>
       (function() {
-        var playStoreUrl = "https://play.google.com/store/apps/details?id=com.travony.app";
+        var driverStoreUrl = "https://play.google.com/store/apps/details?id=com.travony.driver";
+        var riderStoreUrl = "https://play.google.com/store/apps/details?id=com.travony.rider";
         var btnDriver = document.getElementById('btn-driver');
         var btnRider = document.getElementById('btn-rider');
 
         btnDriver.addEventListener('click', function(e) {
           e.preventDefault();
-          window.open(playStoreUrl, '_blank');
+          window.open(driverStoreUrl, '_blank');
         });
 
         btnRider.addEventListener('click', function(e) {
           e.preventDefault();
-          window.open(playStoreUrl, '_blank');
+          window.open(riderStoreUrl, '_blank');
         });
       })();
 

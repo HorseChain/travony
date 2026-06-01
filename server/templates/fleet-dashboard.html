@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Travony Fleet Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --primary: #00B14F;
+      --primary-dark: #009940;
+      --ev: #10b981;
+      --ev-light: #d1fae5;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --bg-root: #f0f4f8;
+      --bg-card: #ffffff;
+      --text: #1a202c;
+      --text-secondary: #64748b;
+      --text-muted: #94a3b8;
+      --border: #e2e8f0;
+      --nav-bg: #0f172a;
+      --nav-text: #e2e8f0;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+      --shadow-lg: 0 4px 16px rgba(0,0,0,0.12);
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--bg-root);
+      color: var(--text);
+      line-height: 1.5;
+    }
+
+    nav {
+      background: var(--nav-bg);
+      padding: 0 20px;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 60px;
+      position: sticky; top: 0; z-index: 100;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    .nav-brand {
+      display: flex; align-items: center; gap: 10px;
+      color: white; font-weight: 700; font-size: 17px;
+    }
+
+    .nav-brand .dot { width: 8px; height: 8px; background: var(--primary); border-radius: 50%; }
+
+    .nav-actions { display: flex; align-items: center; gap: 12px; }
+
+    .nav-user { color: var(--nav-text); font-size: 14px; }
+
+    .refresh-badge {
+      font-size: 11px; color: var(--text-muted);
+      background: rgba(255,255,255,0.08); padding: 3px 8px; border-radius: 20px;
+    }
+
+    .btn-logout {
+      background: rgba(255,255,255,0.1); color: var(--nav-text);
+      border: none; border-radius: 8px; padding: 6px 12px;
+      cursor: pointer; font-size: 13px; font-family: inherit;
+    }
+    .btn-logout:hover { background: rgba(255,255,255,0.2); }
+
+    .tab-nav {
+      display: flex; gap: 4px;
+      padding: 12px 20px 0;
+      border-bottom: 1.5px solid var(--border);
+      background: white; overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+    }
+
+    .tab-btn {
+      padding: 10px 18px; border: none; background: none;
+      font-size: 14px; font-weight: 500;
+      color: var(--text-secondary); cursor: pointer;
+      border-bottom: 2.5px solid transparent; margin-bottom: -1.5px;
+      white-space: nowrap; font-family: inherit; transition: all 0.2s;
+    }
+    .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
+    .tab-btn:hover:not(.active) { color: var(--text); }
+
+    .tab-content { display: none; padding: 20px; }
+    .tab-content.active { display: block; }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px; margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: var(--bg-card); border-radius: 14px;
+      padding: 16px; box-shadow: var(--shadow);
+    }
+    .stat-card .label { font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+    .stat-card .value { font-size: 28px; font-weight: 700; margin: 4px 0 2px; }
+    .stat-card .sub { font-size: 12px; color: var(--text-muted); }
+    .stat-card.green .value { color: var(--ev); }
+    .stat-card.orange .value { color: var(--warning); }
+    .stat-card.red .value { color: var(--danger); }
+
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;
+    }
+    .section-title { font-size: 16px; font-weight: 600; color: var(--text); }
+
+    #demand-map {
+      width: 100%; height: 340px; border-radius: 14px;
+      overflow: hidden; box-shadow: var(--shadow); margin-bottom: 16px;
+    }
+
+    .time-toggle { display: flex; gap: 6px; }
+    .time-btn {
+      padding: 6px 14px; border-radius: 20px; font-size: 13px;
+      border: 1.5px solid var(--border); background: white;
+      cursor: pointer; font-family: inherit; font-weight: 500; transition: all 0.2s;
+    }
+    .time-btn.active { background: var(--primary); color: white; border-color: var(--primary); }
+
+    .table-wrap { background: var(--bg-card); border-radius: 14px; box-shadow: var(--shadow); overflow: hidden; }
+
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      background: #f8fafc; text-align: left; padding: 12px 16px;
+      font-size: 12px; font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; letter-spacing: 0.05em;
+      border-bottom: 1.5px solid var(--border);
+    }
+    td { padding: 13px 16px; font-size: 14px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+    tr:last-child td { border-bottom: none; }
+    tr:hover td { background: #f8fafc; }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 3px 8px; border-radius: 20px; font-size: 12px; font-weight: 600;
+    }
+    .badge-green { background: var(--ev-light); color: #065f46; }
+    .badge-orange { background: #fef3c7; color: #92400e; }
+    .badge-blue { background: #dbeafe; color: #1e40af; }
+    .badge-gray { background: #f1f5f9; color: var(--text-secondary); }
+    .badge-red { background: #fee2e2; color: #991b1b; }
+    .badge-ev { background: #d1fae5; color: #065f46; }
+
+    .dot-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot-green { background: var(--ev); }
+    .dot-gray { background: #cbd5e1; }
+
+    .dispatch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-bottom: 20px; }
+
+    .dispatch-card {
+      background: var(--bg-card); border-radius: 14px; padding: 18px;
+      box-shadow: var(--shadow); border-left: 4px solid transparent;
+    }
+    .dispatch-card.priority-high { border-left-color: var(--danger); }
+    .dispatch-card.priority-medium { border-left-color: var(--warning); }
+    .dispatch-card.priority-low { border-left-color: var(--primary); }
+
+    .dispatch-rank { font-size: 11px; font-weight: 700; letter-spacing: 0.1em; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }
+    .dispatch-hub { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
+    .dispatch-address { font-size: 13px; color: var(--text-secondary); margin-bottom: 12px; }
+    .dispatch-metrics { display: flex; gap: 12px; flex-wrap: wrap; }
+    .dispatch-metric { text-align: center; }
+    .dispatch-metric .val { font-size: 18px; font-weight: 700; }
+    .dispatch-metric .lbl { font-size: 11px; color: var(--text-muted); }
+    .dispatch-metric.demand .val { color: var(--danger); }
+    .dispatch-metric.supply .val { color: var(--ev); }
+
+    .port-bar-wrap { display: flex; align-items: center; gap: 8px; }
+    .port-bar { flex: 1; height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+    .port-bar-fill { height: 100%; border-radius: 3px; background: var(--ev); transition: width 0.5s; }
+    .port-bar-label { font-size: 12px; color: var(--text-secondary); white-space: nowrap; }
+
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
+    .empty-state p { font-size: 14px; }
+
+    .loading-overlay { display: flex; align-items: center; justify-content: center; padding: 40px; color: var(--text-muted); gap: 10px; font-size: 14px; }
+
+    .spinner { width: 18px; height: 18px; border: 2.5px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .search-input {
+      padding: 8px 12px; border: 1.5px solid var(--border); border-radius: 8px;
+      font-size: 14px; font-family: inherit; outline: none; width: 200px;
+    }
+    .search-input:focus { border-color: var(--primary); }
+
+    @media (max-width: 600px) {
+      .tab-content { padding: 14px; }
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .dispatch-grid { grid-template-columns: 1fr; }
+      th, td { padding: 10px 12px; }
+      .tab-btn { padding: 8px 12px; font-size: 13px; }
+      .search-input { width: 100%; margin-top: 8px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <div class="nav-brand">
+      <span class="dot"></span>
+      Travony Fleet
+    </div>
+    <div class="nav-actions">
+      <span class="refresh-badge" id="last-refresh-label">Loading...</span>
+      <span class="nav-user" id="nav-user-name"></span>
+      <button class="btn-logout" onclick="doLogout()">Sign Out</button>
+    </div>
+  </nav>
+
+  <div class="tab-nav">
+    <button class="tab-btn active" onclick="switchTab('dispatch', event)">Dispatch</button>
+    <button class="tab-btn" onclick="switchTab('hubs', event)">Hub Status</button>
+    <button class="tab-btn" onclick="switchTab('demand', event)">Demand Map</button>
+    <button class="tab-btn" onclick="switchTab('fleet', event)">Fleet Vehicles</button>
+  </div>
+
+  <!-- DISPATCH TAB -->
+  <div class="tab-content active" id="tab-dispatch">
+    <div class="dispatch-grid" id="dispatch-cards">
+      <div class="loading-overlay"><div class="spinner"></div> Loading suggestions...</div>
+    </div>
+    <div class="section-header" style="margin-top:8px">
+      <span class="section-title">Live Hub Overview</span>
+      <span class="refresh-badge" id="hub-count-label"></span>
+    </div>
+    <div class="stats-row">
+      <div class="stat-card"><div class="label">Total Active Hubs</div><div class="value" id="stat-hubs">—</div></div>
+      <div class="stat-card green"><div class="label">EV Hubs Online</div><div class="value" id="stat-ev-hubs">—</div></div>
+      <div class="stat-card"><div class="label">EV Drivers Staged</div><div class="value" id="stat-staged">—</div></div>
+      <div class="stat-card orange"><div class="label">Charging Now</div><div class="value" id="stat-charging">—</div></div>
+    </div>
+  </div>
+
+  <!-- HUB STATUS TAB -->
+  <div class="tab-content" id="tab-hubs">
+    <div class="section-header">
+      <span class="section-title">Hub Status</span>
+      <input class="search-input" id="hub-search" placeholder="Search hubs..." oninput="filterHubs()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Hub</th><th>Type</th><th>EV Ports</th><th>Staged</th><th>Activity</th></tr>
+        </thead>
+        <tbody id="hub-table-body">
+          <tr><td colspan="5"><div class="loading-overlay"><div class="spinner"></div> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- DEMAND MAP TAB -->
+  <div class="tab-content" id="tab-demand">
+    <div class="section-header">
+      <span class="section-title">EV Demand Heatmap</span>
+      <div class="time-toggle">
+        <button class="time-btn active" onclick="switchDemandWindow(1, this)">1h</button>
+        <button class="time-btn" onclick="switchDemandWindow(24, this)">24h</button>
+      </div>
+    </div>
+    <div id="demand-map"></div>
+    <div class="stats-row" style="margin-top:16px">
+      <div class="stat-card"><div class="label">Demand Events</div><div class="value" id="stat-demand-total">—</div></div>
+      <div class="stat-card green"><div class="label">Matched</div><div class="value" id="stat-demand-matched">—</div></div>
+      <div class="stat-card red"><div class="label">Unmatched Rate</div><div class="value" id="stat-demand-unmatched">—</div><div class="sub">% of demand not served</div></div>
+    </div>
+  </div>
+
+  <!-- FLEET TAB -->
+  <div class="tab-content" id="tab-fleet">
+    <div class="section-header">
+      <span class="section-title">Fleet Vehicles</span>
+      <input class="search-input" id="fleet-search" placeholder="Search driver / plate..." oninput="filterFleet()">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Driver</th><th>Vehicle</th><th>Status</th><th>Current Hub</th><th>EV Staging</th></tr>
+        </thead>
+        <tbody id="fleet-table-body">
+          <tr><td colspan="5"><div class="loading-overlay"><div class="spinner"></div> Loading...</div></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // Auth token from localStorage (set after login via /dashboard/fleet/login)
+  let AUTH_TOKEN = localStorage.getItem('fleet_token');
+  let currentUser = JSON.parse(localStorage.getItem('fleet_user') || 'null');
+  let mapInstance = null;
+  let markerLayer = null;
+  let allHubs = [];
+  let allVehicles = [];
+  let demandWindowHours = 1;
+  let refreshTimer = null;
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
+
+  function doLogout() {
+    localStorage.removeItem('fleet_token');
+    localStorage.removeItem('fleet_user');
+    fetch('/api/fleet/auth/logout', { method: 'POST', credentials: 'include' });
+    window.location.href = '/dashboard/fleet/login';
+  }
+
+  // ── Init ──────────────────────────────────────────────────────────────────
+
+  if (!AUTH_TOKEN) {
+    window.location.href = '/dashboard/fleet/login';
+  } else {
+    document.getElementById('nav-user-name').textContent = currentUser?.name || '';
+    loadAll();
+    refreshTimer = setInterval(loadAll, 30000);
+  }
+
+  // ── API ───────────────────────────────────────────────────────────────────
+
+  async function apiFetch(path) {
+    const r = await fetch(path, {
+      headers: { Authorization: 'Bearer ' + AUTH_TOKEN },
+      credentials: 'include',
+    });
+    if (r.status === 401) {
+      window.location.href = '/dashboard/fleet/login';
+      throw new Error('Session expired');
+    }
+    if (!r.ok) { const e = await r.json(); throw new Error(e.error || r.statusText); }
+    return r.json();
+  }
+
+  async function loadAll() {
+    const now = new Date().toLocaleTimeString();
+    document.getElementById('last-refresh-label').textContent = 'Updated ' + now;
+    await Promise.allSettled([loadHubs(), loadFleet(), loadDemand(), loadDispatch()]);
+  }
+
+  // ── Tabs ──────────────────────────────────────────────────────────────────
+
+  function switchTab(name, evt) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    if (evt) evt.currentTarget.classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+    if (name === 'demand' && mapInstance) setTimeout(() => mapInstance.invalidateSize(), 100);
+  }
+
+  // ── Hubs ──────────────────────────────────────────────────────────────────
+
+  async function loadHubs() {
+    try {
+      const data = await apiFetch('/api/fleet/dashboard/hubs');
+      allHubs = data.hubs || [];
+      renderHubTable(allHubs);
+      updateDispatchStats(allHubs);
+    } catch (e) { console.warn('Hub load failed', e); }
+  }
+
+  function renderHubTable(hubs) {
+    const tb = document.getElementById('hub-table-body');
+    if (!hubs.length) {
+      tb.innerHTML = '<tr><td colspan="5"><div class="empty-state"><p>No active hubs found</p></div></td></tr>';
+      return;
+    }
+    tb.innerHTML = hubs.map(h => {
+      const evAvail = h.availablePorts || 0;
+      const evTotal = h.totalChargingPorts || 0;
+      const pct = evTotal > 0 ? Math.round((evAvail / evTotal) * 100) : 0;
+      const staged = (h.evCharging || 0) + (h.evReady || 0);
+      const portColor = pct > 50 ? '#10b981' : pct > 20 ? '#f59e0b' : '#ef4444';
+      return `<tr>
+        <td>
+          <div style="font-weight:600">${esc(h.name)}</div>
+          ${h.address ? `<div style="font-size:12px;color:var(--text-muted)">${esc(h.address)}</div>` : ''}
+        </td>
+        <td>${h.isEvHub ? '<span class="badge badge-ev">EV Hub</span>' : `<span class="badge badge-gray">${esc(h.type)}</span>`}</td>
+        <td>
+          ${h.isEvHub ? `<div class="port-bar-wrap">
+            <div class="port-bar"><div class="port-bar-fill" style="width:${pct}%;background:${portColor}"></div></div>
+            <span class="port-bar-label">${evAvail}/${evTotal}</span>
+          </div>` : '<span style="color:var(--text-muted);font-size:13px">N/A</span>'}
+        </td>
+        <td>
+          ${staged > 0 ? `<span class="badge badge-green">${staged} EV</span>` : '<span style="color:var(--text-muted);font-size:13px">0</span>'}
+          ${h.evCharging > 0 ? `<span class="badge badge-orange" style="margin-left:4px">${h.evCharging} charging</span>` : ''}
+        </td>
+        <td><span class="badge ${h.activeCheckIns > 0 ? 'badge-blue' : 'badge-gray'}">${h.activeCheckIns} checked in</span></td>
+      </tr>`;
+    }).join('');
+  }
+
+  function filterHubs() {
+    const q = document.getElementById('hub-search').value.toLowerCase();
+    renderHubTable(allHubs.filter(h => h.name.toLowerCase().includes(q) || (h.address || '').toLowerCase().includes(q)));
+  }
+
+  function updateDispatchStats(hubs) {
+    document.getElementById('stat-hubs').textContent = hubs.length;
+    document.getElementById('stat-ev-hubs').textContent = hubs.filter(h => h.isEvHub).length;
+    document.getElementById('stat-staged').textContent = hubs.reduce((s, h) => s + (h.evReady || 0) + (h.evCharging || 0), 0);
+    document.getElementById('stat-charging').textContent = hubs.reduce((s, h) => s + (h.evCharging || 0), 0);
+    document.getElementById('hub-count-label').textContent = hubs.length + ' hubs';
+  }
+
+  // ── Fleet Vehicles ────────────────────────────────────────────────────────
+
+  async function loadFleet() {
+    try {
+      const data = await apiFetch('/api/fleet/dashboard/vehicles');
+      allVehicles = data.vehicles || [];
+      renderFleetTable(allVehicles);
+    } catch (e) { console.warn('Fleet load failed', e); }
+  }
+
+  function renderFleetTable(vehicles) {
+    const tb = document.getElementById('fleet-table-body');
+    if (!vehicles.length) {
+      tb.innerHTML = '<tr><td colspan="5"><div class="empty-state"><p>No vehicles registered to this fleet</p></div></td></tr>';
+      return;
+    }
+    const stagingColors = { charging: 'badge-orange', ready: 'badge-green', departing: 'badge-blue' };
+    tb.innerHTML = vehicles.map(v => `<tr>
+      <td>
+        <div style="font-weight:600">${esc(v.driverName)}</div>
+        ${v.driverPhone ? `<div style="font-size:12px;color:var(--text-muted)">${esc(v.driverPhone)}</div>` : ''}
+        <div style="font-size:12px;color:var(--text-muted)">Rating: ${v.rating || '—'} · ${v.totalTrips || 0} trips</div>
+      </td>
+      <td>
+        <div style="font-weight:500">${esc(v.make)} ${esc(v.model)}${v.year ? ` (${v.year})` : ''}</div>
+        <div style="font-size:12px;color:var(--text-muted)">${esc(v.plateNumber)} · ${esc(v.color || '')}</div>
+        ${v.isElectric ? '<span class="badge badge-ev" style="margin-top:4px">EV</span>' : ''}
+      </td>
+      <td><span class="badge ${v.isOnline ? 'badge-green' : 'badge-gray'}">
+        <span class="dot-indicator ${v.isOnline ? 'dot-green' : 'dot-gray'}"></span>
+        ${v.isOnline ? 'Online' : 'Offline'}
+      </span></td>
+      <td>${v.currentHubName ? `<span class="badge badge-blue">${esc(v.currentHubName)}</span>` : '<span style="color:var(--text-muted);font-size:13px">No hub</span>'}</td>
+      <td>${v.evStagingStatus ? `<span class="badge ${stagingColors[v.evStagingStatus] || 'badge-gray'}">${v.evStagingStatus}</span>` : '<span style="color:var(--text-muted);font-size:13px">—</span>'}</td>
+    </tr>`).join('');
+  }
+
+  function filterFleet() {
+    const q = document.getElementById('fleet-search').value.toLowerCase();
+    renderFleetTable(allVehicles.filter(v =>
+      v.driverName.toLowerCase().includes(q) ||
+      v.plateNumber.toLowerCase().includes(q) ||
+      (v.make || '').toLowerCase().includes(q)
+    ));
+  }
+
+  // ── Demand Map ────────────────────────────────────────────────────────────
+
+  async function loadDemand() {
+    try {
+      const data = await apiFetch('/api/fleet/dashboard/demand?hours=' + demandWindowHours);
+      document.getElementById('stat-demand-total').textContent = data.total || 0;
+      document.getElementById('stat-demand-matched').textContent = data.matched || 0;
+      document.getElementById('stat-demand-unmatched').textContent = (data.unmatchedRate || 0) + '%';
+      renderDemandMap(data.signals || []);
+    } catch (e) { console.warn('Demand load failed', e); }
+  }
+
+  function renderDemandMap(signals) {
+    if (!mapInstance) {
+      mapInstance = L.map('demand-map', { zoomControl: true }).setView([25.2, 55.3], 10);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors', maxZoom: 18,
+      }).addTo(mapInstance);
+      markerLayer = L.layerGroup().addTo(mapInstance);
+    }
+    markerLayer.clearLayers();
+    const grid = new Map();
+    for (const s of signals) {
+      if (!s.pickupLat || !s.pickupLng) continue;
+      const lat = parseFloat(s.pickupLat);
+      const lng = parseFloat(s.pickupLng);
+      const key = `${Math.round(lat / 0.02) * 0.02},${Math.round(lng / 0.02) * 0.02}`;
+      if (!grid.has(key)) grid.set(key, { lat, lng, total: 0, unmatched: 0 });
+      const cell = grid.get(key);
+      cell.total++;
+      if (!s.matchFound) cell.unmatched++;
+    }
+    grid.forEach(cell => {
+      const intensity = Math.min(cell.total / 5, 1);
+      const pct = cell.total > 0 ? cell.unmatched / cell.total : 0;
+      const color = pct > 0.6 ? '#ef4444' : pct > 0.3 ? '#f59e0b' : '#10b981';
+      L.circleMarker([cell.lat, cell.lng], {
+        radius: 14 + intensity * 24,
+        fillColor: color, color: 'white',
+        weight: 1.5, fillOpacity: 0.55 + intensity * 0.3,
+      }).bindPopup(`<b>${cell.total} demand events</b><br>${cell.unmatched} unmatched (${Math.round(pct * 100)}%)`).addTo(markerLayer);
+    });
+    if (grid.size > 0) {
+      try { mapInstance.fitBounds(L.latLngBounds([...grid.values()].map(c => [c.lat, c.lng])), { padding: [30, 30] }); } catch {}
+    }
+  }
+
+  function switchDemandWindow(hours, btn) {
+    demandWindowHours = hours;
+    document.querySelectorAll('.time-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    loadDemand();
+  }
+
+  // ── Dispatch ──────────────────────────────────────────────────────────────
+
+  async function loadDispatch() {
+    try {
+      const data = await apiFetch('/api/fleet/dashboard/dispatch-suggestions');
+      renderDispatchCards(data.suggestions || []);
+    } catch (e) { console.warn('Dispatch load failed', e); }
+  }
+
+  function renderDispatchCards(suggestions) {
+    const el = document.getElementById('dispatch-cards');
+    if (!suggestions.length) {
+      el.innerHTML = `<div class="stat-card" style="grid-column:1/-1;text-align:center;padding:32px;color:var(--text-muted)">
+        No dispatch data yet. Demand signals will appear here as riders search for EV rides.
+      </div>`;
+      return;
+    }
+    const ranks = ['1st Priority', '2nd Priority', '3rd Priority'];
+    el.innerHTML = suggestions.map((s, i) => `
+      <div class="dispatch-card priority-${s.priority}">
+        <div class="dispatch-rank">${ranks[i] || (i+1)+'th'} — ${s.priority.toUpperCase()} NEED</div>
+        <div class="dispatch-hub">${esc(s.hubName)}</div>
+        <div class="dispatch-address">${esc(s.hubAddress || 'Location on file')}</div>
+        <div class="dispatch-metrics">
+          <div class="dispatch-metric demand"><div class="val">${s.unmatchedDemand}</div><div class="lbl">Unmet demand</div></div>
+          <div class="dispatch-metric supply"><div class="val">${s.evDriversStaged}</div><div class="lbl">EV staged</div></div>
+          <div class="dispatch-metric"><div class="val">${s.dispatchScore}</div><div class="lbl">Gap score</div></div>
+        </div>
+        ${s.availablePorts > 0 ? `<div style="margin-top:12px;font-size:13px;color:var(--ev)">${s.availablePorts} charging port${s.availablePorts !== 1 ? 's' : ''} available</div>` : ''}
+      </div>
+    `).join('');
+  }
+
+  function esc(str) {
+    if (!str) return '';
+    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+</script>
+</body>
+</html>

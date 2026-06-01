@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { View, StyleSheet, TextInput, Pressable, Alert, Platform } from "react-native";
 import { useMutation } from "@tanstack/react-query";
-import Animated, { FadeInDown, FadeIn, ZoomIn } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -87,23 +86,23 @@ export default function FeedbackScreen() {
     return (
       <ThemedView style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
         <View style={[styles.successContainer, { paddingTop: headerHeight + Spacing["4xl"] }]}>
-          <Animated.View entering={ZoomIn.duration(500)} style={[styles.successIcon, { backgroundColor: theme.primary + "15" }]}>
+          <View style={[styles.successIcon, { backgroundColor: theme.primary + "15" }]}>
             <Ionicons name="checkmark-circle" size={64} color={theme.primary} />
-          </Animated.View>
-          <Animated.View entering={FadeIn.delay(300).duration(400)}>
+          </View>
+          <View>
             <ThemedText style={styles.successTitle}>Thank You</ThemedText>
             <ThemedText style={[styles.successMessage, { color: theme.textSecondary }]}>
               Your feedback has been submitted successfully. We appreciate your input in improving the network.
             </ThemedText>
-          </Animated.View>
-          <Animated.View entering={FadeIn.delay(600).duration(400)}>
+          </View>
+          <View>
             <Pressable
               style={({ pressed }) => [styles.resetButton, { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 }]}
               onPress={handleReset}
             >
               <ThemedText style={[styles.resetButtonText, { color: theme.buttonText }]}>Submit More Feedback</ThemedText>
             </Pressable>
-          </Animated.View>
+          </View>
         </View>
       </ThemedView>
     );
@@ -119,7 +118,7 @@ export default function FeedbackScreen() {
       }}
       scrollIndicatorInsets={{ bottom: insets.bottom }}
     >
-      <Animated.View entering={FadeInDown.delay(0).duration(400)}>
+      <View>
         <ThemedText style={styles.sectionTitle}>Category</ThemedText>
         <View style={styles.chipsContainer}>
           {CATEGORIES.map((cat) => {
@@ -148,9 +147,9 @@ export default function FeedbackScreen() {
             );
           })}
         </View>
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+      <View>
         <ThemedText style={styles.sectionTitle}>Rating</ThemedText>
         <View style={styles.starsContainer}>
           {[1, 2, 3, 4, 5].map((star) => (
@@ -163,9 +162,9 @@ export default function FeedbackScreen() {
             </Pressable>
           ))}
         </View>
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+      <View>
         <ThemedText style={styles.sectionTitle}>Your Feedback</ThemedText>
         <TextInput
           style={[
@@ -184,9 +183,9 @@ export default function FeedbackScreen() {
           value={content}
           onChangeText={setContent}
         />
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+      <View>
         <Pressable
           style={({ pressed }) => [
             styles.submitButton,
@@ -207,7 +206,7 @@ export default function FeedbackScreen() {
             </View>
           )}
         </Pressable>
-      </Animated.View>
+      </View>
     </KeyboardAwareScrollViewCompat>
   );
 }

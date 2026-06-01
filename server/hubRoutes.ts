@@ -2,11 +2,11 @@ import { Router } from "express";
 import { storage } from "./storage";
 import { db } from "./db";
 import {
-  hubs, hubMessages, hubReactions, hubCheckIns,
+  hubs, hubMessages, hubReactions, hubCheckIns, evDemandSignals,
   communityPrestige, userFeedback, carpoolSuggestions,
-  drivers, users, hotspots, rides,
+  drivers, users, hotspots, rides, cities,
 } from "@shared/schema";
-import { eq, and, gte, desc, sql, count } from "drizzle-orm";
+import { eq, and, gte, desc, sql, count, lt, isNull } from "drizzle-orm";
 import {
   getHubsNearLocation,
   updateHubDemand,
@@ -61,16 +61,216 @@ router.get("/api/openclaw/hubs", async (req, res) => {
 
     const lat = parseFloat(req.query.lat as string);
     const lng = parseFloat(req.query.lng as string);
-    const radiusKm = parseFloat(req.query.radiusKm as string) || 10;
+    const radiusKm = parseFloat(req.query.radiusKm as string) || 50;
+    const hasLocation = !isNaN(lat) && !isNaN(lng);
 
-    if (isNaN(lat) || isNaN(lng)) {
-      return res.status(400).json({ error: "lat and lng are required" });
+    let formatted: any[];
+
+    function demandLevel(score: number): string {
+      if (score >= 8) return "very_high";
+      if (score >= 6) return "high";
+      if (score >= 4) return "moderate";
+      if (score >= 1) return "low";
+      return "idle";
     }
 
-    const nearbyHubs = await getHubsNearLocation(lat, lng, radiusKm);
-    res.json(nearbyHubs);
+    function formatHub(h: any, overrides: Record<string, any> = {}): Record<string, any> {
+      const score = parseFloat(h.avgDemandScore || "0");
+      const evPortsTotal = h.totalChargingPorts || 0;
+      const evPortsAvail = h.availablePorts || 0;
+      const staged = overrides.stagedCount ?? 0;
+      return {
+        id: h.id,
+        name: h.name,
+        type: h.type,
+        lat: typeof h.lat === "string" ? parseFloat(h.lat) : h.lat,
+        lng: typeof h.lng === "string" ? parseFloat(h.lng) : h.lng,
+        description: h.description,
+        radiusMeters: h.radiusMeters,
+        address: h.address,
+        isEvHub: h.isEvHub || false,
+        // Canonical field names for client contract
+        evPortsAvailable: evPortsAvail,
+        evPortsTotal,
+        demandScore: score,
+        demandLevel: demandLevel(score),
+        stagedCount: staged,
+        // Legacy aliases for backwards compat
+        totalChargingPorts: evPortsTotal,
+        availablePorts: evPortsAvail,
+        activeDrivers: staged,
+        ...overrides,
+      };
+    }
+
+    // Fetch UAE-only active hubs (regionCode starts with AE-) — location only affects distance/sort
+    const allHubs = await db.select().from(hubs).where(
+      and(
+        eq(hubs.status, "active"),
+        sql`(${hubs.regionCode} IS NULL OR ${hubs.regionCode} LIKE 'AE-%')`
+      )
+    );
+
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+
+    // Derive staged count from recent hubCheckIns (active, last 2 hours, not checked out)
+    const recentCheckIns = await db
+      .select({ hubId: hubCheckIns.hubId })
+      .from(hubCheckIns)
+      .where(
+        and(
+          gte(hubCheckIns.checkedInAt, twoHoursAgo),
+          isNull(hubCheckIns.checkedOutAt)
+        )
+      );
+
+    const checkInCountByHub = recentCheckIns.reduce<Record<string, number>>((acc, ci) => {
+      acc[ci.hubId] = (acc[ci.hubId] || 0) + 1;
+      return acc;
+    }, {});
+
+    const recentRides = hasLocation
+      ? await db.select({ pickupLat: rides.pickupLat, pickupLng: rides.pickupLng }).from(rides).where(gte(rides.createdAt, twoHoursAgo))
+      : [];
+
+    function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    formatted = allHubs.map(h => {
+      const hLat = parseFloat(h.lat);
+      const hLng = parseFloat(h.lng);
+      const hubRadiusKm = (h.radiusMeters || 300) / 1000;
+
+      // staged count comes from check-ins (includes seeded activity)
+      const stagedCount = checkInCountByHub[h.id] || 0;
+
+      const rideCount = hasLocation ? recentRides.filter(r => {
+        const rLat = parseFloat(r.pickupLat || "0");
+        const rLng = parseFloat(r.pickupLng || "0");
+        return haversineKm(hLat, hLng, rLat, rLng) <= hubRadiusKm;
+      }).length : 0;
+
+      const distanceKm = hasLocation
+        ? Math.round(haversineKm(lat, lng, hLat, hLng) * 1000) / 1000
+        : undefined;
+
+      return formatHub(h, {
+        lat: hLat,
+        lng: hLng,
+        distance: distanceKm,
+        recentRides: rideCount,
+        yieldEstimate: rideCount > 0 ? Math.round(rideCount * 5.5 * 100) / 100 : 0,
+        stagedCount,
+        activeDrivers: stagedCount,
+      });
+    });
+
+    res.json(formatted);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to fetch hubs" });
+  }
+});
+
+router.get("/api/openclaw/hubs/browse", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const cityId = req.query.cityId as string;
+    const regionCode = req.query.regionCode as string;
+
+    let query = db.select().from(hubs).where(eq(hubs.status, "active"));
+
+    const allActiveHubs = await query;
+
+    let filteredHubs = allActiveHubs;
+    if (cityId) {
+      filteredHubs = allActiveHubs.filter(h => h.cityId === cityId);
+    } else if (regionCode) {
+      filteredHubs = allActiveHubs.filter(h => h.regionCode?.startsWith(regionCode));
+    }
+
+    const allCities = await db.select().from(cities).where(eq(cities.isActive, true));
+
+    const grouped: Record<string, { city: typeof allCities[0]; hubs: typeof filteredHubs }> = {};
+    for (const hub of filteredHubs) {
+      const city = allCities.find(c => c.id === hub.cityId);
+      const cityName = city?.name || "Unknown";
+      if (!grouped[cityName]) {
+        grouped[cityName] = { city: city!, hubs: [] };
+      }
+      grouped[cityName].hubs.push(hub);
+    }
+
+    const result = Object.entries(grouped).map(([cityName, data]) => ({
+      cityName,
+      cityId: data.city?.id,
+      regionCode: data.city?.regionCode,
+      hubCount: data.hubs.length,
+      hubs: data.hubs.map(h => ({
+        id: h.id,
+        name: h.name,
+        type: h.type,
+        lat: parseFloat(h.lat),
+        lng: parseFloat(h.lng),
+        radiusMeters: h.radiusMeters,
+        description: h.description,
+        address: h.address,
+        demandScore: parseFloat(h.avgDemandScore || "0"),
+        peakHours: h.peakHours,
+      })),
+    })).sort((a, b) => b.hubCount - a.hubCount);
+
+    res.json({
+      totalHubs: filteredHubs.length,
+      totalCities: result.length,
+      cities: result,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to browse hubs" });
+  }
+});
+
+// GET /api/openclaw/hubs/ev-hubs?lat=X&lng=Y — must be declared BEFORE /:hubId to avoid route capture
+router.get("/api/openclaw/hubs/ev-hubs", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const lat = parseFloat(req.query.lat as string);
+    const lng = parseFloat(req.query.lng as string);
+    const radiusKm = parseFloat((req.query.radius as string) || "50");
+
+    const allEvHubs = await db.select().from(hubs).where(
+      and(eq(hubs.isEvHub, true), eq(hubs.status, "active"))
+    );
+
+    const hubsWithDistance = allEvHubs.map((hub) => {
+      const dLat = (parseFloat(hub.lat) - lat) * (Math.PI / 180);
+      const dLng = (parseFloat(hub.lng) - lng) * (Math.PI / 180);
+      const a =
+        Math.sin(dLat / 2) ** 2 +
+        Math.cos(lat * (Math.PI / 180)) *
+          Math.cos(parseFloat(hub.lat) * (Math.PI / 180)) *
+          Math.sin(dLng / 2) ** 2;
+      const distanceKm = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return { ...hub, distanceKm: parseFloat(distanceKm.toFixed(2)) };
+    });
+
+    const nearby = isNaN(lat) || isNaN(lng)
+      ? hubsWithDistance
+      : hubsWithDistance.filter((h) => h.distanceKm <= radiusKm);
+
+    nearby.sort((a, b) => a.distanceKm - b.distanceKm);
+
+    res.json({ hubs: nearby, count: nearby.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch EV hubs" });
   }
 });
 
@@ -112,15 +312,58 @@ router.get("/api/openclaw/hotspots", async (req, res) => {
   }
 });
 
-router.get("/api/openclaw/hubs/:hubId/check-in", async (req, res) => {
+router.post("/api/openclaw/hubs/:hubId/check-in", async (req, res) => {
   try {
     const session = await getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
 
     const { hubId } = req.params;
+    const { evStagingStatus } = req.body; // "charging" | "ready" | "departing" | undefined
+
     const [hub] = await db.select().from(hubs).where(eq(hubs.id, hubId));
     if (!hub) {
       return res.status(404).json({ error: "Hub not found" });
+    }
+
+    const driverRoles = ["driver", "fleet_driver", "fleet_owner"];
+    const isDriverRole = driverRoles.includes(session.role);
+
+    // Only drivers/fleet drivers may set EV staging status
+    const validEvStatuses = ["charging", "ready", "departing"];
+    const validatedEvStatus = evStagingStatus && validEvStatuses.includes(evStagingStatus) && isDriverRole
+      ? evStagingStatus
+      : null;
+
+    // Non-driver users providing evStagingStatus get a 403
+    if (evStagingStatus && !isDriverRole) {
+      return res.status(403).json({ error: "Only drivers may set EV staging status" });
+    }
+
+    // Idempotency: reject if user already has an active check-in at this hub
+    const existingActive = await db.select({ id: hubCheckIns.id })
+      .from(hubCheckIns)
+      .where(and(
+        eq(hubCheckIns.hubId, hubId),
+        eq(hubCheckIns.userId, session.userId),
+        sql`${hubCheckIns.checkedOutAt} IS NULL`,
+      ))
+      .limit(1);
+    if (existingActive.length > 0) {
+      return res.status(409).json({ error: "Already checked in to this hub. Check out first." });
+    }
+
+    // For charging check-ins at EV hubs, atomically decrement port or reject (uses DB-level condition)
+    if (validatedEvStatus === "charging" && hub.isEvHub) {
+      const updated = await db.update(hubs).set({
+        availablePorts: sql`GREATEST(0, ${hubs.availablePorts} - 1)`,
+        updatedAt: new Date(),
+      }).where(and(
+        eq(hubs.id, hubId),
+        sql`${hubs.availablePorts} > 0`,
+      )).returning({ availablePorts: hubs.availablePorts });
+      if (updated.length === 0) {
+        return res.status(409).json({ error: "No charging ports available at this hub" });
+      }
     }
 
     const [checkIn] = await db.insert(hubCheckIns).values({
@@ -128,11 +371,12 @@ router.get("/api/openclaw/hubs/:hubId/check-in", async (req, res) => {
       userId: session.userId,
       userRole: session.role,
       checkedInAt: new Date(),
-    } as any).returning();
+      evStagingStatus: validatedEvStatus as "charging" | "ready" | "departing" | null,
+    }).returning();
 
     await incrementContribution(session.userId, "check_in");
 
-    res.json(checkIn);
+    res.json({ ...checkIn, hubIsEvHub: hub.isEvHub || false });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to check in" });
   }
@@ -157,9 +401,22 @@ router.post("/api/openclaw/hubs/:hubId/check-out", async (req, res) => {
       return res.status(404).json({ error: "No active check-in found" });
     }
 
+    const checkIn = activeCheckIns[0];
     const [updated] = await db.update(hubCheckIns).set({
       checkedOutAt: new Date(),
-    }).where(eq(hubCheckIns.id, activeCheckIns[0].id)).returning();
+    }).where(eq(hubCheckIns.id, checkIn.id)).returning();
+
+    // If the driver was charging at an EV hub, restore the port on checkout
+    const checkInEvStatus = (checkIn as { evStagingStatus?: string | null }).evStagingStatus;
+    if (checkInEvStatus === "charging") {
+      const [hub] = await db.select().from(hubs).where(eq(hubs.id, hubId));
+      if (hub?.isEvHub) {
+        await db.update(hubs).set({
+          availablePorts: Math.min(hub.totalChargingPorts || 0, (hub.availablePorts || 0) + 1),
+          updatedAt: new Date(),
+        }).where(eq(hubs.id, hubId));
+      }
+    }
 
     res.json(updated);
   } catch (error: any) {
@@ -1171,6 +1428,281 @@ router.get("/api/openclaw/hubs/:hubId/insights", async (req, res) => {
     }
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to get hub insights" });
+  }
+});
+
+
+// GET /api/openclaw/hubs/:hubId/ev-status — returns EV availability panel for a hub
+router.get("/api/openclaw/hubs/:hubId/ev-status", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const { hubId } = req.params;
+    const [hub] = await db.select().from(hubs).where(eq(hubs.id, hubId));
+    if (!hub) return res.status(404).json({ error: "Hub not found" });
+
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    const activeEvCheckIns = await db
+      .select({
+        id: hubCheckIns.id,
+        userId: hubCheckIns.userId,
+        evStagingStatus: sql<string>`${hubCheckIns.evStagingStatus}`,
+        checkedInAt: hubCheckIns.checkedInAt,
+      })
+      .from(hubCheckIns)
+      .where(
+        and(
+          eq(hubCheckIns.hubId, hubId),
+          sql`${hubCheckIns.checkedOutAt} IS NULL`,
+          gte(hubCheckIns.checkedInAt, twoHoursAgo)
+        )
+      );
+
+    const now = Date.now();
+    const AVG_CHARGE_MINUTES = 45; // estimated average charge duration
+
+    const chargingDrivers = activeEvCheckIns.filter((c) => c.evStagingStatus === "charging");
+    const readyDrivers = activeEvCheckIns.filter((c) => c.evStagingStatus === "ready");
+    const departingDrivers = activeEvCheckIns.filter((c) => c.evStagingStatus === "departing");
+
+    const evStagingBreakdown = {
+      charging: chargingDrivers.length,
+      ready: readyDrivers.length,
+      departing: departingDrivers.length,
+    };
+
+    // Estimated ready times: for each charging driver, compute remaining minutes
+    const estimatedReadyTimes = chargingDrivers.map((c) => {
+      const minutesCharging = c.checkedInAt
+        ? Math.floor((now - new Date(c.checkedInAt).getTime()) / 60000)
+        : 0;
+      const minutesRemaining = Math.max(0, AVG_CHARGE_MINUTES - minutesCharging);
+      return { userId: c.userId, minutesRemaining };
+    });
+
+    // Nearest estimated ready time (minutes) across all charging drivers
+    const nearestReadyMinutes = estimatedReadyTimes.length > 0
+      ? Math.min(...estimatedReadyTimes.map((e) => e.minutesRemaining))
+      : null;
+
+    res.json({
+      hubId,
+      isEvHub: hub.isEvHub || false,
+      totalChargingPorts: hub.totalChargingPorts || 0,
+      availablePorts: hub.availablePorts || 0,
+      occupancyRate:
+        hub.totalChargingPorts && hub.totalChargingPorts > 0
+          ? Math.round(((hub.totalChargingPorts - (hub.availablePorts || 0)) / hub.totalChargingPorts) * 100)
+          : 0,
+      evDriversPresent: activeEvCheckIns.length,
+      evStagingBreakdown,
+      estimatedReadyTimes,
+      nearestReadyMinutes,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch EV status" });
+  }
+});
+
+// GET /api/openclaw/fleet/ev-staging — fleet owner sees their drivers' current EV staging status across hubs
+router.get("/api/openclaw/fleet/ev-staging", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    if (!["admin", "fleet_owner"].includes(session.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    // Fleet owners see only their own drivers (joined via drivers.fleetOwnerId).
+    // Admins see all EV staging across all hubs.
+    const baseQuery = db
+      .select({
+        checkInId: hubCheckIns.id,
+        userId: hubCheckIns.userId,
+        hubId: hubCheckIns.hubId,
+        hubName: hubs.name,
+        hubLat: hubs.lat,
+        hubLng: hubs.lng,
+        evStagingStatus: hubCheckIns.evStagingStatus,
+        checkedInAt: hubCheckIns.checkedInAt,
+        userRole: hubCheckIns.userRole,
+        driverFleetOwnerId: drivers.fleetOwnerId,
+      })
+      .from(hubCheckIns)
+      .innerJoin(hubs, eq(hubCheckIns.hubId, hubs.id))
+      .leftJoin(drivers, eq(hubCheckIns.userId, drivers.userId));
+
+    const whereConditions = session.role === "admin"
+      ? and(isNull(hubCheckIns.checkedOutAt), eq(hubs.isEvHub, true))
+      : and(isNull(hubCheckIns.checkedOutAt), eq(hubs.isEvHub, true), eq(drivers.fleetOwnerId, session.userId));
+
+    const activeCheckIns = await baseQuery
+      .where(whereConditions)
+      .orderBy(desc(hubCheckIns.checkedInAt))
+      .limit(200);
+
+    const byStatus = {
+      charging: activeCheckIns.filter((c) => c.evStagingStatus === "charging").length,
+      ready: activeCheckIns.filter((c) => c.evStagingStatus === "ready").length,
+      departing: activeCheckIns.filter((c) => c.evStagingStatus === "departing").length,
+      noStatus: activeCheckIns.filter((c) => !c.evStagingStatus).length,
+    };
+
+    res.json({ activeCheckIns, byStatus, total: activeCheckIns.length });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch fleet EV staging" });
+  }
+});
+
+// GET /api/openclaw/ev-demand-signals — fleet operator analytics read
+router.get("/api/openclaw/ev-demand-signals", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    if (!["admin", "fleet_owner"].includes(session.role)) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+
+    const limit = Math.min(parseInt((req.query.limit as string) || "100"), 500);
+    const signals = await db
+      .select()
+      .from(evDemandSignals)
+      .orderBy(desc(evDemandSignals.requestedAt))
+      .limit(limit);
+
+    const totalSignals = signals.length;
+    const matchedSignals = signals.filter((s) => s.matchFound).length;
+    const matchRate = totalSignals > 0 ? Math.round((matchedSignals / totalSignals) * 100) : 0;
+
+    res.json({ signals, totalSignals, matchedSignals, matchRate });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to fetch EV demand signals" });
+  }
+});
+
+// POST /api/openclaw/ev-demand-signals — log an EV demand signal (internal use, authenticated)
+router.post("/api/openclaw/ev-demand-signals", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const { pickupLat, pickupLng, regionCode, matchFound, evDriversAvailable, nearestHubId } = req.body;
+
+    const [signal] = await db.insert(evDemandSignals).values({
+      userId: session.userId,
+      pickupLat: pickupLat !== undefined ? String(pickupLat) : null,
+      pickupLng: pickupLng !== undefined ? String(pickupLng) : null,
+      regionCode: typeof regionCode === "string" ? regionCode : null,
+      matchFound: matchFound === true,
+      evDriversAvailable: typeof evDriversAvailable === "number" ? evDriversAvailable : 0,
+      nearestHubId: typeof nearestHubId === "string" ? nearestHubId : null,
+      requestedAt: new Date(),
+    }).returning();
+
+    res.json(signal);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to log EV demand signal" });
+  }
+});
+
+// Admin-only: seed demo demand/check-in activity for EV hubs
+router.post("/api/openclaw/admin/seed-demo-activity", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    // Only allow admin/fleet_owner roles
+    const [sessionUser] = await db.select({ role: users.role }).from(users).where(eq(users.id, session.userId));
+    if (!sessionUser || !["admin", "fleet_owner"].includes(sessionUser.role)) {
+      return res.status(403).json({ error: "Admin access required" });
+    }
+
+    const evHubs = await db.select().from(hubs).where(and(eq(hubs.isEvHub, true), eq(hubs.status, "active")));
+    if (evHubs.length === 0) {
+      return res.status(404).json({ error: "No EV hubs found. Run hub initialization first." });
+    }
+
+    // Get driver users for seeding — fall back to any user (admin/fleet) if no drivers exist
+    let seedUsers = await db.select({ id: users.id })
+      .from(users)
+      .where(eq(users.role, "driver"))
+      .limit(5);
+
+    // Deterministic fallback: if no driver users, use the requesting user (always exists)
+    if (seedUsers.length === 0) {
+      seedUsers = [{ id: session.userId }];
+    }
+
+    let updatedCount = 0;
+    let checkInsCreated = 0;
+
+    const evStagingStatuses: ("charging" | "ready" | "departing")[] = ["charging", "ready", "departing"];
+
+    for (const hub of evHubs) {
+      // Randomize available ports to simulate realistic occupancy
+      const total = hub.totalChargingPorts || 12;
+      const occupiedCount = Math.floor(total * (0.3 + Math.random() * 0.5)); // 30-80% occupied
+      const available = Math.max(0, total - occupiedCount);
+
+      // Randomize demand score (5-9 for EV hubs)
+      const demandScore = (5 + Math.random() * 4).toFixed(2);
+
+      await db.update(hubs).set({
+        availablePorts: available,
+        avgDemandScore: demandScore,
+        lastActivityAt: new Date(Date.now() - Math.floor(Math.random() * 30 * 60 * 1000)),
+        updatedAt: new Date(),
+      }).where(eq(hubs.id, hub.id));
+
+      updatedCount++;
+
+      // Seed realistic check-in records — 1-3 staged drivers per EV hub
+      const stagedDriverCount = 1 + Math.floor(Math.random() * 3);
+      const hubLat = parseFloat(hub.lat);
+      const hubLng = parseFloat(hub.lng);
+
+      for (let i = 0; i < stagedDriverCount; i++) {
+        const seedUser = seedUsers[i % seedUsers.length];
+        const evStatus = evStagingStatuses[Math.floor(Math.random() * evStagingStatuses.length)];
+        const checkedInMinutesAgo = 5 + Math.floor(Math.random() * 55);
+
+        try {
+          await db.insert(hubCheckIns).values({
+            hubId: hub.id,
+            userId: seedUser.id,
+            userRole: "driver",
+            lat: (hubLat + (Math.random() - 0.5) * 0.002).toFixed(8),
+            lng: (hubLng + (Math.random() - 0.5) * 0.002).toFixed(8),
+            checkedInAt: new Date(Date.now() - checkedInMinutesAgo * 60 * 1000),
+            evStagingStatus: evStatus,
+          });
+          checkInsCreated++;
+        } catch (e) {
+          // Skip if constraint violation (e.g., same user already checked in)
+        }
+      }
+    }
+
+    // Also update non-EV hubs with random demand (0-6)
+    const regularHubs = await db.select({ id: hubs.id }).from(hubs).where(and(eq(hubs.isEvHub, false), eq(hubs.status, "active")));
+    for (const hub of regularHubs) {
+      const demandScore = (Math.random() * 6).toFixed(2);
+      await db.update(hubs).set({
+        avgDemandScore: demandScore,
+        updatedAt: new Date(),
+      }).where(eq(hubs.id, hub.id));
+    }
+
+    res.json({
+      success: true,
+      message: `Demo activity seeded for ${updatedCount} EV hubs and ${regularHubs.length} regular hubs`,
+      evHubsUpdated: updatedCount,
+      regularHubsUpdated: regularHubs.length,
+      checkInsCreated,
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to seed demo activity" });
   }
 });
 

@@ -1,0 +1,169 @@
+Perfect. Then we **lock this down to a single, elegant system** with **as few moving parts as possible**, while still delivering:
+
+* posting
+* profiles
+* chatting
+* memory
+* movement as the core
+
+Below is the **most reduced, internally consistent version** of Travony.
+If you remove anything from this, it breaks. If you add anything, it bloats.
+
+---
+
+# **Travony — Minimal, Perfectly Wired**
+
+## One Core Idea (Everything Derives From This)
+
+> **Travony is where people post and talk *while they are moving through a place*.**
+
+---
+
+## 1. One Object Only: **The Move**
+
+There is **only one content type** in Travony.
+
+### A Move is:
+
+* a short photo or video
+* one caption
+* created only while moving
+* automatically tied to:
+
+  * place (zone)
+  * time
+  * movement type
+
+There are no stories, posts, tweets, snaps.
+Everything is a **Move**.
+
+---
+
+## 2. Profiles = Collection of Moves
+
+Profiles exist, but they are simple.
+
+A profile shows:
+
+* avatar + name
+* **Move Trail** (vertical journey feed)
+
+No likes count.
+No reposts.
+No highlights.
+
+Your identity is **where you’ve moved**.
+
+---
+
+## 3. Discovery = Place First, People Second
+
+There is **no global home feed**.
+
+Discovery happens in only two ways:
+
+1. **Map → Zone**
+2. **Search → Place**
+
+You find Moves because:
+
+* you’re nearby
+* or you care about that place
+
+Not because someone is famous.
+
+---
+
+## 4. Talking Is Always Attached to a Move or Zone
+
+There is **no free chat**.
+
+### Two ways to talk:
+
+1. **Zone Chat** – people currently there
+2. **Move Reply** – temporary thread under a Move
+
+If movement context disappears → chat disappears.
+
+This keeps conversations natural and safe.
+
+---
+
+## 5. Saving = Pinning to Your Trail
+
+Saving a Move:
+
+* pins it to your personal trail
+* optionally bookmarks the zone
+
+Saved Moves are private by default.
+
+No public collections.
+No boards.
+
+---
+
+## 6. Following Exists but Is Silent
+
+You can follow someone, but:
+
+* you only see their Moves **when they are moving**
+* or when they post in a zone you enter
+
+No feed farming.
+No pressure.
+
+---
+
+## 7. Ride Booking Is Just Another Move Trigger
+
+Booking a ride:
+
+* unlocks longer Move limits
+* improves trust
+* enhances visibility
+
+But visually:
+
+* it’s still just movement
+
+This keeps the product unified.
+
+---
+
+## 8. What This Replaces (Cleanly)
+
+* X → replaced by **Move captions**
+* Instagram → replaced by **Move visuals**
+* Snapchat → replaced by **Move ephemerality**
+* Google Maps → replaced by **human movement signal**
+
+All with **one object**.
+
+---
+
+## 9. Absolute MVP (Cannot Be Smaller)
+
+1. Move creation (movement-gated)
+2. Move Trail profile
+3. Map Zones → Moves
+4. Zone Chat
+5. Move Replies
+6. Save to Trail
+
+That’s it.
+
+---
+
+## One Line That Defines Travony Forever
+
+> **“Travony is a social map where every post comes from movement.”**
+
+If you want next, I can:
+
+* sketch the UI in words (screen by screen)
+* reduce this to a 30-second pitch
+* stress-test edge cases
+* or turn this into an engineering spec
+
+Say the next step.

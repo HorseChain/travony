@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { View, StyleSheet, Pressable, Alert, Switch, Platform } from "react-native";
+import React, { useState, useEffect, useCallback, useRef } from "react";
+import { View, StyleSheet, Pressable, Alert, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -7,6 +7,17 @@ import * as Location from "expo-location";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigation, useFocusEffect } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withRepeat,
+  withSequence,
+  withTiming,
+  interpolateColor,
+  runOnJS,
+} from "react-native-reanimated";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -19,7 +30,6 @@ import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeSta
 import { GoingHomeButton } from "@/components/driver/GoingHomeButton";
 import { DriverHomeSkeleton } from "@/components/SkeletonLoader";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeIn, FadeOut, SlideInUp, ZoomIn } from "react-native-reanimated";
 
 type NavigationProp = NativeStackNavigationProp<DriverHomeStackParamList>;
 
@@ -42,12 +52,168 @@ interface RideRequest {
   pmgthPremiumAmount?: number;
   pmgthPremiumPercent?: number;
   pmgthDirectionScore?: number;
+  isEvRide?: boolean;
+}
+
+interface Hub {
+  id: string;
+  name: string;
+  lat: string | number;
+  lng: string | number;
+  demandScore?: number;
+  isEvHub?: boolean;
+  availablePorts?: number;
+}
+
+function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+const COUNTDOWN_SECONDS = 15;
+const RING_SIZE = 80;
+const RING_BORDER = 6;
+
+function CountdownRing({ seconds, total, onGreenBg = false }: { seconds: number; total: number; onGreenBg?: boolean }) {
+  const progress = seconds / total; // 1→0 as time runs out
+  const ringColor = onGreenBg
+    ? seconds <= 5 ? "#FFB3B3" : "rgba(255,255,255,0.9)"
+    : seconds <= 5 ? "#E53935" : seconds <= 10 ? "#FF8C00" : Colors.travonyGreen;
+  const trackColor = onGreenBg ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.12)";
+  // Two-half technique: rotate left half and right half independently
+  const halfProgress = Math.min(progress * 2, 1); // 0→1 for first half
+  const secondHalfProgress = Math.max(progress * 2 - 1, 0); // 0→1 for second half
+  const firstHalfAngle = halfProgress * 180;
+  const secondHalfAngle = secondHalfProgress * 180;
+  const clipInner = RING_SIZE / 2 - RING_BORDER;
+  return (
+    <View style={{ width: RING_SIZE, height: RING_SIZE }}>
+      {/* Track circle */}
+      <View
+        style={{
+          position: "absolute",
+          width: RING_SIZE,
+          height: RING_SIZE,
+          borderRadius: RING_SIZE / 2,
+          borderWidth: RING_BORDER,
+          borderColor: trackColor,
+        }}
+      />
+      {/* Left half clip */}
+      <View style={{ position: "absolute", width: RING_SIZE / 2, height: RING_SIZE, left: 0, overflow: "hidden" }}>
+        <View
+          style={{
+            width: RING_SIZE,
+            height: RING_SIZE,
+            borderRadius: RING_SIZE / 2,
+            borderWidth: RING_BORDER,
+            borderColor: ringColor,
+            transform: [{ rotate: `${secondHalfAngle - 180}deg` }],
+            opacity: progress > 0.5 ? 1 : 0,
+          }}
+        />
+      </View>
+      {/* Right half clip */}
+      <View style={{ position: "absolute", width: RING_SIZE / 2, height: RING_SIZE, right: 0, overflow: "hidden" }}>
+        <View
+          style={{
+            position: "absolute",
+            left: -(RING_SIZE / 2),
+            width: RING_SIZE,
+            height: RING_SIZE,
+            borderRadius: RING_SIZE / 2,
+            borderWidth: RING_BORDER,
+            borderColor: ringColor,
+            transform: [{ rotate: `${firstHalfAngle}deg` }],
+          }}
+        />
+      </View>
+      {/* Inner mask to make it look like a ring (matches parent bg) */}
+      {onGreenBg ? (
+        <View
+          style={{
+            position: "absolute",
+            width: clipInner * 2,
+            height: clipInner * 2,
+            borderRadius: clipInner,
+            backgroundColor: Colors.travonyGreen,
+            top: RING_BORDER,
+            left: RING_BORDER,
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function AnimatedToggle({
+  value,
+  onValueChange,
+}: {
+  value: boolean;
+  onValueChange: (v: boolean) => void;
+}) {
+  const { theme } = useTheme();
+  const animProgress = useSharedValue(value ? 1 : 0);
+  const pulseScale = useSharedValue(1);
+
+  useEffect(() => {
+    animProgress.value = withSpring(value ? 1 : 0, { damping: 18, stiffness: 180 });
+    if (value) {
+      pulseScale.value = withRepeat(
+        withSequence(
+          withTiming(1.25, { duration: 800 }),
+          withTiming(1, { duration: 800 })
+        ),
+        -1,
+        false
+      );
+    } else {
+      pulseScale.value = withTiming(1);
+    }
+  }, [value]);
+
+  const trackStyle = useAnimatedStyle(() => ({
+    backgroundColor: interpolateColor(
+      animProgress.value,
+      [0, 1],
+      ["#9E9E9E", Colors.travonyGreen]
+    ),
+    width: 76 + animProgress.value * 8,
+  }));
+
+  const thumbStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: animProgress.value * 28 }],
+  }));
+
+  const pulseStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+  }));
+
+  return (
+    <Pressable onPress={() => onValueChange(!value)}>
+      <Animated.View style={[styles.toggleTrack, trackStyle]}>
+        <Animated.View style={[styles.toggleThumb, thumbStyle]}>
+          {value ? (
+            <Animated.View style={[styles.toggleDot, pulseStyle]} />
+          ) : null}
+        </Animated.View>
+      </Animated.View>
+    </Pressable>
+  );
 }
 
 export default function DriverHomeScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const { user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
   const queryClient = useQueryClient();
@@ -55,16 +221,26 @@ export default function DriverHomeScreen() {
   const [isOnline, setIsOnline] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
-  const [showHeatmap, setShowHeatmap] = useState(false);
   const [isReady, setIsReady] = useState(false);
   const [showActivationMoment, setShowActivationMoment] = useState(false);
+  const [onlineSessionStartTime, setOnlineSessionStartTime] = useState<Date | null>(null);
+  const [onlineSessionMinutes, setOnlineSessionMinutes] = useState(0);
+  const [hubCooldowns, setHubCooldowns] = useState<Record<string, number>>({});
+  const [proactiveHub, setProactiveHub] = useState<(Hub & { distanceKm: number }) | null>(null);
+  const [countdownSeconds, setCountdownSeconds] = useState(COUNTDOWN_SECONDS);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const checkedInHubsThisSession = useRef<Set<string>>(new Set());
+  const dismissedHubProximityIds = useRef<Set<string>>(new Set());
+  const [proximityHub, setProximityHub] = useState<Hub | null>(null);
+  const [checkInSuccess, setCheckInSuccess] = useState(false);
+  const [checkInPrestige, setCheckInPrestige] = useState<number | null>(null);
+
+  const hubSlideIn = useSharedValue(-100);
+  const hubOpacity = useSharedValue(0);
+  const hubSwipeX = useSharedValue(0);
 
   useEffect(() => {
-    console.log("DriverHomeScreen: Mounting");
-    const timer = setTimeout(() => {
-      console.log("DriverHomeScreen: Ready after delay");
-      setIsReady(true);
-    }, 500);
+    const timer = setTimeout(() => setIsReady(true), 500);
     return () => clearTimeout(timer);
   }, []);
 
@@ -73,41 +249,33 @@ export default function DriverHomeScreen() {
     enabled: !!user,
   });
 
-  // Sync online status from server on load
   useEffect(() => {
     if (driverData?.is_online !== undefined && driverData.is_online !== isOnline) {
       setIsOnline(driverData.is_online);
     }
   }, [driverData?.is_online]);
 
-  const { data: pendingRides, error: pendingRidesError, isLoading: pendingRidesLoading } = useQuery<RideRequest[]>({
+  const { data: pendingRides } = useQuery<RideRequest[]>({
     queryKey: ["/api/drivers/pending-rides"],
     enabled: isOnline,
     refetchInterval: 5000,
   });
 
-  // Debug logging for pending rides
-  useEffect(() => {
-    console.log("[DRIVER-DEBUG] isOnline:", isOnline, "pendingRides:", pendingRides?.length, "error:", pendingRidesError?.message, "loading:", pendingRidesLoading);
-  }, [isOnline, pendingRides, pendingRidesError, pendingRidesLoading]);
-
-  interface DemandZone {
-    zoneLat: string;
-    zoneLng: string;
-    totalRequests: number;
-    avgFare: string;
-    demandLevel: "low" | "medium" | "high" | "surge";
-  }
-
-  const { data: earningsData } = useQuery<{ monthlyYield: string }>({
-    queryKey: ["/api/drivers/monthly-yield"],
-    enabled: isOnline && !!user,
-    refetchInterval: 30000,
+  const { data: earningsData } = useQuery<{ totalEarnings: string; totalTrips: number }>({
+    queryKey: ["/api/drivers/earnings"],
+    enabled: !!user,
+    refetchInterval: isOnline ? 30000 : undefined,
   });
 
-  const { data: heatmapData } = useQuery<{ zones: DemandZone[]; timestamp: string }>({
-    queryKey: ["/api/drivers/heatmap"],
-    enabled: showHeatmap && isOnline && !!currentLocation,
+  const { data: hubsData } = useQuery<Hub[]>({
+    queryKey: ["/api/openclaw/hubs"],
+    enabled: isOnline && !!currentLocation,
+    refetchInterval: 60000,
+  });
+
+  const { data: evHubsData } = useQuery<Hub[]>({
+    queryKey: ["/api/openclaw/hubs/ev-hubs"],
+    enabled: isOnline && !!currentLocation,
     refetchInterval: 60000,
   });
 
@@ -124,6 +292,48 @@ export default function DriverHomeScreen() {
     },
   });
 
+  const declineRideMutation = useMutation({
+    mutationFn: async (rideId: string) => {
+      return apiRequest(`/api/rides/${rideId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: "cancelled" }),
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/drivers/pending-rides"] });
+    },
+    onError: () => {},
+  });
+
+  const checkInMutation = useMutation({
+    mutationFn: async (hubId: string) => {
+      return apiRequest(`/api/openclaw/hubs/${hubId}/check-in`, {
+        method: "POST",
+        body: JSON.stringify({ evStatus: "non_ev" }),
+        headers: { "Content-Type": "application/json" },
+      });
+    },
+    onSuccess: async () => {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (proximityHub) {
+        checkedInHubsThisSession.current.add(proximityHub.id);
+      }
+      try {
+        const prestige = await apiRequest("/api/openclaw/prestige");
+        setCheckInPrestige(prestige?.score ?? null);
+      } catch {}
+      setCheckInSuccess(true);
+      setTimeout(() => {
+        setProximityHub(null);
+        setCheckInSuccess(false);
+      }, 3000);
+    },
+    onError: () => {
+      setProximityHub(null);
+    },
+  });
+
   useEffect(() => {
     requestLocationPermission();
   }, []);
@@ -137,12 +347,141 @@ export default function DriverHomeScreen() {
   );
 
   useEffect(() => {
-    console.log("Driver pending rides:", pendingRides?.length, "isOnline:", isOnline, "incomingRequest:", incomingRequest?.id);
     if (pendingRides && pendingRides.length > 0 && !incomingRequest) {
-      console.log("Setting incoming request:", pendingRides[0]);
       setIncomingRequest(pendingRides[0]);
     }
   }, [pendingRides, isOnline]);
+
+  const declinedRideId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (incomingRequest) {
+      setCountdownSeconds(COUNTDOWN_SECONDS);
+      if (countdownRef.current) clearInterval(countdownRef.current);
+      const rideId = incomingRequest.id;
+      countdownRef.current = setInterval(() => {
+        setCountdownSeconds((s) => {
+          if (s <= 1) {
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            if (declinedRideId.current !== rideId) {
+              declinedRideId.current = rideId;
+              declineRideMutation.mutate(rideId);
+            }
+            setIncomingRequest(null);
+            return 0;
+          }
+          if (s === 11) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+          if (s === 6) Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+          return s - 1;
+        });
+      }, 1000);
+    } else {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    }
+    return () => {
+      if (countdownRef.current) clearInterval(countdownRef.current);
+    };
+  }, [incomingRequest?.id]);
+
+  useEffect(() => {
+    if (!isOnline) {
+      setOnlineSessionStartTime(null);
+      setOnlineSessionMinutes(0);
+      return;
+    }
+    if (!onlineSessionStartTime) {
+      setOnlineSessionStartTime(new Date());
+    }
+    const timer = setInterval(() => {
+      if (onlineSessionStartTime) {
+        const mins = Math.floor((Date.now() - onlineSessionStartTime.getTime()) / 60000);
+        setOnlineSessionMinutes(mins);
+      }
+    }, 60000);
+    return () => clearInterval(timer);
+  }, [isOnline, onlineSessionStartTime]);
+
+  useEffect(() => {
+    if (!isOnline || !currentLocation || !hubsData) return;
+    const now = Date.now();
+    const allHubs: Hub[] = [
+      ...(hubsData || []),
+      ...(evHubsData || []),
+    ];
+    const uniqueHubs = Array.from(new Map(allHubs.map((h) => [h.id, h])).values());
+
+    for (const hub of uniqueHubs) {
+      const dist = distanceKm(
+        currentLocation.lat,
+        currentLocation.lng,
+        Number(hub.lat),
+        Number(hub.lng)
+      );
+      if (dist > 8) continue;
+      const demandOk = (hub.demandScore ?? 0) > 0.6;
+      const evOk = hub.isEvHub && (hub.availablePorts ?? 0) > 0;
+      if (!demandOk && !evOk) continue;
+      const lastShown = hubCooldowns[hub.id] ?? 0;
+      if (now - lastShown < 30 * 60 * 1000) continue;
+      setProactiveHub({ ...hub, distanceKm: Math.round(dist * 10) / 10 });
+      hubSlideIn.value = withSpring(0, { damping: 18 });
+      hubOpacity.value = withTiming(1, { duration: 300 });
+      break;
+    }
+  }, [isOnline, currentLocation, hubsData, evHubsData]);
+
+  useEffect(() => {
+    if (!isOnline || !currentLocation || !hubsData) return;
+    for (const hub of hubsData) {
+      const dist = distanceKm(
+        currentLocation.lat,
+        currentLocation.lng,
+        Number(hub.lat),
+        Number(hub.lng)
+      );
+      if (
+        dist < 0.3 &&
+        !checkedInHubsThisSession.current.has(hub.id) &&
+        !dismissedHubProximityIds.current.has(hub.id)
+      ) {
+        setProximityHub(hub);
+        break;
+      }
+    }
+  }, [currentLocation, hubsData, isOnline]);
+
+  const hubCardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: hubSlideIn.value }, { translateX: hubSwipeX.value }],
+    opacity: hubOpacity.value,
+  }));
+
+  const dismissHub = useCallback((hubId: string) => {
+    setHubCooldowns((prev) => ({ ...prev, [hubId]: Date.now() }));
+    hubSlideIn.value = withSpring(-100);
+    hubOpacity.value = withTiming(0);
+    setTimeout(() => setProactiveHub(null), 400);
+  }, [hubSlideIn, hubOpacity]);
+
+  const hubSwipeGesture = Gesture.Pan()
+    .activeOffsetX([-10, 10])
+    .onUpdate((e) => {
+      hubSwipeX.value = e.translationX;
+      const absX = Math.abs(e.translationX);
+      hubOpacity.value = Math.max(0, 1 - absX / 160);
+    })
+    .onEnd((e) => {
+      if (Math.abs(e.translationX) > 80 || Math.abs(e.velocityX) > 500) {
+        const direction = e.translationX > 0 ? 400 : -400;
+        hubSwipeX.value = withTiming(direction, { duration: 200 });
+        hubOpacity.value = withTiming(0, { duration: 200 });
+        if (proactiveHub) {
+          runOnJS(dismissHub)(proactiveHub.id);
+        }
+      } else {
+        hubSwipeX.value = withSpring(0);
+        hubOpacity.value = withSpring(1);
+      }
+    });
 
   const requestLocationPermission = async () => {
     try {
@@ -160,8 +499,7 @@ export default function DriverHomeScreen() {
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
-      const { latitude, longitude } = location.coords;
-      setCurrentLocation({ lat: latitude, lng: longitude });
+      setCurrentLocation({ lat: location.coords.latitude, lng: location.coords.longitude });
     } catch (error) {
       console.error("Error getting location:", error);
     }
@@ -171,9 +509,10 @@ export default function DriverHomeScreen() {
     setIsOnline(value);
     toggleOnlineMutation.mutate(value);
     if (value) {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setShowActivationMoment(true);
-      setTimeout(() => setShowActivationMoment(false), 2500);
+      setOnlineSessionStartTime(new Date());
+      setTimeout(() => setShowActivationMoment(false), 1000);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setIncomingRequest(null);
@@ -181,19 +520,13 @@ export default function DriverHomeScreen() {
   };
 
   const handleAcceptRide = async () => {
-    console.log("Accept ride pressed, incomingRequest:", incomingRequest?.id);
-    if (!incomingRequest) {
-      console.log("No incoming request to accept");
-      return;
-    }
+    if (!incomingRequest) return;
     try {
-      console.log("Sending PATCH to accept ride:", incomingRequest.id);
       await apiRequest(`/api/rides/${incomingRequest.id}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "accepted" }),
         headers: { "Content-Type": "application/json" },
       });
-      console.log("Ride accepted, navigating to active ride");
       navigation.navigate("DriverActiveRide", { rideId: incomingRequest.id });
       setIncomingRequest(null);
     } catch (error: any) {
@@ -207,8 +540,16 @@ export default function DriverHomeScreen() {
   };
 
   const handleDeclineRide = () => {
+    if (incomingRequest && declinedRideId.current !== incomingRequest.id) {
+      declinedRideId.current = incomingRequest.id;
+      declineRideMutation.mutate(incomingRequest.id);
+    }
     setIncomingRequest(null);
   };
+
+  const todayEarnings = earningsData?.totalEarnings ?? "0.00";
+  const todayTrips = earningsData?.totalTrips ?? 0;
+  const showPmgthPrompt = isOnline && onlineSessionMinutes >= 120;
 
   if (!isReady) {
     return <DriverHomeSkeleton />;
@@ -227,78 +568,144 @@ export default function DriverHomeScreen() {
         <View style={[styles.statusCard, { backgroundColor: theme.backgroundRoot }]}>
           <View style={styles.statusContent}>
             <View style={{ flex: 1 }}>
-              <ThemedText style={styles.statusLabel}>
-                {isOnline ? "Vehicle Active" : "Vehicle Inactive"}
-              </ThemedText>
-              <ThemedText style={[styles.networkEfficiency, { color: isOnline ? Colors.travonyGreen : theme.textMuted }]}>
-                {isOnline ? "Network Efficiency: 94%" : "Activate to join the network"}
+              <View style={styles.earningsRow}>
+                <Ionicons
+                  name="wallet-outline"
+                  size={14}
+                  color={isOnline ? Colors.travonyGreen : theme.textMuted}
+                />
+                <ThemedText style={[styles.earningsText, { color: isOnline ? Colors.travonyGreen : theme.textMuted }]}>
+                  {isOnline
+                    ? `AED ${todayEarnings} today · ${todayTrips} trip${todayTrips !== 1 ? "s" : ""}`
+                    : "AED 0 · Start earning"}
+                </ThemedText>
+              </View>
+              <ThemedText style={[styles.statusLabel, { color: theme.textPrimary }]}>
+                {isOnline ? "Online" : "Offline"}
               </ThemedText>
             </View>
-            <Switch
-              value={isOnline}
-              onValueChange={handleToggleOnline}
-              trackColor={{ false: theme.border, true: Colors.travonyGreen }}
-              thumbColor={isOnline ? "#fff" : "#f4f3f4"}
-            />
+            <AnimatedToggle value={isOnline} onValueChange={handleToggleOnline} />
           </View>
-          {isOnline && earningsData ? (
-            <View style={styles.monthlyYieldRow}>
-              <ThemedText style={[styles.yieldLabel, { color: theme.textSecondary }]}>Monthly Yield</ThemedText>
-              <ThemedText style={[styles.yieldValue, { color: Colors.travonyGreen }]}>
-                AED {earningsData.monthlyYield || "0.00"}
-              </ThemedText>
-            </View>
-          ) : null}
         </View>
+
+        {showActivationMoment ? (
+          <View style={[styles.liveBanner, { backgroundColor: Colors.travonyGreen }]}>
+            <ThemedText style={styles.liveBannerText}>You're Live</ThemedText>
+          </View>
+        ) : null}
       </View>
 
-      <Pressable
-        style={({ pressed }) => [
-          styles.networkHubsButton,
-          {
-            top: insets.top + Spacing.md + 100,
-            backgroundColor: theme.backgroundElevated,
-            borderColor: theme.border,
-            opacity: pressed ? 0.85 : 1,
-          },
-        ]}
-        onPress={() => navigation.navigate("OpenClaw", { variant: "driver" })}
-      >
-        <Ionicons name="grid-outline" size={20} color={Colors.travonyGreen} />
-        <View style={styles.networkHubsTextContainer}>
-          <ThemedText style={styles.networkHubsTitle}>Network Hubs</ThemedText>
-          <ThemedText style={[styles.networkHubsSubtitle, { color: theme.textMuted }]}>
-            Demand hubs & yield estimates
-          </ThemedText>
-        </View>
-        <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
-      </Pressable>
+      <View style={[styles.quickActionsRow, { top: insets.top + Spacing.md + 106 }]}>
+        {proactiveHub ? (
+          <GestureDetector gesture={hubSwipeGesture}>
+            <Animated.View style={[styles.hubCard, { backgroundColor: theme.backgroundRoot }, hubCardStyle]}>
+              <View style={styles.hubCardContent}>
+                {proactiveHub.isEvHub ? (
+                  <Ionicons name="flash" size={18} color="#2196F3" />
+                ) : (
+                  <Ionicons name="location" size={18} color={Colors.travonyGreen} />
+                )}
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={styles.hubCardTitle} numberOfLines={1}>
+                    {proactiveHub.name}
+                  </ThemedText>
+                  <ThemedText style={[styles.hubCardSub, { color: theme.textMuted }]}>
+                    {proactiveHub.isEvHub && (proactiveHub.availablePorts ?? 0) > 0
+                      ? `${proactiveHub.availablePorts} charging ports open`
+                      : `${proactiveHub.distanceKm} km away · Good demand now`}
+                  </ThemedText>
+                </View>
+                <Pressable
+                  style={[styles.hubHeadButton, { backgroundColor: Colors.travonyGreen }]}
+                  onPress={() => navigation.navigate("HubDetail", { hubId: proactiveHub.id.toString(), hubName: proactiveHub.name })}
+                >
+                  <ThemedText style={styles.hubHeadButtonText}>Head There</ThemedText>
+                </Pressable>
+                <Pressable onPress={() => dismissHub(proactiveHub.id)} style={styles.hubDismiss}>
+                  <Ionicons name="close" size={16} color={theme.textMuted} />
+                </Pressable>
+              </View>
+            </Animated.View>
+          </GestureDetector>
+        ) : (
+          <>
+            <Pressable
+              style={({ pressed }) => [
+                styles.networkHubsButton,
+                {
+                  backgroundColor: theme.backgroundElevated,
+                  borderColor: theme.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              onPress={() => navigation.navigate("OpenClaw", { variant: "driver" })}
+            >
+              <Ionicons name="grid-outline" size={20} color={Colors.travonyGreen} />
+              <View style={styles.networkHubsTextContainer}>
+                <ThemedText style={styles.networkHubsTitle}>Network Hubs</ThemedText>
+                <ThemedText style={[styles.networkHubsSubtitle, { color: theme.textMuted }]}>
+                  Demand hubs & yield
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </Pressable>
 
-      {isOnline && !incomingRequest && (
+            <Pressable
+              style={({ pressed }) => [
+                styles.coffeeButton,
+                {
+                  backgroundColor: theme.backgroundElevated,
+                  borderColor: theme.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              onPress={() => navigation.navigate("DriverCoffeeOrders")}
+            >
+              <Ionicons name="cafe" size={22} color="#8B4513" />
+            </Pressable>
+          </>
+        )}
+      </View>
+
+      {isOnline && !incomingRequest ? (
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
-          <View style={styles.goingHomeContainer}>
-            <GoingHomeButton isOnline={isOnline} currentLocation={currentLocation} />
-          </View>
+          {showPmgthPrompt ? (
+            <GoingHomeButton isOnline={isOnline} currentLocation={currentLocation} cardMode />
+          ) : (
+            <View style={styles.goingHomeContainer}>
+              <GoingHomeButton isOnline={isOnline} currentLocation={currentLocation} />
+            </View>
+          )}
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
             <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
           </View>
         </View>
-      )}
+      ) : null}
 
       {incomingRequest ? (
         <View style={[styles.requestCard, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
           <View style={styles.requestHeader}>
             <View style={styles.requestTitleRow}>
               <ThemedText style={styles.requestTitle}>New Route Request</ThemedText>
-              {incomingRequest.isPmgthRide ? (
-                <View style={[styles.pmgthBadge, { backgroundColor: Colors.travonyGreen + "20" }]}>
-                  <Ionicons name="home" size={12} color={Colors.travonyGreen} />
-                  <ThemedText style={[styles.pmgthBadgeText, { color: Colors.travonyGreen }]}>
-                    On Your Way
-                  </ThemedText>
-                </View>
-              ) : null}
+              <View style={styles.badgeRow}>
+                {incomingRequest.isPmgthRide ? (
+                  <View style={[styles.pmgthBadge, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                    <Ionicons name="home" size={12} color={Colors.travonyGreen} />
+                    <ThemedText style={[styles.pmgthBadgeText, { color: Colors.travonyGreen }]}>
+                      {incomingRequest.pmgthDirectionScore != null
+                        ? `${Math.round(incomingRequest.pmgthDirectionScore * 100)}% aligned with your route`
+                        : "Going Your Way"}
+                    </ThemedText>
+                  </View>
+                ) : null}
+                {incomingRequest.isEvRide ? (
+                  <View style={[styles.evBadge, { backgroundColor: "#2196F320" }]}>
+                    <Ionicons name="flash" size={12} color="#2196F3" />
+                    <ThemedText style={[styles.evBadgeText, { color: "#2196F3" }]}>EV Requested</ThemedText>
+                  </View>
+                ) : null}
+              </View>
             </View>
             <View style={styles.fareContainer}>
               <View style={[styles.fareBadge, { backgroundColor: Colors.travonyGreen }]}>
@@ -312,12 +719,25 @@ export default function DriverHomeScreen() {
             </View>
           </View>
 
-          {incomingRequest.isPmgthRide ? (
-            <View style={[styles.pmgthInfo, { backgroundColor: Colors.travonyGreen + "10" }]}>
-              <Ionicons name="flash" size={14} color={Colors.travonyGreen} />
-              <ThemedText style={[styles.pmgthInfoText, { color: Colors.travonyGreen }]}>
-                Direction match! Earn +{incomingRequest.pmgthPremiumPercent?.toFixed(0)}% premium instantly
+          {incomingRequest.customerName ? (
+            <View style={[styles.customerInfo, { backgroundColor: theme.backgroundElevated }]}>
+              <Ionicons name="person-outline" size={16} color={theme.textMuted} />
+              <ThemedText style={[styles.customerName, { color: theme.textSecondary }]}>
+                {incomingRequest.customerName}
               </ThemedText>
+              {incomingRequest.customerRating ? (
+                <View style={styles.ratingBadge}>
+                  <Ionicons name="star" size={12} color="#FFB800" />
+                  <ThemedText style={[styles.ratingText, { color: theme.textPrimary }]}>
+                    {incomingRequest.customerRating.toFixed(1)}
+                  </ThemedText>
+                </View>
+              ) : null}
+              {incomingRequest.customerTotalRides ? (
+                <ThemedText style={[styles.ridesCount, { color: theme.textMuted }]}>
+                  {incomingRequest.customerTotalRides} trips
+                </ThemedText>
+              ) : null}
             </View>
           ) : null}
 
@@ -344,20 +764,36 @@ export default function DriverHomeScreen() {
           </View>
 
           <View style={styles.rideStats}>
+            {(() => {
+              if (
+                currentLocation &&
+                incomingRequest.pickupLat &&
+                incomingRequest.pickupLng
+              ) {
+                const dKm = distanceKm(
+                  currentLocation.lat,
+                  currentLocation.lng,
+                  parseFloat(String(incomingRequest.pickupLat)),
+                  parseFloat(String(incomingRequest.pickupLng))
+                );
+                const minToPickup = Math.max(1, Math.round((dKm / 30) * 60));
+                return (
+                  <View style={styles.statItem}>
+                    <Ionicons name="time-outline" size={16} color={theme.textMuted} />
+                    <ThemedText style={[styles.statText, { color: theme.textSecondary }]}>
+                      {minToPickup} min to pickup
+                    </ThemedText>
+                  </View>
+                );
+              }
+              return null;
+            })()}
             <View style={styles.statItem}>
               <Ionicons name="navigate-outline" size={16} color={theme.textMuted} />
               <ThemedText style={[styles.statText, { color: theme.textSecondary }]}>
-                {incomingRequest.distance} km
+                {incomingRequest.distance} km trip
               </ThemedText>
             </View>
-            {incomingRequest.duration ? (
-              <View style={styles.statItem}>
-                <Ionicons name="time-outline" size={16} color={theme.textMuted} />
-                <ThemedText style={[styles.statText, { color: theme.textSecondary }]}>
-                  ~{incomingRequest.duration} min
-                </ThemedText>
-              </View>
-            ) : null}
             {incomingRequest.farePerKm ? (
               <View style={styles.statItem}>
                 <Ionicons name="cash-outline" size={16} color={Colors.travonyGreen} />
@@ -368,57 +804,80 @@ export default function DriverHomeScreen() {
             ) : null}
           </View>
 
-          {incomingRequest.customerRating ? (
-            <View style={[styles.customerInfo, { backgroundColor: theme.backgroundElevated }]}>
-              <Ionicons name="person-outline" size={16} color={theme.textMuted} />
-              <ThemedText style={[styles.customerName, { color: theme.textSecondary }]}>
-                {incomingRequest.customerName}
-              </ThemedText>
-              <View style={styles.ratingBadge}>
-                <Ionicons name="star" size={12} color="#FFB800" />
-                <ThemedText style={[styles.ratingText, { color: theme.textPrimary }]}>
-                  {incomingRequest.customerRating.toFixed(1)}
-                </ThemedText>
-              </View>
-              {incomingRequest.customerTotalRides ? (
-                <ThemedText style={[styles.ridesCount, { color: theme.textMuted }]}>
-                  ({incomingRequest.customerTotalRides} rides)
-                </ThemedText>
-              ) : null}
-            </View>
-          ) : null}
-
           <View style={styles.requestActions}>
+            <Pressable
+              style={[styles.acceptButtonWrapped, { backgroundColor: Colors.travonyGreen }]}
+              onPress={handleAcceptRide}
+            >
+              <View style={styles.acceptButtonRingWrap}>
+                <CountdownRing seconds={countdownSeconds} total={COUNTDOWN_SECONDS} onGreenBg />
+                <View style={styles.countdownOverlayNumber}>
+                  <ThemedText style={[styles.countdownText, { color: countdownSeconds <= 5 ? "#ffdddd" : "rgba(255,255,255,0.9)" }]}>
+                    {countdownSeconds}
+                  </ThemedText>
+                </View>
+              </View>
+              <ThemedText style={styles.acceptButtonText}>Accept Route</ThemedText>
+            </Pressable>
             <Pressable
               style={[styles.declineButton, { borderColor: theme.border }]}
               onPress={handleDeclineRide}
             >
-              <Ionicons name="close-outline" size={24} color={theme.error} />
-            </Pressable>
-            <Pressable
-              style={[styles.acceptButton, { backgroundColor: Colors.travonyGreen }]}
-              onPress={handleAcceptRide}
-            >
-              <ThemedText style={styles.acceptButtonText}>Accept Route</ThemedText>
+              <ThemedText style={[styles.declineButtonText, { color: theme.error }]}>Decline</ThemedText>
             </Pressable>
           </View>
         </View>
       ) : null}
 
-      {showActivationMoment ? (
-        <Animated.View 
-          entering={FadeIn.duration(300)} 
-          exiting={FadeOut.duration(300)} 
-          style={styles.activationOverlay}
-        >
-          <Animated.View entering={ZoomIn.delay(200).duration(400)} style={styles.activationContent}>
-            <View style={styles.activationIcon}>
-              <Ionicons name="radio-outline" size={48} color={Colors.travonyGreen} />
+      {proximityHub && !checkedInHubsThisSession.current.has(proximityHub.id) ? (
+        <View style={[styles.proximitySheet, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
+          {checkInSuccess ? (
+            <View style={styles.checkInSuccessContent}>
+              <Ionicons name="checkmark-circle" size={28} color={Colors.travonyGreen} />
+              <View style={{ flex: 1 }}>
+                <ThemedText style={[styles.checkInSuccessTitle, { color: Colors.travonyGreen }]}>
+                  Checked in — you're earning prestige
+                </ThemedText>
+                {checkInPrestige !== null ? (
+                  <ThemedText style={[styles.checkInSubtitle, { color: theme.textSecondary }]}>
+                    Prestige score: {checkInPrestige}
+                  </ThemedText>
+                ) : null}
+              </View>
             </View>
-            <ThemedText style={styles.activationTitle}>Vehicle Activated</ThemedText>
-            <ThemedText style={styles.activationSubtitle}>Autonomous Yield: Enabled</ThemedText>
-          </Animated.View>
-        </Animated.View>
+          ) : (
+            <>
+              <View style={styles.proximitySheetContent}>
+                <Ionicons name="location" size={22} color={Colors.travonyGreen} />
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={styles.proximityHubTitle}>{proximityHub.name} is nearby</ThemedText>
+                  <ThemedText style={[styles.proximityHubSub, { color: theme.textSecondary }]}>
+                    Check in to join the community and unlock demand insights
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.proximityActions}>
+                <Pressable
+                  style={[styles.checkInButton, { backgroundColor: Colors.travonyGreen }]}
+                  onPress={() => checkInMutation.mutate(proximityHub.id)}
+                  disabled={checkInMutation.isPending}
+                >
+                  <ThemedText style={styles.checkInButtonText}>
+                    {checkInMutation.isPending ? "Checking in..." : "Check In"}
+                  </ThemedText>
+                </Pressable>
+                <Pressable onPress={() => {
+                  if (proximityHub) {
+                    dismissedHubProximityIds.current.add(proximityHub.id);
+                  }
+                  setProximityHub(null);
+                }}>
+                  <ThemedText style={[styles.dismissLink, { color: theme.textMuted }]}>Dismiss</ThemedText>
+                </Pressable>
+              </View>
+            </>
+          )}
+        </View>
       ) : null}
     </ThemedView>
   );
@@ -427,18 +886,6 @@ export default function DriverHomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  map: {
-    flex: 1,
-  },
-  mapPlaceholder: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-    gap: Spacing.md,
-  },
-  mapPlaceholderText: {
-    ...Typography.body,
   },
   statusBar: {
     position: "absolute",
@@ -455,9 +902,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 8,
       },
-      android: {
-        elevation: 4,
-      },
+      android: { elevation: 4 },
     }),
   },
   statusContent: {
@@ -465,12 +910,136 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
+  earningsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginBottom: 2,
+  },
+  earningsText: {
+    ...Typography.caption,
+    fontWeight: "600",
+  },
   statusLabel: {
     ...Typography.h4,
-    marginBottom: Spacing.xs,
   },
-  statusSubtitle: {
-    ...Typography.small,
+  liveBanner: {
+    marginTop: Spacing.xs,
+    alignSelf: "center",
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  liveBannerText: {
+    ...Typography.bodyMedium,
+    color: "#fff",
+    fontWeight: "700",
+  },
+  toggleTrack: {
+    height: 32,
+    borderRadius: 16,
+    justifyContent: "center",
+    paddingHorizontal: 4,
+    minWidth: 76,
+  },
+  toggleThumb: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: "#fff",
+    justifyContent: "center",
+    alignItems: "center",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.2,
+        shadowRadius: 2,
+      },
+      android: { elevation: 2 },
+    }),
+  },
+  toggleDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.travonyGreen,
+  },
+  networkEfficiency: {
+    ...Typography.caption,
+  },
+  quickActionsRow: {
+    position: "absolute",
+    left: Spacing.lg,
+    right: Spacing.lg,
+    flexDirection: "row",
+    gap: Spacing.md,
+  },
+  hubCard: {
+    flex: 1,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.md,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 6,
+      },
+      android: { elevation: 4 },
+    }),
+  },
+  hubCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  hubCardTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "600",
+  },
+  hubCardSub: {
+    ...Typography.caption,
+  },
+  hubHeadButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  hubHeadButtonText: {
+    ...Typography.caption,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  hubDismiss: {
+    padding: 4,
+  },
+  networkHubsButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+  },
+  networkHubsTextContainer: {
+    flex: 1,
+  },
+  networkHubsTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "600",
+  },
+  networkHubsSubtitle: {
+    ...Typography.caption,
+  },
+  coffeeButton: {
+    width: 52,
+    height: 52,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
   bottomControls: {
     position: "absolute",
@@ -487,6 +1056,15 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     padding: Spacing.lg,
     borderRadius: BorderRadius.xl,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+      },
+      android: { elevation: 3 },
+    }),
   },
   searchingDot: {
     width: 12,
@@ -511,37 +1089,49 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.15,
         shadowRadius: 12,
       },
-      android: {
-        elevation: 8,
-      },
-      web: {
-        boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-      },
+      android: { elevation: 8 },
+      web: { boxShadow: "0 4px 12px rgba(0,0,0,0.15)" },
     }),
   },
   requestHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: Spacing.lg,
+    alignItems: "flex-start",
+    marginBottom: Spacing.md,
   },
   requestTitle: {
     ...Typography.h3,
+    marginBottom: Spacing.xs,
   },
   requestTitleRow: {
+    flex: 1,
+  },
+  badgeRow: {
     flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
+    gap: Spacing.xs,
+    flexWrap: "wrap",
   },
   pmgthBadge: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: Spacing.sm,
-    paddingVertical: Spacing.xs,
+    paddingVertical: 2,
     borderRadius: BorderRadius.sm,
     gap: 4,
   },
   pmgthBadgeText: {
+    ...Typography.small,
+    fontWeight: "600",
+  },
+  evBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 2,
+    borderRadius: BorderRadius.sm,
+    gap: 4,
+  },
+  evBadgeText: {
     ...Typography.small,
     fontWeight: "600",
   },
@@ -560,19 +1150,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: "#FFFFFF",
   },
-  pmgthInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.sm,
-    gap: Spacing.xs,
-    marginBottom: Spacing.md,
-  },
-  pmgthInfoText: {
-    ...Typography.small,
-    fontWeight: "500",
-  },
   fareBadge: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
@@ -582,8 +1159,33 @@ const styles = StyleSheet.create({
     ...Typography.h4,
     color: "#fff",
   },
+  customerInfo: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.md,
+  },
+  customerName: {
+    ...Typography.body,
+    flex: 1,
+  },
+  ratingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+  },
+  ratingText: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+  },
+  ridesCount: {
+    ...Typography.caption,
+  },
   locationInfo: {
-    marginBottom: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   locationRow: {
     flexDirection: "row",
@@ -598,10 +1200,10 @@ const styles = StyleSheet.create({
   },
   locationLine: {
     width: 2,
-    height: 24,
+    height: 20,
     backgroundColor: "#E0E0E0",
     marginLeft: 5,
-    marginVertical: Spacing.xs,
+    marginVertical: 2,
   },
   locationTextContainer: {
     flex: 1,
@@ -615,203 +1217,121 @@ const styles = StyleSheet.create({
   },
   rideStats: {
     flexDirection: "row",
-    gap: Spacing.xl,
-    marginBottom: Spacing.lg,
+    gap: Spacing.lg,
+    marginBottom: Spacing.md,
   },
   statItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
+    gap: Spacing.xs,
   },
   statText: {
     ...Typography.body,
   },
   requestActions: {
-    flexDirection: "row",
     gap: Spacing.md,
   },
-  declineButton: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    borderWidth: 2,
-    justifyContent: "center",
+  acceptButtonWrapped: {
+    flexDirection: "row",
     alignItems: "center",
+    borderRadius: 32,
+    paddingRight: Spacing.xl,
+    overflow: "hidden",
   },
-  acceptButton: {
-    flex: 1,
-    height: 56,
-    borderRadius: 28,
-    justifyContent: "center",
+  acceptButtonRingWrap: {
+    width: RING_SIZE,
+    height: RING_SIZE,
     alignItems: "center",
+    justifyContent: "center",
+    position: "relative",
+  },
+  countdownOverlayNumber: {
+    position: "absolute",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  countdownText: {
+    ...Typography.h3,
+    fontWeight: "700",
   },
   acceptButtonText: {
     ...Typography.button,
     color: "#fff",
-  },
-  heatmapToggle: {
-    position: "absolute",
-    right: Spacing.lg,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    justifyContent: "center",
-    alignItems: "center",
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: { elevation: 3 },
-      default: {},
-    }),
-  },
-  heatmapLegend: {
-    position: "absolute",
-    right: Spacing.lg,
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    ...Platform.select({
-      ios: {
-        shadowColor: "#000",
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-      },
-      android: { elevation: 3 },
-      default: {},
-    }),
-  },
-  heatmapTitle: {
-    ...Typography.caption,
-    fontWeight: "600",
-    marginBottom: Spacing.xs,
-  },
-  legendItems: {
-    gap: 4,
-  },
-  legendItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.xs,
-  },
-  legendDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendText: {
-    ...Typography.caption,
-  },
-  heatmapSubtext: {
-    ...Typography.caption,
-    marginTop: Spacing.xs,
-    fontSize: 10,
-  },
-  customerInfo: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    marginBottom: Spacing.md,
-    gap: Spacing.sm,
-  },
-  customerName: {
-    ...Typography.body,
     flex: 1,
+    textAlign: "center",
   },
-  ratingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  ratingText: {
-    ...Typography.body,
-    fontWeight: "600",
-  },
-  ridesCount: {
-    ...Typography.caption,
-  },
-  networkEfficiency: {
-    ...Typography.small,
-    letterSpacing: 0.5,
-  },
-  monthlyYieldRow: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginTop: Spacing.md,
-    paddingTop: Spacing.md,
-    borderTopWidth: 1,
-    borderTopColor: "rgba(128, 128, 128, 0.15)",
-  },
-  yieldLabel: {
-    ...Typography.small,
-    letterSpacing: 0.5,
-    textTransform: "uppercase",
-  },
-  yieldValue: {
-    fontSize: 18,
-    fontWeight: "600",
-    letterSpacing: 0.3,
-  },
-  activationOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0, 0, 0, 0.85)",
+  declineButton: {
+    height: 40,
+    borderRadius: 20,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 200,
+    borderWidth: 1,
   },
-  activationContent: {
-    alignItems: "center",
-    gap: Spacing.lg,
+  declineButtonText: {
+    ...Typography.bodyMedium,
+    fontWeight: "600",
   },
-  activationIcon: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: "rgba(0, 177, 79, 0.15)",
-    justifyContent: "center",
-    alignItems: "center",
-    marginBottom: Spacing.md,
-  },
-  activationTitle: {
-    fontSize: 24,
-    fontWeight: "300",
-    color: "#FFFFFF",
-    letterSpacing: 1,
-  },
-  activationSubtitle: {
-    fontSize: 13,
-    fontWeight: "400",
-    color: "rgba(255, 255, 255, 0.4)",
-    letterSpacing: 2,
-    textTransform: "uppercase",
-  },
-  networkHubsButton: {
+  proximitySheet: {
     position: "absolute",
     left: Spacing.lg,
     right: Spacing.lg,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    zIndex: 99,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.12,
+        shadowRadius: 10,
+      },
+      android: { elevation: 6 },
+    }),
+  },
+  proximitySheetContent: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  proximityHubTitle: {
+    ...Typography.h4,
+    marginBottom: 2,
+  },
+  proximityHubSub: {
+    ...Typography.body,
+  },
+  proximityActions: {
     flexDirection: "row",
     alignItems: "center",
-    padding: Spacing.md,
-    borderRadius: BorderRadius.md,
-    borderWidth: 1,
-    gap: Spacing.md,
+    gap: Spacing.xl,
   },
-  networkHubsTextContainer: {
+  checkInButton: {
     flex: 1,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  networkHubsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
-    letterSpacing: 0.3,
+  checkInButtonText: {
+    ...Typography.button,
+    color: "#fff",
   },
-  networkHubsSubtitle: {
-    fontSize: 11,
-    fontWeight: "400",
-    marginTop: 2,
+  dismissLink: {
+    ...Typography.body,
+    fontWeight: "500",
+  },
+  checkInSuccessContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  checkInSuccessTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+  },
+  checkInSubtitle: {
+    ...Typography.caption,
   },
 });

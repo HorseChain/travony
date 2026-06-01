@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
-import { View, StyleSheet, Platform, Pressable } from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { View, StyleSheet, Platform, Pressable, Animated } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withSequence, FadeIn, FadeOut } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -35,7 +34,8 @@ export function GuaranteeBanner({ isOnline }: Props) {
   const { theme } = useTheme();
   const [showPayoutToast, setShowPayoutToast] = useState(false);
   const [lastSeenPayoutId, setLastSeenPayoutId] = useState<string | null>(null);
-  const pulseScale = useSharedValue(1);
+  const pulseScale = useRef(new Animated.Value(1)).current;
+  const payoutOpacity = useRef(new Animated.Value(0)).current;
 
   const { data: guaranteeStatus } = useQuery<GuaranteeStatus>({
     queryKey: ["/api/guarantee/status"],
@@ -53,10 +53,10 @@ export function GuaranteeBanner({ isOnline }: Props) {
         setShowPayoutToast(true);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         
-        pulseScale.value = withSequence(
-          withSpring(1.1),
-          withSpring(1)
-        );
+        Animated.sequence([
+          Animated.spring(pulseScale, { toValue: 1.1, useNativeDriver: true }),
+          Animated.spring(pulseScale, { toValue: 1, useNativeDriver: true }),
+        ]).start();
         
         const timer = setTimeout(() => setShowPayoutToast(false), 5000);
         return () => clearTimeout(timer);
@@ -64,23 +64,21 @@ export function GuaranteeBanner({ isOnline }: Props) {
     }
   }, [guaranteeStatus?.recentPayout]);
 
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseScale.value }],
-  }));
+  useEffect(() => {
+    Animated.timing(payoutOpacity, { toValue: showPayoutToast ? 1 : 0, duration: 300, useNativeDriver: true }).start();
+  }, [showPayoutToast]);
 
   if (!isOnline) return null;
 
   if (showPayoutToast && guaranteeStatus?.recentPayout) {
     return (
       <Animated.View
-        entering={FadeIn.duration(300)}
-        exiting={FadeOut.duration(300)}
         style={[
           styles.payoutToast,
-          { backgroundColor: Colors.travonyGreen },
+          { backgroundColor: Colors.travonyGreen, opacity: payoutOpacity },
         ]}
       >
-        <Animated.View style={pulseStyle}>
+        <Animated.View style={{ transform: [{ scale: pulseScale }] }}>
           <Ionicons name="checkmark-circle" size={20} color="#fff" />
         </Animated.View>
         <View style={styles.payoutContent}>

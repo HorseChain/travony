@@ -1,0 +1,100 @@
+HubDetailScreen — Premium Intelligence Master Checklist
+Core Structure
+[ ] Build top navigation (Back, Hub Name, Menu)
+[ ] Implement Live Intelligence Header Card
+[ ] Display Activity Score
+[ ] Display Vehicles Active
+[ ] Display Network Members Nearby
+[ ] Add Predicted Yield Window
+[ ] Add AI Confidence %
+[ ] Implement segmented tabs (Activity | Live Feed | Insights)
+[ ] Add smooth tab transitions
+[ ] Build contextual bottom action bar (Driver / Rider specific)
+Activity Tab (Operational Intelligence)
+[ ] Add micro heatmap preview
+[ ] Build 30-minute demand trend graph
+[ ] Add vehicle arrival/departure ticker
+[ ] Insert AI recommendation block
+[ ] Ensure decision-focused layout
+[ ] Test readability under high activity
+Live Feed (Structured Hub Intelligence)
+[ ] Build message card layout (avatar, name, timestamp)
+[ ] Require message category selection:
+Demand Insight
+Traffic Alert
+Event Signal
+Availability Update
+[ ] Limit default message preview to 2 lines
+[ ] Add quick-tap reactions
+[ ] Create posting input with category selector
+[ ] Enforce geofence participation rules
+[ ] Allow posting only for verified active/nearby users
+AI Ranking & Moderation
+[ ] Sort feed by proximity relevance
+[ ] Add recency weighting
+[ ] Add engagement weighting
+[ ] Implement AI usefulness scoring
+[ ] Auto-collapse low-value posts
+[ ] Add “AI Highlighted” indicator
+[ ] Implement report/mute functionality
+Micro-Interaction & Emotional Layer
+[ ] Add subtle haptic feedback for high-activity hubs
+[ ] Add gradient animation tied to hub intensity
+[ ] Add smooth reaction animations
+[ ] Introduce subtle “Hub Active” pulse indicator
+[ ] Ensure no overstimulation or clutter
+Insights Tab (Long-Term Intelligence)
+[ ] Driver view:
+Average yield per hour
+Best activation times
+Contribution score
+[ ] Rider view:
+Average wait time
+Peak activity windows
+Hub reliability score
+[ ] Add historical trend mini-graphs
+[ ] Maintain clean typography hierarchy
+Personalization Layer
+[ ] Tailor feed relevance to user behavior
+[ ] Add personalized yield window predictions
+[ ] Allow custom activity notification thresholds
+[ ] Enable preferred hub tagging
+[ ] Implement context-aware smart prompts
+Reputation & Prestige Layer
+[ ] Add subtle contribution score visibility
+[ ] Weight feed ranking by trust/reputation score
+[ ] Add minimal “Top Hub Contributor” badge
+[ ] Prevent gamification or leaderboard clutter
+Predictive Intelligence Upgrade
+[ ] Add “Next Likely Active Hub” suggestion
+[ ] Add cross-hub migration patterns
+[ ] Implement event-based activity prediction
+[ ] Add seasonal behavior detection
+[ ] Improve AI confidence accuracy display
+Performance & Scaling
+[ ] Optimize feed load performance
+[ ] Implement lazy loading for older messages
+[ ] Optimize heatmap rendering
+[ ] Reduce backend query latency
+[ ] Stress-test under high hub traffic
+UX Refinement & Polish
+[ ] Enforce consistent spacing system
+[ ] Harmonize typography weights
+[ ] Reduce unnecessary icon usage
+[ ] Improve visual hierarchy
+[ ] Remove UI clutter
+[ ] Conduct usability micro-tests
+Strategic Validation
+[ ] Measure engagement rate per hub
+[ ] Measure yield improvement after feed usage
+[ ] Analyze AI prediction accuracy
+[ ] Identify low-value interaction patterns
+[ ] Adjust ranking algorithm accordingly
+[ ] Remove features that do not increase measurable value
+Final Outcome Confirmation
+[ ] HubDetailScreen functions as an AI-powered intelligence node
+[ ] Feed is structured, curated, and mobility-focused
+[ ] Drivers optimize yield confidently
+[ ] Riders access real-time contextual insights
+[ ] UI remains calm, minimal, and premium
+[ ] System scales across cities without losing quality

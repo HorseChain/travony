@@ -1,0 +1,79 @@
+uploads = []
+
+[[generated]]
+id = "Ymk9iwRnuSE-wBHtRtfcY"
+uri = "file://attached_assets/vid_frames/frame_01_intro.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "LeHHQlerQLONUNf1sJYA1"
+uri = "file://attached_assets/vid_frames/frame_02_rider_booking.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "Hj4hf9nMhJAJww7o9yUGK"
+uri = "file://attached_assets/vid_frames/frame_03_ev_selection.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "4MArIubjWkOPIQ8hBugpa"
+uri = "file://attached_assets/vid_frames/frame_04_driver_earnings.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "kpk8HBpPqZsOrbabNz_6u"
+uri = "file://attached_assets/vid_frames/frame_05_hub_network.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "njc4xVC2QHZe_189kQkov"
+uri = "file://attached_assets/vid_frames/frame_06_fleet_dashboard.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "FFU1V2EzxFpLTvidJynDO"
+uri = "file://attached_assets/vid_frames/frame_07_blockchain.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "bKBI86Moo2jX5fl8olZoH"
+uri = "file://attached_assets/vid_frames/frame_08_rider_arrive.png"
+type = "image"
+title = "generated_image"
+
+[[outputs]]
+id = "7OxkAJsRccSBoCYU0RS9U"
+uri = "file://attached_assets/ADNOC_EV_OS_Presentation.pptx"
+type = "slides"
+title = "ADNOC EV OS — Pitch Deck (Updated · Khalid Al Marzooqi)"
+
+[[outputs]]
+id = "rCs5tB6hSXh02SGgCaZ_v"
+uri = "file://attached_assets/generated_videos/adnoc_ev_os_network_animation.mp4"
+type = "video"
+title = "ADNOC EV OS — Platform Illustration Video"
+
+[[outputs]]
+id = "iLKXoJ0ymwLV-SByKW1P5"
+uri = "file://attached_assets/generated_videos/adnoc_ev_os_platform_tour.mp4"
+type = "video"
+title = "ADNOC EV OS — Animated Intro (49s)"
+
+[[outputs]]
+id = "w1-ADQTmSF9z1GLDEAOnn"
+uri = "file://attached_assets/generated_videos/adnoc_ev_os_full_demo.mp4"
+type = "video"
+title = "ADNOC EV OS - Full Demo (1m47s, AI Intro + Platform Tour)"
+
+[[outputs]]
+id = "dELGNrYvvQeoxH1S7WWZl"
+uri = "file://attached_assets/generated_videos/adnoc_ev_os_real_platform.mp4"
+type = "video"
+title = "ADNOC EV OS - Real Platform Video (58s, Hub-Focused)"

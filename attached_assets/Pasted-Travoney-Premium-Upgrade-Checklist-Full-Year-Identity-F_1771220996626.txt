@@ -1,0 +1,106 @@
+Travoney Premium Upgrade Checklist – Full Year
+Identity & First Impression
+
+ Replace splash/onboarding: “Movement has value.” + “Welcome to the Travoney Mobility Network.”
+
+ Two clear buttons: Driver / Rider
+
+ Remove marketing slides, gamification, clutter
+
+ Update app store descriptions → network + asset philosophy
+
+Language & Terminology
+
+ Rename: Driver → Vehicle Owner, Go Online → Activate Vehicle
+
+ Trip → Route, Ride → Access, Earnings → Yield
+
+ Ensure notifications, labels, menus, and settings are consistent
+
+Home Screen Simplification
+
+ Driver app home: Vehicle Status, Current Route, Monthly Yield only
+
+ Rider app home: Destination Input, ETA, Network Status only
+
+ Remove distractions, badges, bright colors, unnecessary icons
+
+Signature Moments
+
+ Driver activation: subtle animation + soft haptic
+
+ Display: “Vehicle Activated – Autonomous Yield Enabled”
+
+ Rider: “Route Optimized – System Efficient” confirmation
+
+ Remove confetti, gamification, loud alerts
+
+Status & Transparency
+
+ Driver: Vehicle Status, Network Efficiency, Monthly & Lifetime Yield
+
+ Rider: Network Status, ETA Intelligence, Efficiency metrics
+
+ Audit copy for calm, premium tone
+
+Long-Term Perspective
+
+ Add “About the Network” page (concise, serious paragraph)
+
+ Driver: Vehicle Contribution, Network Participation
+
+ Rider: Optional subtle metric: “Mobility Footprint Optimized”
+
+ Maintain calm, premium, confident tone
+
+Visual & Performance Refinement
+
+ UI: muted accent colors, consistent typography, spacing, icons
+
+ Remove unnecessary animations or pop-ups
+
+ Transitions <250ms, use skeleton loaders
+
+ Test screens → fluid, calm, intelligent feel
+
+ Check notifications for minimalism & premium tone
+
+30-Day Transformation Feedback
+
+ Test 5–10 users (observe calm, intelligence, premium perception)
+
+ Drivers: “My car is no longer just an expense”
+
+ Riders: “This system feels smarter and effortless”
+
+ Note friction points → minor adjustments only
+
+ Final copy audit for clarity, consistency, prestige
+
+General Rules
+
+ Remove before adding → subtraction over addition
+
+ Consistent terminology in every microcopy
+
+ Calm over flashy → white space & restraint
+
+ Signature moments subtle but meaningful
+
+ Predictive behavior → reduce cognitive load
+
+ Maintain perception of intelligence → metrics, network optimization, asset participation
+
+ Test 30-day transformations regularly with users
+
+Outcome Check
+
+ Drivers feel like Vehicle Owners generating autonomous yield
+
+ Riders feel part of a smart mobility infrastructure
+
+ UX is calm, focused, and minimal cognitive load
+
+ Subtle emotional cues reinforce trust, loyalty, prestige
+
+ Travoney is category-defining, respected without marketing noise

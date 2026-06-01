@@ -1,0 +1,120 @@
+Absolutely! Here’s a **clean, actionable checklist version** of the full 60-day Travoney premium upgrade plan. I’ve removed days or week references and kept it fully focused on tasks:
+
+---
+
+# **Travoney Premium Upgrade Checklist (1-Hour Micro-Tasks)**
+
+---
+
+## Identity & First Impression
+
+* Replace splash/onboarding screen with:
+
+  * *“Movement has value.”*
+  * *“Welcome to the Travoney Mobility Network.”*
+* Ensure two clear buttons: Driver / Rider
+* Remove extra slides, animations, or clutter
+* Update app store descriptions to reflect **network + asset philosophy**
+
+---
+
+## Language & Terminology
+
+* Scan each screen and replace terminology:
+
+  * Driver → Vehicle Owner
+  * Go Online → Activate Vehicle
+  * Trip → Route
+  * Ride → Access
+  * Earnings → Yield
+* Ensure notifications and alerts match new terminology
+* Review labels in menus and settings for consistency
+
+---
+
+## Home Screen Simplification
+
+* Driver app home: keep only:
+
+  * Vehicle Status
+  * Current Route
+  * Monthly Yield
+* Rider app home: keep only:
+
+  * Destination input
+  * Estimated arrival
+  * Network status indicator
+* Test home screens for calm and focus; remove distractions
+
+---
+
+## Signature Moments
+
+* Add subtle animation and soft haptic for Driver activation
+* Display message: *“Vehicle Activated – Autonomous Yield Enabled”*
+* Review Rider “Route Optimized” confirmation
+* Remove confetti, gamification, and loud notifications
+
+---
+
+## Status & Transparency
+
+* Driver app: show Vehicle Status, Network Efficiency, Monthly & Lifetime Yield
+* Rider app: show Network Status, ETA Intelligence, Efficiency metrics
+* Audit copy for clarity and premium tone
+
+---
+
+## Long-Term Perspective
+
+* Add “About the Network” page with concise, serious paragraph
+* Add lifetime stats for drivers: Vehicle Contribution, Network Participation
+* Optional: Riders see subtle metric like “Mobility Footprint Optimized”
+* Ensure tone is calm, premium, confident
+
+---
+
+## Visual & Performance Refinement
+
+* Audit UI: muted accent colors, consistent icons, spacing, typography
+* Ensure transitions are <250ms, use skeleton loaders instead of blank screens
+* Remove unnecessary animations or pop-ups
+* Test opening apps → feel fluid, calm, intelligent
+
+---
+
+## 30-Day Transformation Feedback
+
+* Test with 5–10 users (drivers/riders) for perception of calm, intelligence, and premium feel
+* Review transformation statements:
+
+  * Drivers: “My car is no longer just an expense.”
+  * Riders: “This system feels smarter, calmer, effortless.”
+* Note friction points; adjust minor issues only
+* Final copy audit for clarity, consistency, and prestige
+
+---
+
+## General Daily Rules
+
+* Spend first 5 minutes reviewing prior progress
+* Focus on one small area per session
+* Remove elements before adding new ones
+* Check consistency across both apps
+* Ask: “Does this feel intelligent, calm, premium?”
+
+---
+
+✅ **Result:**
+
+* Users perceive Travoney as **smart, serious, premium**
+* Drivers feel like **Vehicle Owners and asset holders**
+* Riders feel like **members of a sophisticated mobility network**
+* Minimal cognitive load, calm experience, high perceived value
+* Subtle design & messaging create long-term trust and loyalty
+
+---
+
+If you want, I can also make a **one-page visual checklist with boxes to tick** for each task — so you can literally follow it daily without thinking. It turns the 60-day plan into a ready-to-use execution sheet.
+
+Do you want me to create that?

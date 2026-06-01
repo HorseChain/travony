@@ -8,6 +8,7 @@ import RatingScreen from "@/screens/RatingScreen";
 import InvoiceScreen from "@/screens/InvoiceScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
+import CoffeeScreen from "@/screens/CoffeeScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type HomeStackParamList = {
@@ -17,7 +18,12 @@ export type HomeStackParamList = {
       address: string; 
       lat: number; 
       lng: number; 
-    }; 
+    };
+    selectedPickup?: {
+      address: string;
+      lat: number;
+      lng: number;
+    };
   } | undefined;
   SelectLocation: { type: "pickup" | "dropoff" };
   ConfirmRide: {
@@ -29,6 +35,7 @@ export type HomeStackParamList = {
   Invoice: { rideId: string };
   OpenClaw: { variant: "rider" };
   HubDetail: { hubId: string; hubName: string };
+  Coffee: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -83,6 +90,11 @@ export default function HomeStackNavigator() {
         name="HubDetail"
         component={HubDetailScreen}
         options={({ route }: any) => ({ headerTitle: route.params?.hubName || "Hub" })}
+      />
+      <Stack.Screen
+        name="Coffee"
+        component={CoffeeScreen}
+        options={{ headerTitle: "Coffee" }}
       />
     </Stack.Navigator>
   );

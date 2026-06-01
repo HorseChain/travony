@@ -18,7 +18,7 @@ export function WebMapFallback({ message = "Maps available in mobile app", style
     <View style={[styles.fallbackContainer, style]}>
       <View style={styles.fallbackContent}>
         <View style={styles.mapIcon}>
-          <Text style={styles.mapIconText}>📍</Text>
+          <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#FFFFFF" }} />
         </View>
         <Text style={styles.fallbackTitle}>Map View</Text>
         <Text style={styles.fallbackMessage}>
@@ -49,9 +49,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: Spacing.lg,
-  },
-  mapIconText: {
-    fontSize: 36,
   },
   fallbackTitle: {
     fontSize: 20,

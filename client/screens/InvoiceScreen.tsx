@@ -30,6 +30,10 @@ interface Ride {
   status: string;
   pickupAddress: string;
   dropoffAddress: string;
+  pickupLat?: string;
+  pickupLng?: string;
+  dropoffLat?: string;
+  dropoffLng?: string;
   estimatedFare: string | null;
   actualFare: string | null;
   distance: string | null;
@@ -130,6 +134,23 @@ export default function InvoiceScreen() {
     navigation.popToTop();
   };
 
+  const handleBookAgain = () => {
+    if (!ride) return;
+    navigation.navigate("Home", {
+      selectedLocation: {
+        type: "dropoff",
+        address: ride.dropoffAddress,
+        lat: parseFloat(ride.dropoffLat || "0"),
+        lng: parseFloat(ride.dropoffLng || "0"),
+      },
+      selectedPickup: {
+        address: ride.pickupAddress,
+        lat: parseFloat(ride.pickupLat || "0"),
+        lng: parseFloat(ride.pickupLng || "0"),
+      },
+    });
+  };
+
   if (rideLoading || invoicesLoading) {
     return (
       <ThemedView style={styles.container}>
@@ -157,6 +178,7 @@ export default function InvoiceScreen() {
   const platformFee = ride.platformFee || (parseFloat(fare) * 0.1).toFixed(2);
   const driverEarnings = ride.driverEarnings || (parseFloat(fare) * 0.9).toFixed(2);
   const currencySymbol = invoice?.currency || ride.currencySymbol || "AED";
+  const blockchainShort = ride.blockchainHash ? ride.blockchainHash.slice(0, 8) : null;
 
   return (
     <ThemedView style={styles.container}>
@@ -300,6 +322,14 @@ export default function InvoiceScreen() {
                 {currencySymbol} {platformFee}
               </ThemedText>
             </View>
+            <View style={[styles.verifiedRow, { borderTopColor: theme.border + "60" }]}>
+              <Ionicons name="link-outline" size={13} color={theme.textMuted} />
+              <ThemedText style={[styles.verifiedText, { color: theme.textMuted }]}>
+                {blockchainShort
+                  ? `Verified by Travony Network · ${blockchainShort}`
+                  : "Verified by Travony Network"}
+              </ThemedText>
+            </View>
           </View>
 
           <View style={[styles.carbonSection, { backgroundColor: "#E3F2FD" }]}>
@@ -349,6 +379,14 @@ export default function InvoiceScreen() {
 
         <View style={styles.actions}>
           <Pressable
+            style={[styles.bookAgainButton, { backgroundColor: theme.primary }]}
+            onPress={handleBookAgain}
+          >
+            <Ionicons name="repeat-outline" size={18} color="#fff" />
+            <ThemedText style={styles.bookAgainButtonText}>Book this trip again</ThemedText>
+          </Pressable>
+
+          <Pressable
             style={[styles.shareButton, { borderColor: theme.border }]}
             onPress={handleShare}
           >
@@ -357,10 +395,10 @@ export default function InvoiceScreen() {
           </Pressable>
 
           <Pressable
-            style={[styles.doneButton, { backgroundColor: Colors.travonyGreen }]}
+            style={[styles.doneButton, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}
             onPress={handleDone}
           >
-            <ThemedText style={styles.doneButtonText}>Done</ThemedText>
+            <ThemedText style={[styles.doneButtonText, { color: theme.textSecondary }]}>Done</ThemedText>
           </Pressable>
         </View>
       </ScrollView>
@@ -535,6 +573,18 @@ const styles = StyleSheet.create({
     ...Typography.small,
     fontWeight: "600",
   },
+  verifiedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    marginTop: Spacing.sm,
+    paddingTop: Spacing.sm,
+    borderTopWidth: 1,
+  },
+  verifiedText: {
+    ...Typography.caption,
+    fontStyle: "italic",
+  },
   blockchainSection: {
     padding: Spacing.md,
     borderRadius: BorderRadius.md,
@@ -608,6 +658,18 @@ const styles = StyleSheet.create({
   actions: {
     gap: Spacing.md,
   },
+  bookAgainButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    gap: Spacing.sm,
+  },
+  bookAgainButtonText: {
+    ...Typography.button,
+    color: "#FFFFFF",
+  },
   shareButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -624,9 +686,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.lg,
     borderRadius: BorderRadius.md,
     alignItems: "center",
+    borderWidth: 1,
   },
   doneButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
   },
 });

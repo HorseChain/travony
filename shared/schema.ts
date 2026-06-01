@@ -28,6 +28,7 @@ export const payoutMethodEnum = pgEnum("payout_method", ["bank", "crypto"]);
 export const currencyEnum = pgEnum("currency", ["AED", "USDT", "USD", "EUR", "GBP", "RUB", "INR", "NGN", "KES", "ZAR", "CNY", "JPY", "KRW", "SGD", "THB", "VND", "IDR", "PHP", "MYR", "PKR", "BDT", "EGP", "TRY", "BRL", "MXN"]);
 export const invoiceTypeEnum = pgEnum("invoice_type", ["customer", "driver"]);
 export const disputeStatusEnum = pgEnum("dispute_status", ["open", "investigating", "resolved_rider_favor", "resolved_driver_favor", "resolved_partial", "closed"]);
+export const evStagingStatusEnum = pgEnum("ev_staging_status_enum", ["charging", "ready", "departing"]);
 export const disputeTypeEnum = pgEnum("dispute_type", ["fare", "route", "rating", "payment", "safety", "behavior", "damage"]);
 export const disputeResolutionEnum = pgEnum("dispute_resolution", ["refund_full", "refund_partial", "no_action", "warning_driver", "warning_rider", "suspend_driver", "suspend_rider", "rating_removed"]);
 export const vehicleVerificationStatusEnum = pgEnum("vehicle_verification_status", ["pending", "ai_verified", "admin_verified", "rejected"]);
@@ -80,6 +81,7 @@ export const drivers = pgTable("drivers", {
   walletBalance: decimal("wallet_balance", { precision: 12, scale: 2 }).default("0.00"),
   minRiderRating: decimal("min_rider_rating", { precision: 3, scale: 2 }),
   minRiderRatingEnabled: boolean("min_rider_rating_enabled").default(false),
+  fleetOwnerId: varchar("fleet_owner_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -108,6 +110,7 @@ export const vehicles = pgTable("vehicles", {
   adminVerifiedAt: timestamp("admin_verified_at"),
   adminNotes: text("admin_notes"),
   isActive: boolean("is_active").default(true),
+  isElectric: boolean("is_electric").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -171,6 +174,7 @@ export const rides = pgTable("rides", {
   driverEarnings: decimal("driver_earnings", { precision: 10, scale: 2 }),
   regionCode: text("region_code").default("AE"),
   currency: currencyEnum("currency").default("AED"),
+  isEvRide: boolean("is_ev_ride").default(false),
   isPmgthRide: boolean("is_pmgth_ride").default(false),
   pmgthPremiumAmount: decimal("pmgth_premium_amount", { precision: 10, scale: 2 }),
   pmgthPremiumPercent: decimal("pmgth_premium_percent", { precision: 5, scale: 2 }),
@@ -1141,6 +1145,9 @@ export const hubs = pgTable("hubs", {
   lastActivityAt: timestamp("last_activity_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  isEvHub: boolean("is_ev_hub").default(false),
+  totalChargingPorts: integer("total_charging_ports").default(0),
+  availablePorts: integer("available_ports").default(0),
 });
 
 export const hotspots = pgTable("hotspots", {
@@ -1195,6 +1202,19 @@ export const hubCheckIns = pgTable("hub_check_ins", {
   lng: decimal("lng", { precision: 11, scale: 8 }),
   checkedInAt: timestamp("checked_in_at").defaultNow().notNull(),
   checkedOutAt: timestamp("checked_out_at"),
+  evStagingStatus: evStagingStatusEnum("ev_staging_status"),
+});
+
+export const evDemandSignals = pgTable("ev_demand_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }),
+  regionCode: text("region_code"),
+  matchFound: boolean("match_found").default(false),
+  evDriversAvailable: integer("ev_drivers_available").default(0),
+  nearestHubId: varchar("nearest_hub_id").references(() => hubs.id),
+  requestedAt: timestamp("requested_at").defaultNow().notNull(),
 });
 
 export const communityPrestige = pgTable("community_prestige", {
@@ -1272,6 +1292,54 @@ export const rideEventLog = pgTable("ride_event_log", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const coffeeOrderStatusEnum = pgEnum("coffee_order_status", [
+  "pending", "accepted", "preparing", "ready", "picked_up", "delivering", "delivered", "cancelled"
+]);
+
+export const coffeeOrderTypeEnum = pgEnum("coffee_order_type", [
+  "order", "buy", "gift"
+]);
+
+export const coffeeSizeEnum = pgEnum("coffee_size", ["small", "medium", "large"]);
+
+export const coffeeOrders = pgTable("coffee_orders", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ordererId: varchar("orderer_id").references(() => users.id).notNull(),
+  recipientId: varchar("recipient_id").references(() => users.id),
+  recipientPhone: text("recipient_phone"),
+  recipientName: text("recipient_name"),
+  driverId: varchar("driver_id").references(() => drivers.id),
+  hubId: varchar("hub_id").references(() => hubs.id),
+  orderType: coffeeOrderTypeEnum("order_type").notNull(),
+  status: coffeeOrderStatusEnum("status").default("pending").notNull(),
+  coffeeName: text("coffee_name").notNull(),
+  coffeeSize: coffeeSizeEnum("coffee_size").default("medium").notNull(),
+  quantity: integer("quantity").default(1).notNull(),
+  specialInstructions: text("special_instructions"),
+  giftMessage: text("gift_message"),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 7 }),
+  pickupLng: decimal("pickup_lng", { precision: 10, scale: 7 }),
+  pickupAddress: text("pickup_address"),
+  deliveryLat: decimal("delivery_lat", { precision: 10, scale: 7 }),
+  deliveryLng: decimal("delivery_lng", { precision: 10, scale: 7 }),
+  deliveryAddress: text("delivery_address"),
+  itemPrice: decimal("item_price", { precision: 10, scale: 2 }).notNull(),
+  deliveryFee: decimal("delivery_fee", { precision: 10, scale: 2 }).default("0"),
+  totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").default("AED").notNull(),
+  paymentMethod: text("payment_method").default("card"),
+  paymentStatus: text("payment_status").default("pending"),
+  estimatedDeliveryMinutes: integer("estimated_delivery_minutes"),
+  completedAt: timestamp("completed_at"),
+  cancelledAt: timestamp("cancelled_at"),
+  cancelReason: text("cancel_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type CoffeeOrder = typeof coffeeOrders.$inferSelect;
+export type InsertCoffeeOrder = typeof coffeeOrders.$inferInsert;
+
 export type Hub = typeof hubs.$inferSelect;
 export type Hotspot = typeof hotspots.$inferSelect;
 export type HubMessage = typeof hubMessages.$inferSelect;
@@ -1281,3 +1349,18 @@ export type CommunityPrestige = typeof communityPrestige.$inferSelect;
 export type UserFeedback = typeof userFeedback.$inferSelect;
 export type CarpoolSuggestion = typeof carpoolSuggestions.$inferSelect;
 export type RideEventLog = typeof rideEventLog.$inferSelect;
+
+export const apiKeys = pgTable("api_keys", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  ownerId: varchar("owner_id").references(() => users.id).notNull(),
+  name: text("name").notNull(),
+  keyPrefix: varchar("key_prefix", { length: 16 }).notNull().unique(),
+  keyHash: text("key_hash").notNull(),
+  scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
+  isActive: boolean("is_active").default(true).notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ApiKey = typeof apiKeys.$inferSelect;
+export type InsertApiKey = typeof apiKeys.$inferInsert;

@@ -16,12 +16,6 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import Animated, {
-  FadeIn,
-  FadeOut,
-  SlideInRight,
-  SlideOutLeft,
-} from "react-native-reanimated";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
@@ -242,20 +236,20 @@ export default function OnboardingScreen() {
   };
 
   const renderPerspectiveStep = () => (
-    <Animated.View entering={FadeIn.duration(800)} exiting={FadeOut.duration(300)} style={styles.perspectiveContainer}>
+    <View style={styles.perspectiveContainer}>
       <View style={styles.perspectiveContent}>
-        <Animated.View entering={FadeIn.delay(300).duration(1000)}>
+        <View>
           <ThemedText style={styles.perspectiveHeadline}>
             {getPerspectiveHeadline()}
           </ThemedText>
-        </Animated.View>
-        <Animated.View entering={FadeIn.delay(1000).duration(800)}>
+        </View>
+        <View>
           <ThemedText style={styles.perspectiveSubtext}>
             {getPerspectiveSubtext()}
           </ThemedText>
-        </Animated.View>
+        </View>
       </View>
-      <Animated.View entering={FadeIn.delay(1500).duration(800)} style={styles.perspectiveButtons}>
+      <View style={styles.perspectiveButtons}>
         {(APP_VARIANT === 'driver' || APP_VARIANT === 'unified') ? (
           <Pressable
             style={({ pressed }) => [
@@ -281,12 +275,12 @@ export default function OnboardingScreen() {
             </ThemedText>
           </Pressable>
         ) : null}
-      </Animated.View>
-    </Animated.View>
+      </View>
+    </View>
   );
 
   const renderRoleStep = () => (
-    <Animated.View entering={FadeIn} exiting={SlideOutLeft} style={styles.stepContainer}>
+    <View style={styles.stepContainer}>
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
         <Ionicons name="car" size={64} color={Colors.travonyGreen} />
       </View>
@@ -318,11 +312,11 @@ export default function OnboardingScreen() {
           <ThemedText style={[styles.roleButtonSubtitle, { color: theme.textSecondary }]}>Vehicle as asset</ThemedText>
         </Pressable>
       </View>
-    </Animated.View>
+    </View>
   );
 
   const renderLocationStep = () => (
-    <Animated.View entering={FadeIn} exiting={SlideOutLeft} style={styles.stepContainer}>
+    <View style={styles.stepContainer}>
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
         <Ionicons name="location" size={64} color={Colors.travonyGreen} />
       </View>
@@ -344,7 +338,14 @@ export default function OnboardingScreen() {
           <ThemedText style={styles.primaryButtonText}>Enable Location</ThemedText>
         )}
       </Pressable>
-    </Animated.View>
+      <Pressable
+        style={styles.skipButton}
+        onPress={() => setStep("phone")}
+        disabled={isLoading}
+      >
+        <ThemedText style={[styles.skipText, { color: theme.textMuted }]}>Skip for now</ThemedText>
+      </Pressable>
+    </View>
   );
 
   const renderCountryPicker = () => (
@@ -403,7 +404,7 @@ export default function OnboardingScreen() {
   );
 
   const renderPhoneStep = () => (
-    <Animated.View entering={SlideInRight} exiting={SlideOutLeft} style={styles.stepContainer}>
+    <View style={styles.stepContainer}>
       {renderCountryPicker()}
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
         <Ionicons name="call" size={64} color={Colors.travonyGreen} />
@@ -454,11 +455,11 @@ export default function OnboardingScreen() {
           <ThemedText style={styles.primaryButtonText}>Send Code</ThemedText>
         )}
       </Pressable>
-    </Animated.View>
+    </View>
   );
 
   const renderOtpStep = () => (
-    <Animated.View entering={SlideInRight} exiting={SlideOutLeft} style={styles.stepContainer}>
+    <View style={styles.stepContainer}>
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
         <Ionicons name="shield-checkmark" size={64} color={Colors.travonyGreen} />
       </View>
@@ -501,11 +502,11 @@ export default function OnboardingScreen() {
       </Pressable>
 
       {isLoading && <ActivityIndicator color={Colors.travonyGreen} style={{ marginTop: Spacing.xl }} />}
-    </Animated.View>
+    </View>
   );
 
   const renderNameStep = () => (
-    <Animated.View entering={SlideInRight} exiting={SlideOutLeft} style={styles.stepContainer}>
+    <View style={styles.stepContainer}>
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
         <Ionicons name="person" size={64} color={Colors.travonyGreen} />
       </View>
@@ -545,7 +546,7 @@ export default function OnboardingScreen() {
           <ThemedText style={styles.primaryButtonText}>Continue</ThemedText>
         )}
       </Pressable>
-    </Animated.View>
+    </View>
   );
 
   return (

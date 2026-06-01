@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   StyleSheet,
@@ -6,6 +6,7 @@ import {
   Pressable,
   Alert,
   ActivityIndicator,
+  Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
@@ -13,7 +14,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -25,6 +26,85 @@ import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "Rating">;
 type RouteProps = RouteProp<HomeStackParamList, "Rating">;
+
+interface Ride {
+  id: string;
+  status: string;
+  dropoffAddress: string;
+  estimatedFare: string | null;
+  actualFare: string | null;
+}
+
+function ArrivedScreen({ ride }: { ride: Ride | undefined }) {
+  const { theme } = useTheme();
+  const scaleAnim = useRef(new Animated.Value(0)).current;
+  const opacityAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.spring(scaleAnim, { toValue: 1, useNativeDriver: true, tension: 60, friction: 6 }),
+      Animated.timing(opacityAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, []);
+
+  const fare = ride?.actualFare || ride?.estimatedFare;
+
+  return (
+    <View style={[arrivedStyles.container, { backgroundColor: Colors.travonyGreen }]}>
+      <Animated.View style={{ transform: [{ scale: scaleAnim }], opacity: opacityAnim, alignItems: "center" }}>
+        <View style={arrivedStyles.checkCircle}>
+          <Ionicons name="checkmark" size={64} color={Colors.travonyGreen} />
+        </View>
+        <ThemedText style={arrivedStyles.title}>You've arrived</ThemedText>
+        {ride?.dropoffAddress ? (
+          <ThemedText style={arrivedStyles.address} numberOfLines={2}>
+            {ride.dropoffAddress}
+          </ThemedText>
+        ) : null}
+        {fare ? (
+          <ThemedText style={arrivedStyles.fare}>AED {fare}</ThemedText>
+        ) : null}
+      </Animated.View>
+    </View>
+  );
+}
+
+const arrivedStyles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Spacing.xl,
+  },
+  checkCircle: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: "#fff",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.xl,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: "700",
+    color: "#fff",
+    marginBottom: Spacing.md,
+  },
+  address: {
+    fontSize: 16,
+    color: "#fff",
+    opacity: 0.9,
+    textAlign: "center",
+    marginBottom: Spacing.md,
+  },
+  fare: {
+    fontSize: 24,
+    fontWeight: "700",
+    color: "#fff",
+    opacity: 0.95,
+  },
+});
 
 export default function RatingScreen() {
   const insets = useSafeAreaInsets();
@@ -38,6 +118,18 @@ export default function RatingScreen() {
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [tip, setTip] = useState<number | null>(null);
+  const [showArrived, setShowArrived] = useState(true);
+
+  const { data: ride } = useQuery<Ride>({
+    queryKey: ["/api/rides", rideId],
+  });
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowArrived(false);
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const tipOptions = [0, 2, 5, 10];
 
@@ -71,6 +163,10 @@ export default function RatingScreen() {
   const handleSkip = () => {
     navigation.replace("Invoice", { rideId });
   };
+
+  if (showArrived) {
+    return <ArrivedScreen ride={ride} />;
+  }
 
   return (
     <ThemedView style={styles.container}>

@@ -12,12 +12,14 @@ interface DriverScore {
   vehicleMake: string;
   vehicleModel: string;
   plateNumber: string;
+  isElectric: boolean;
   score: number;
   scoreBreakdown: {
     distanceScore: number;
     ratingScore: number;
     experienceScore: number;
     availabilityScore: number;
+    evBonus: number;
   };
 }
 
@@ -122,7 +124,8 @@ export async function findOptimalDrivers(
   pickupLng: number,
   dropoffLat: number,
   dropoffLng: number,
-  vehicleType?: string
+  vehicleType?: string,
+  evPreferred?: boolean
 ): Promise<DriverScore[]> {
   const availableDrivers = await storage.getAvailableDriversWithVehicles(
     pickupLat,
@@ -134,6 +137,10 @@ export async function findOptimalDrivers(
 
   for (const driver of availableDrivers) {
     if (vehicleType && driver.vehicleType !== vehicleType) {
+      continue;
+    }
+
+    if (evPreferred && !driver.isElectric) {
       continue;
     }
 
@@ -160,11 +167,14 @@ export async function findOptimalDrivers(
     
     const availabilityScore = 100;
 
+    const evBonus = driver.isElectric ? (evPreferred ? 30 : 5) : 0;
+
     const score = (
       distanceScore * 0.40 +
       ratingScore * 0.30 +
       experienceScore * 0.20 +
-      availabilityScore * 0.10
+      availabilityScore * 0.10 +
+      evBonus
     );
 
     scoredDrivers.push({
@@ -179,12 +189,14 @@ export async function findOptimalDrivers(
       vehicleMake: driver.vehicleMake,
       vehicleModel: driver.vehicleModel,
       plateNumber: driver.plateNumber,
+      isElectric: driver.isElectric || false,
       score: Math.round(score * 10) / 10,
       scoreBreakdown: {
         distanceScore: Math.round(distanceScore),
         ratingScore: Math.round(ratingScore),
         experienceScore: Math.round(experienceScore),
         availabilityScore: Math.round(availabilityScore),
+        evBonus: Math.round(evBonus),
       },
     });
   }
@@ -282,10 +294,11 @@ export async function getOptimalRideMatch(
   pickupLng: number,
   dropoffLat: number,
   dropoffLng: number,
-  vehicleType?: string
+  vehicleType?: string,
+  evPreferred?: boolean
 ) {
   const [drivers, pricing] = await Promise.all([
-    findOptimalDrivers(pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType),
+    findOptimalDrivers(pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType, evPreferred),
     calculateOptimalPrice(pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType),
   ]);
 

@@ -3,6 +3,9 @@ import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import * as fs from "fs";
 import * as path from "path";
+import swaggerUi from "swagger-ui-express";
+import { apiSpec } from "./apiSpec";
+import { apiKeyMiddleware } from "./apiKeyMiddleware";
 
 const app = express();
 const log = console.log;
@@ -200,9 +203,24 @@ function configureExpoAndLanding(app: express.Application) {
     "templates",
     "admin-dashboard.html",
   );
+  const fleetDashboardTemplatePath = path.resolve(
+    process.cwd(),
+    "server",
+    "templates",
+    "fleet-dashboard.html",
+  );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
   const adminDashboardTemplate = fs.existsSync(adminTemplatePath) 
     ? fs.readFileSync(adminTemplatePath, "utf-8") 
+    : null;
+  const fleetDashboardTemplate = fs.existsSync(fleetDashboardTemplatePath)
+    ? fs.readFileSync(fleetDashboardTemplatePath, "utf-8")
+    : null;
+  const fleetLoginTemplatePath = path.resolve(
+    process.cwd(), "server", "templates", "fleet-login.html",
+  );
+  const fleetLoginTemplate = fs.existsSync(fleetLoginTemplatePath)
+    ? fs.readFileSync(fleetLoginTemplatePath, "utf-8")
     : null;
   const appName = getAppName();
 
@@ -215,6 +233,111 @@ function configureExpoAndLanding(app: express.Application) {
     } else {
       res.status(404).send("Admin dashboard not found");
     }
+  });
+
+  // /dashboard/fleet — server-side protected: verify HttpOnly fleet_token cookie
+  app.get("/dashboard/fleet", async (req: Request, res: Response) => {
+    if (!fleetDashboardTemplate) {
+      return res.status(404).send("Fleet dashboard not found");
+    }
+    const cookieHeader = req.headers.cookie || "";
+    const tokenMatch = cookieHeader.match(/(?:^|;\s*)fleet_token=([^;]+)/);
+    const cookieToken = tokenMatch ? decodeURIComponent(tokenMatch[1]) : null;
+    if (cookieToken) {
+      try {
+        const { db: dbModule } = await import("./db");
+        const { sessions } = await import("@shared/schema");
+        const { eq } = await import("drizzle-orm");
+        const [session] = await dbModule.select().from(sessions).where(eq(sessions.token, cookieToken)).limit(1);
+        if (session && new Date() <= session.expiresAt && ["fleet_owner", "admin"].includes(session.role)) {
+          res.setHeader("Content-Type", "text/html; charset=utf-8");
+          return res.status(200).send(fleetDashboardTemplate);
+        }
+      } catch {
+        // Invalid/expired cookie — fall through to 401
+      }
+    }
+    // Not authenticated: return 401 with redirect instruction
+    res.status(401).send(`<!DOCTYPE html><html><head><meta charset="UTF-8">
+<meta http-equiv="refresh" content="0;url=/dashboard/fleet/login">
+<title>Redirecting...</title></head><body>
+<p>Authentication required. <a href="/dashboard/fleet/login">Sign in</a></p>
+</body></html>`);
+  });
+
+  // /dashboard/fleet/login — public login page
+  app.get("/dashboard/fleet/login", (_req: Request, res: Response) => {
+    const tpl = fleetLoginTemplate || fleetDashboardTemplate;
+    if (!tpl) return res.status(404).send("Fleet login page not found");
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.status(200).send(tpl);
+  });
+
+  // /api/fleet/auth/login — sets HttpOnly cookie for dashboard session
+  app.post("/api/fleet/auth/login", async (req: Request, res: Response) => {
+    try {
+      const { email, password } = req.body;
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email and password are required" });
+      }
+      const { storage: storageModule } = await import("./storage");
+      const user = await storageModule.getUserByEmail(email);
+      if (!user || !user.password) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      const { scryptSync, timingSafeEqual } = await import("crypto");
+      const [salt, stored] = user.password.split(":");
+      const newHash = scryptSync(password, salt, 64).toString("hex");
+      const storedBuf = Buffer.from(stored, "hex");
+      const newBuf = Buffer.from(newHash, "hex");
+      if (storedBuf.length !== newBuf.length || !timingSafeEqual(storedBuf, newBuf)) {
+        return res.status(401).json({ error: "Invalid credentials" });
+      }
+      if (!["fleet_owner", "admin"].includes(user.role)) {
+        return res.status(403).json({ error: "Access restricted to fleet owners and administrators" });
+      }
+      const { randomBytes } = await import("crypto");
+      const token = randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+      await storageModule.createSession(token, user.id, user.role, expiresAt);
+      // Set HttpOnly cookie for server-side auth on /dashboard/fleet
+      res.cookie("fleet_token", token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        expires: expiresAt,
+        path: "/",
+      });
+      // Return token in body for localStorage (API Bearer auth) + set HttpOnly cookie for page auth
+      res.json({ success: true, token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Login failed";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // /api/fleet/auth/logout — clears HttpOnly cookie AND invalidates DB session token
+  app.post("/api/fleet/auth/logout", async (req: Request, res: Response) => {
+    try {
+      // Invalidate cookie-based token
+      const cookieHeader = req.headers.cookie || "";
+      const cookieMatch = cookieHeader.match(/(?:^|;\s*)fleet_token=([^;]+)/);
+      if (cookieMatch?.[1]) {
+        const { storage: storageModule } = await import("./storage");
+        await storageModule.deleteSession(cookieMatch[1]).catch(() => null);
+      }
+      // Also invalidate Bearer token if provided (belt-and-suspenders)
+      const authHeader = req.headers.authorization;
+      if (authHeader?.startsWith("Bearer ")) {
+        const bearerToken = authHeader.slice(7);
+        const { storage: storageModule } = await import("./storage");
+        await storageModule.deleteSession(bearerToken).catch(() => null);
+      }
+    } catch {
+      // Best-effort: always clear cookie and return success
+    }
+    res.clearCookie("fleet_token", { path: "/" });
+    res.json({ success: true });
   });
 
   // Policy pages for Google Play Store compliance
@@ -238,6 +361,15 @@ function configureExpoAndLanding(app: express.Application) {
       res.status(200).sendFile(termsOfServicePath);
     } else {
       res.status(404).send("Terms of Service not found");
+    }
+  });
+
+  app.get("/delete-account", (_req: Request, res: Response) => {
+    if (fs.existsSync(dataDeletionPath)) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).sendFile(dataDeletionPath);
+    } else {
+      res.status(404).send("Account Deletion page not found");
     }
   });
 
@@ -329,7 +461,7 @@ function configureExpoAndLanding(app: express.Application) {
     `);
   });
 
-  log("Policy pages: /privacy, /terms, /data-deletion, /support");
+  log("Policy pages: /privacy, /terms, /data-deletion, /delete-account, /support");
   log("Payment pages: /payment-success, /payment-cancelled");
 
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -439,6 +571,133 @@ async function seedAdminUser(): Promise<void> {
   }
 }
 
+function setupDeveloperPortal(app: express.Application) {
+  const developerPortalPath = path.resolve(
+    process.cwd(), "server", "templates", "developer-portal.html"
+  );
+
+  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(apiSpec, {
+    customSiteTitle: "Travony API Docs",
+    customCss: `
+      .swagger-ui .topbar { background: #0a0d12; border-bottom: 1px solid #1e2740; }
+      .swagger-ui .topbar-wrapper img { display: none; }
+      .swagger-ui .topbar-wrapper::before { content: 'Travony API'; color: #3b82f6; font-weight: 800; font-size: 18px; }
+      .swagger-ui { background: #0a0d12; }
+      .swagger-ui .info .title { color: #e2e8f0; }
+    `,
+    swaggerOptions: { persistAuthorization: true },
+  }));
+
+  app.get("/developer", (_req: Request, res: Response) => {
+    if (fs.existsSync(developerPortalPath)) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(fs.readFileSync(developerPortalPath, "utf-8"));
+    } else {
+      res.redirect("/api/docs");
+    }
+  });
+
+  log("Developer portal: /developer");
+  log("Swagger UI: /api/docs");
+}
+
+async function resolveSessionUser(req: Request) {
+  const authHeader = req.headers.authorization || "";
+  const token = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : null;
+  if (!token) return null;
+  const { db } = await import("./db");
+  const { sessions, users } = await import("@shared/schema");
+  const { eq } = await import("drizzle-orm");
+  const [session] = await db.select().from(sessions).where(eq(sessions.token, token)).limit(1);
+  if (!session || new Date() > session.expiresAt) return null;
+  const [user] = await db.select().from(users).where(eq(users.id, session.userId)).limit(1);
+  return user || null;
+}
+
+async function setupApiKeyRoutes(app: express.Application) {
+  app.use(apiKeyMiddleware);
+
+  app.get("/api/api-keys", async (req: Request, res: Response) => {
+    try {
+      const user = await resolveSessionUser(req);
+      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
+        return res.status(403).json({ error: "Fleet owners and admins only" });
+      }
+      const { db } = await import("./db");
+      const { apiKeys } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+      const keys = await db.select({
+        id: apiKeys.id,
+        name: apiKeys.name,
+        keyPrefix: apiKeys.keyPrefix,
+        scopes: apiKeys.scopes,
+        isActive: apiKeys.isActive,
+        lastUsedAt: apiKeys.lastUsedAt,
+        createdAt: apiKeys.createdAt,
+      }).from(apiKeys).where(eq(apiKeys.ownerId, user.id));
+      res.json(keys);
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list keys" });
+    }
+  });
+
+  app.post("/api/api-keys", async (req: Request, res: Response) => {
+    try {
+      const user = await resolveSessionUser(req);
+      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
+        return res.status(403).json({ error: "Fleet owners and admins only" });
+      }
+      const { name, scopes } = req.body;
+      if (!name || !Array.isArray(scopes)) {
+        return res.status(400).json({ error: "name and scopes array are required" });
+      }
+      const { generateApiKey } = await import("./apiKeyMiddleware");
+      const { key, prefix, hash } = generateApiKey();
+      const { db } = await import("./db");
+      const { apiKeys } = await import("@shared/schema");
+      const { v4: uuidv4 } = await import("uuid");
+      const [created] = await db.insert(apiKeys).values({
+        id: uuidv4(),
+        ownerId: user.id,
+        name,
+        keyPrefix: prefix,
+        keyHash: hash,
+        scopes,
+        isActive: true,
+      }).returning();
+      res.status(201).json({
+        key,
+        id: created.id,
+        name: created.name,
+        scopes: created.scopes,
+        warning: "Store this key securely — it will not be shown again.",
+      });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to create key" });
+    }
+  });
+
+  app.delete("/api/api-keys/:id", async (req: Request, res: Response) => {
+    try {
+      const user = await resolveSessionUser(req);
+      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
+        return res.status(403).json({ error: "Fleet owners and admins only" });
+      }
+      const { db } = await import("./db");
+      const { apiKeys } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      await db.update(apiKeys)
+        .set({ isActive: false })
+        .where(and(eq(apiKeys.id, req.params.id), eq(apiKeys.ownerId, user.id)));
+      res.json({ success: true, message: "API key revoked" });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to revoke key" });
+    }
+  });
+
+  log("API key routes: GET/POST /api/api-keys, DELETE /api/api-keys/:id");
+}
+
 (async () => {
   setupCors(app);
   setupBodyParsing(app);
@@ -449,6 +708,9 @@ async function seedAdminUser(): Promise<void> {
   log(`Blockchain: ${blockchainResult.message}`);
 
   await seedAdminUser();
+
+  setupDeveloperPortal(app);
+  await setupApiKeyRoutes(app);
 
   configureExpoAndLanding(app);
 

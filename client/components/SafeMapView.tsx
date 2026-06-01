@@ -9,7 +9,7 @@ let MapViewComponent: any = null;
 let mapsAvailable = false;
 
 try {
-  if (Platform.OS !== "web") {
+  if (Platform.OS !== "web" && Platform.OS !== "android") {
     const Maps = require("react-native-maps");
     MapViewComponent = Maps.default;
     mapsAvailable = true;

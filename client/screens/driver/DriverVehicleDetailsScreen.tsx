@@ -1,4 +1,4 @@
-import { View, StyleSheet, TextInput, Alert, Platform, TouchableOpacity, Image, ActivityIndicator, ScrollView } from "react-native";
+import { View, StyleSheet, TextInput, Alert, Platform, TouchableOpacity, Image, ActivityIndicator, ScrollView, Switch } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -28,6 +28,7 @@ interface VehicleData {
   photoSide?: string;
   verificationStatus?: "pending" | "ai_verified" | "admin_verified" | "rejected";
   aiVerificationNotes?: string;
+  isElectric?: boolean;
 }
 
 interface DriverData {
@@ -64,6 +65,7 @@ export default function DriverVehicleDetailsScreen() {
   const [photoSide, setPhotoSide] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
+  const [isElectric, setIsElectric] = useState(false);
 
   const userRegion = (user as any)?.regionCode || "BD";
 
@@ -83,6 +85,7 @@ export default function DriverVehicleDetailsScreen() {
       setPhotoFront(driverData.vehicle.photoFront || null);
       setPhotoSide(driverData.vehicle.photoSide || null);
       setVerificationStatus(driverData.vehicle.verificationStatus || null);
+      setIsElectric(driverData.vehicle.isElectric || false);
     }
   }, [driverData]);
 
@@ -120,6 +123,7 @@ export default function DriverVehicleDetailsScreen() {
       photoFront?: string;
       photoSide?: string;
       autoVerify?: boolean;
+      isElectric?: boolean;
     }) => {
       return apiRequest("/api/drivers/vehicle", {
         method: "PATCH",
@@ -187,6 +191,7 @@ export default function DriverVehicleDetailsScreen() {
       photoFront: photoFront || undefined,
       photoSide: photoSide || undefined,
       autoVerify: withVerification,
+      isElectric,
     });
   };
 
@@ -256,6 +261,33 @@ export default function DriverVehicleDetailsScreen() {
               </TouchableOpacity>
             ))}
           </ScrollView>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
+          <View style={styles.evToggleRow}>
+            <View style={styles.evToggleInfo}>
+              <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+                Electric Vehicle (EV)
+              </ThemedText>
+              <ThemedText style={[styles.hint, { color: theme.textMuted, marginTop: 2 }]}>
+                Mark this vehicle as fully electric
+              </ThemedText>
+            </View>
+            <Switch
+              value={isElectric}
+              onValueChange={setIsElectric}
+              trackColor={{ false: theme.border, true: Colors.travonyGreen + "80" }}
+              thumbColor={isElectric ? Colors.travonyGreen : theme.textMuted}
+            />
+          </View>
+          {isElectric ? (
+            <View style={[styles.evBadgeInline, { backgroundColor: Colors.travonyGreen + "15" }]}>
+              <Feather name="zap" size={14} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.hint, { color: Colors.travonyGreen, marginTop: 0, marginLeft: 6 }]}>
+                EV badge will appear on your rides
+              </ThemedText>
+            </View>
+          ) : null}
         </View>
 
         <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
@@ -532,5 +564,22 @@ const styles = StyleSheet.create({
   },
   skipText: {
     ...Typography.small,
+  },
+  evToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  evToggleInfo: {
+    flex: 1,
+    marginRight: Spacing.md,
+  },
+  evBadgeInline: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.md,
   },
 });

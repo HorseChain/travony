@@ -6,7 +6,7 @@ channel = "stable-24_05"
 packages = ["imagemagick", "ffmpeg", "gh", "jdk17", "unzip"]
 
 [deployment]
-deploymentTarget = "cloudrun"
+deploymentTarget = "vm"
 build = ["sh", "-c", "npm run expo:static:build && npm run server:build"]
 run = ["npm", "run", "server:prod"]
 
@@ -20,7 +20,7 @@ externalPort = 80
 
 [[ports]]
 localPort = 8082
-externalPort = 3001
+externalPort = 3000
 
 [env]
 PORT = "5000"
@@ -62,3 +62,7 @@ ensurePreviewReachable = "/status"
 [userenv.shared]
 RIDE_REGISTRY_CONTRACT = "0xA8C20314004FEA3bE339f73cE4E192eCAaA062Ec"
 ADMIN_PASSWORD = "Travony2024!"
+
+[postMerge]
+path = "scripts/post-merge.sh"
+timeoutMs = 120000

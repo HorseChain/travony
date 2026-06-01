@@ -8,23 +8,16 @@ import {
   Image,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  withRepeat,
-  interpolate,
-  Easing,
-} from "react-native-reanimated";
+import { Animated as RNAnimated } from "react-native";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { DimensionValue } from "react-native";
-import { MapView, Marker, Polyline, PROVIDER_GOOGLE, AnimatedRegion, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
+import { MapView, Marker, Polyline, AnimatedRegion, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
 
 const isWeb = Platform.OS === ("web" as typeof Platform.OS);
+const isAndroid = Platform.OS === "android";
 const isNative = !isWeb;
 
 interface Location {
@@ -32,6 +25,15 @@ interface Location {
   lng: number;
   address?: string;
   heading?: number;
+}
+
+interface EvHubMarker {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  availablePorts: number;
+  totalChargingPorts: number;
 }
 
 interface RideMapProps {
@@ -53,6 +55,7 @@ interface RideMapProps {
   height?: DimensionValue;
   driverHeading?: number;
   vehicleType?: "car" | "motorcycle" | "auto" | "suv";
+  evHubMarkers?: EvHubMarker[];
 }
 
 const TRAVONY_GREEN = Colors.travonyGreen;
@@ -86,25 +89,23 @@ const darkMapStyle = [
 ];
 
 function PickupMarker({ isActive }: { isActive?: boolean }) {
-  const pulseAnim = useSharedValue(0);
+  const pulseAnim = useRef(new RNAnimated.Value(0)).current;
 
   useEffect(() => {
-    pulseAnim.value = withRepeat(
-      withTiming(1, { duration: 2000, easing: Easing.out(Easing.ease) }),
-      -1,
-      false
+    const animation = RNAnimated.loop(
+      RNAnimated.timing(pulseAnim, { toValue: 1, duration: 2000, useNativeDriver: true })
     );
+    animation.start();
+    return () => animation.stop();
   }, []);
 
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(pulseAnim.value, [0, 1], [1, 2]) }],
-    opacity: interpolate(pulseAnim.value, [0, 0.5, 1], [0.6, 0.3, 0]),
-  }));
+  const pulseScale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] });
+  const pulseOpacity = pulseAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.6, 0.3, 0] });
 
   return (
     <View style={styles.markerContainer}>
       {isActive ? (
-        <Animated.View style={[styles.pickupPulse, pulseStyle]} />
+        <RNAnimated.View style={[styles.pickupPulse, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
       ) : null}
       <View style={styles.pickupMarker}>
         <View style={styles.pickupDot} />
@@ -124,30 +125,39 @@ function DropoffMarker() {
   );
 }
 
+function EvHubMapMarker({ name, availablePorts, totalChargingPorts }: { name: string; availablePorts: number; totalChargingPorts: number }) {
+  const pct = totalChargingPorts > 0 ? availablePorts / totalChargingPorts : 0;
+  const dotColor = pct > 0.5 ? "#16a34a" : pct > 0.2 ? "#f59e0b" : "#ef4444";
+  return (
+    <View style={styles.evHubMarkerContainer}>
+      <View style={[styles.evHubMarkerBubble, { borderColor: dotColor }]}>
+        <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={14} color={dotColor} />
+        <View style={[styles.evHubDot, { backgroundColor: dotColor }]} />
+      </View>
+      <View style={styles.evHubMarkerPin} />
+    </View>
+  );
+}
+
 function DriverMarker({ heading = 0, vehicleType = "car" }: { heading?: number; vehicleType?: string }) {
-  const rotation = useSharedValue(heading);
-  const pulseAnim = useSharedValue(0);
+  const rotation = useRef(new RNAnimated.Value(heading)).current;
+  const pulseAnim = useRef(new RNAnimated.Value(0)).current;
 
   useEffect(() => {
-    rotation.value = withTiming(heading, { duration: 500 });
+    RNAnimated.timing(rotation, { toValue: heading, duration: 500, useNativeDriver: true }).start();
   }, [heading]);
 
   useEffect(() => {
-    pulseAnim.value = withRepeat(
-      withTiming(1, { duration: 1500, easing: Easing.out(Easing.ease) }),
-      -1,
-      false
+    const animation = RNAnimated.loop(
+      RNAnimated.timing(pulseAnim, { toValue: 1, duration: 1500, useNativeDriver: true })
     );
+    animation.start();
+    return () => animation.stop();
   }, []);
 
-  const markerStyle = useAnimatedStyle(() => ({
-    transform: [{ rotate: `${rotation.value}deg` }],
-  }));
-
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: interpolate(pulseAnim.value, [0, 1], [1, 1.8]) }],
-    opacity: interpolate(pulseAnim.value, [0, 0.5, 1], [0.4, 0.2, 0]),
-  }));
+  const pulseScale = pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] });
+  const pulseOpacity = pulseAnim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.4, 0.2, 0] });
+  const rotationStr = rotation.interpolate({ inputRange: [-360, 360], outputRange: ["-360deg", "360deg"] });
 
   const getVehicleIcon = () => {
     switch (vehicleType) {
@@ -164,13 +174,13 @@ function DriverMarker({ heading = 0, vehicleType = "car" }: { heading?: number; 
 
   return (
     <View style={styles.driverMarkerContainer}>
-      <Animated.View style={[styles.driverPulseRing, pulseStyle]} />
-      <Animated.View style={[styles.driverVehicle, markerStyle]}>
+      <RNAnimated.View style={[styles.driverPulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
+      <RNAnimated.View style={[styles.driverVehicle, { transform: [{ rotate: rotationStr }] }]}>
         <View style={styles.driverIconBg}>
           <Ionicons name={getVehicleIcon()} size={20} color="#FFFFFF" />
         </View>
         <View style={styles.driverArrow} />
-      </Animated.View>
+      </RNAnimated.View>
     </View>
   );
 }
@@ -194,6 +204,7 @@ export default function RideMap({
   height = "100%",
   driverHeading = 0,
   vehicleType = "car",
+  evHubMarkers,
 }: RideMapProps) {
   const { theme, isDark } = useTheme();
   const mapRef = useRef<any>(null);
@@ -340,7 +351,7 @@ export default function RideMap({
     ];
   }, [pickupLocation, dropoffLocation]);
 
-  if (isWeb || !mapsAvailable || !MapView || !isMapMounted) {
+  if (isAndroid || isWeb || !mapsAvailable || !MapView || !isMapMounted) {
     return (
       <View style={[styles.container, { height, backgroundColor: theme.backgroundDefault }]}>
         <View style={styles.webFallback}>
@@ -409,8 +420,7 @@ export default function RideMap({
       <MapView
         ref={mapRef}
         style={styles.map}
-        provider={Platform.OS === "android" ? PROVIDER_GOOGLE : undefined}
-        customMapStyle={isDark ? darkMapStyle : lightMapStyle}
+        customMapStyle={Platform.OS === "ios" ? (isDark ? darkMapStyle : lightMapStyle) : undefined}
         showsUserLocation={showUserLocation}
         showsMyLocationButton={false}
         showsCompass={false}
@@ -489,6 +499,25 @@ export default function RideMap({
             <DropoffMarker />
           </Marker>
         ) : null}
+
+        {evHubMarkers && Marker
+          ? evHubMarkers.map((hub) => (
+              <Marker
+                key={`ev-hub-${hub.id}`}
+                coordinate={{ latitude: hub.lat, longitude: hub.lng }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
+                title={hub.name}
+                description={`${hub.availablePorts}/${hub.totalChargingPorts} ports available`}
+              >
+                <EvHubMapMarker
+                  name={hub.name}
+                  availablePorts={hub.availablePorts}
+                  totalChargingPorts={hub.totalChargingPorts}
+                />
+              </Marker>
+            ))
+          : null}
 
         {showDriverMarker && driverLocation ? (
           isNative && driverAnimatedCoord && Marker?.Animated ? (
@@ -658,6 +687,41 @@ const styles = StyleSheet.create({
     height: 10,
     backgroundColor: "#1a1a1a",
     marginTop: -2,
+  },
+  evHubMarkerContainer: {
+    alignItems: "center",
+  },
+  evHubMarkerBubble: {
+    backgroundColor: "rgba(255,255,255,0.95)",
+    borderRadius: 10,
+    borderWidth: 2,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.2,
+        shadowRadius: 3,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
+  },
+  evHubDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  evHubMarkerPin: {
+    width: 3,
+    height: 8,
+    borderRadius: 1.5,
+    backgroundColor: "#555",
+    marginTop: -1,
   },
   driverMarkerContainer: {
     width: 56,

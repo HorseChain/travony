@@ -1,10 +1,16 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { View, StyleSheet, Pressable, Alert, Linking, Platform, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  withSpring,
+} from "react-native-reanimated";
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -12,7 +18,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
-import { MapView, Marker, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
+import { MapView, Marker, mapsAvailable } from "@/components/NativeMaps";
 
 type NavigationProp = NativeStackNavigationProp<DriverHomeStackParamList>;
 type RouteProps = RouteProp<DriverHomeStackParamList, "DriverActiveRide">;
@@ -29,6 +35,7 @@ interface Ride {
   estimatedFare: string;
   actualFare?: string;
   paymentMethod?: string;
+  otp?: string;
   customer?: {
     name: string;
     phone?: string;
@@ -38,20 +45,120 @@ interface Ride {
 
 type RideStatus = "accepted" | "arriving" | "started" | "in_progress" | "completed";
 
+const STATUS_STEPS: { key: string; label: string }[] = [
+  { key: "accepted", label: "Accepted" },
+  { key: "arriving", label: "Arrived" },
+  { key: "started", label: "Ride Started" },
+  { key: "completed", label: "Completed" },
+];
+
+function getStepIndex(status: string): number {
+  switch (status) {
+    case "accepted": return 0;
+    case "arriving": return 1;
+    case "started": return 2;
+    case "in_progress": return 2;
+    case "completed": return 3;
+    default: return 0;
+  }
+}
+
+function StatusProgressStrip({ status }: { status: string }) {
+  const { theme } = useTheme();
+  const currentStep = getStepIndex(status);
+  return (
+    <View style={progressStyles.container}>
+      {STATUS_STEPS.map((step, index) => {
+        const done = index <= currentStep;
+        const isActive = index === currentStep;
+        return (
+          <View key={step.key} style={progressStyles.stepWrapper}>
+            <View
+              style={[
+                progressStyles.dot,
+                {
+                  backgroundColor: done ? Colors.travonyGreen : theme.border,
+                  borderColor: isActive ? Colors.travonyGreen : "transparent",
+                  borderWidth: isActive ? 2 : 0,
+                },
+              ]}
+            />
+            <ThemedText
+              style={[
+                progressStyles.label,
+                { color: done ? Colors.travonyGreen : theme.textMuted },
+              ]}
+            >
+              {step.label}
+            </ThemedText>
+            {index < STATUS_STEPS.length - 1 ? (
+              <View
+                style={[
+                  progressStyles.line,
+                  { backgroundColor: index < currentStep ? Colors.travonyGreen : theme.border },
+                ]}
+              />
+            ) : null}
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const progressStyles = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    marginBottom: Spacing.xl,
+    paddingHorizontal: Spacing.xs,
+  },
+  stepWrapper: {
+    alignItems: "center",
+    flex: 1,
+    position: "relative",
+  },
+  dot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    marginBottom: 4,
+  },
+  label: {
+    ...Typography.small,
+    textAlign: "center",
+    fontSize: 10,
+  },
+  line: {
+    position: "absolute",
+    top: 6,
+    left: "55%",
+    right: "-55%",
+    height: 2,
+    zIndex: -1,
+  },
+});
+
 export default function DriverActiveRideScreen() {
   const insets = useSafeAreaInsets();
-  const { theme, isDark } = useTheme();
+  const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const queryClient = useQueryClient();
   const mapRef = useRef<any>(null);
 
   const { rideId } = route.params || {};
-  
-  // Ensure rideId is a valid string
-  const validRideId = typeof rideId === 'string' ? rideId : '';
+  const validRideId = typeof rideId === "string" ? rideId : "";
 
-  const { data: ride, isLoading, error } = useQuery<Ride>({
+  const [showEarningsFlash, setShowEarningsFlash] = useState(false);
+  const [postRideFare, setPostRideFare] = useState("");
+  const [todayTotal, setTodayTotal] = useState("");
+  const [rideTruthScore, setRideTruthScore] = useState<number | null>(null);
+  const earningsOpacity = useSharedValue(0);
+  const earningsTranslate = useSharedValue(20);
+
+  const { data: ride, isLoading } = useQuery<Ride>({
     queryKey: ["/api/rides", validRideId],
     refetchInterval: 5000,
     enabled: !!validRideId,
@@ -60,7 +167,7 @@ export default function DriverActiveRideScreen() {
   const updateStatusMutation = useMutation({
     mutationFn: async (status: RideStatus) => {
       const updates: any = { status };
-      if (status === "started") {
+      if (status === "started" || status === "in_progress") {
         updates.startedAt = new Date().toISOString();
       } else if (status === "completed") {
         updates.completedAt = new Date().toISOString();
@@ -71,12 +178,31 @@ export default function DriverActiveRideScreen() {
         headers: { "Content-Type": "application/json" },
       });
     },
-    onSuccess: (data) => {
+    onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/rides", validRideId] });
       if (data.status === "completed") {
-        Alert.alert("Ride Completed", "Great job! The ride has been completed.", [
-          { text: "OK", onPress: () => navigation.goBack() }
-        ]);
+        const fare = data.actualFare || data.estimatedFare || "0.00";
+        setPostRideFare(fare);
+        try {
+          const earnings = await apiRequest("/api/drivers/earnings");
+          setTodayTotal(earnings?.totalEarnings ?? "0.00");
+        } catch {}
+        try {
+          const score = await apiRequest(`/api/truth/rides/${validRideId}/score`);
+          if (score?.score?.totalScore != null) {
+            setRideTruthScore(Math.round(score.score.totalScore));
+          }
+        } catch {}
+        setShowEarningsFlash(true);
+        earningsOpacity.value = withTiming(1, { duration: 400 });
+        earningsTranslate.value = withSpring(0);
+        setTimeout(() => {
+          earningsOpacity.value = withTiming(0, { duration: 400 });
+          setTimeout(() => {
+            setShowEarningsFlash(false);
+            navigation.goBack();
+          }, 450);
+        }, 2500);
       }
     },
     onError: (error: any) => {
@@ -84,9 +210,13 @@ export default function DriverActiveRideScreen() {
     },
   });
 
+  const earningsFlashStyle = useAnimatedStyle(() => ({
+    opacity: earningsOpacity.value,
+    transform: [{ translateY: earningsTranslate.value }],
+  }));
+
   const getStatusInfo = () => {
     if (!ride) return { title: "Loading...", subtitle: "", action: "", nextStatus: null as RideStatus | null };
-
     switch (ride.status) {
       case "accepted":
         return {
@@ -97,11 +227,12 @@ export default function DriverActiveRideScreen() {
         };
       case "arriving":
         return {
-          title: "Waiting for Customer",
-          subtitle: "Customer has been notified",
+          title: "Waiting for Rider",
+          subtitle: "Rider has been notified you're here",
           action: "Start Ride",
-          nextStatus: "in_progress" as RideStatus,
+          nextStatus: "started" as RideStatus,
         };
+      case "started":
       case "in_progress":
         return {
           title: "Trip in Progress",
@@ -131,22 +262,20 @@ export default function DriverActiveRideScreen() {
 
   const handleNavigate = () => {
     if (!ride) return;
-    const destination = ride.status === "in_progress" 
+    const isEnRoute = ride.status === "started" || ride.status === "in_progress";
+    const destination = isEnRoute
       ? { lat: ride.dropoffLat, lng: ride.dropoffLng }
       : { lat: ride.pickupLat, lng: ride.pickupLng };
-    
     const url = Platform.select({
       ios: `maps:?daddr=${destination.lat},${destination.lng}`,
       android: `google.navigation:q=${destination.lat},${destination.lng}`,
       default: `https://www.google.com/maps/dir/?api=1&destination=${destination.lat},${destination.lng}`,
     });
-    
     Linking.openURL(url);
   };
 
   const handleStatusUpdate = () => {
     if (!statusInfo.nextStatus) return;
-    
     if (statusInfo.nextStatus === "completed" && ride?.paymentMethod === "cash") {
       const fare = ride.actualFare || ride.estimatedFare || "0.00";
       Alert.alert(
@@ -154,10 +283,7 @@ export default function DriverActiveRideScreen() {
         `Please collect AED ${fare} from the customer before completing the ride.`,
         [
           { text: "Cancel", style: "cancel" },
-          { 
-            text: "Cash Collected", 
-            onPress: () => updateStatusMutation.mutate("completed"),
-          }
+          { text: "Cash Collected", onPress: () => updateStatusMutation.mutate("completed") },
         ]
       );
     } else {
@@ -166,33 +292,29 @@ export default function DriverActiveRideScreen() {
   };
 
   const handleCancelRide = () => {
-    Alert.alert(
-      "Cancel Ride",
-      "Are you sure you want to cancel this ride?",
-      [
-        { text: "No", style: "cancel" },
-        {
-          text: "Yes, Cancel",
-          style: "destructive",
-          onPress: async () => {
-            try {
-              await apiRequest(`/api/rides/${validRideId}`, {
-                method: "PATCH",
-                body: JSON.stringify({ status: "cancelled", cancelledAt: new Date().toISOString() }),
-                headers: { "Content-Type": "application/json" },
-              });
-              navigation.goBack();
-            } catch (error: any) {
-              Alert.alert("Error", error.message || "Failed to cancel ride");
-            }
-          },
+    Alert.alert("Cancel Ride", "Are you sure you want to cancel this ride?", [
+      { text: "No", style: "cancel" },
+      {
+        text: "Yes, Cancel",
+        style: "destructive",
+        onPress: async () => {
+          try {
+            await apiRequest(`/api/rides/${validRideId}`, {
+              method: "PATCH",
+              body: JSON.stringify({ status: "cancelled", cancelledAt: new Date().toISOString() }),
+              headers: { "Content-Type": "application/json" },
+            });
+            navigation.goBack();
+          } catch (error: any) {
+            Alert.alert("Error", error.message || "Failed to cancel ride");
+          }
         },
-      ]
-    );
+      },
+    ]);
   };
 
   const renderMap = () => {
-    if (Platform.OS === "web" || !mapsAvailable || !MapView) {
+    if (Platform.OS === "android" || Platform.OS === "web" || !mapsAvailable || !MapView) {
       return (
         <View style={[styles.mapPlaceholder, { backgroundColor: theme.backgroundElevated }]}>
           <Ionicons name="navigate-outline" size={48} color={theme.primary} />
@@ -202,7 +324,6 @@ export default function DriverActiveRideScreen() {
         </View>
       );
     }
-
     return (
       <MapView
         ref={mapRef}
@@ -215,26 +336,20 @@ export default function DriverActiveRideScreen() {
         }}
         showsUserLocation
       >
-        {ride && (
+        {ride ? (
           <>
             <Marker
-              coordinate={{
-                latitude: Number(ride.pickupLat),
-                longitude: Number(ride.pickupLng),
-              }}
+              coordinate={{ latitude: Number(ride.pickupLat), longitude: Number(ride.pickupLng) }}
               title="Pickup"
               pinColor={Colors.travonyGreen}
             />
             <Marker
-              coordinate={{
-                latitude: Number(ride.dropoffLat),
-                longitude: Number(ride.dropoffLng),
-              }}
+              coordinate={{ latitude: Number(ride.dropoffLat), longitude: Number(ride.dropoffLng) }}
               title="Drop-off"
               pinColor={theme.error}
             />
           </>
-        )}
+        ) : null}
       </MapView>
     );
   };
@@ -247,34 +362,25 @@ export default function DriverActiveRideScreen() {
     );
   }
 
-  // Calculate button section height
-  const buttonSectionHeight = (statusInfo.nextStatus ? 56 : 0) + 
-    (ride?.status !== "in_progress" && ride?.status !== "completed" ? 48 + Spacing.sm : 0) + 
-    Math.max(insets.bottom, Spacing.lg) + Spacing.lg;
-
   return (
     <ThemedView style={styles.container}>
-      {/* Map takes remaining space above bottom panel */}
-      <View style={[styles.mapContainer, { marginBottom: 0 }]}>
-        {renderMap()}
-        
-        {/* Back button overlay on map */}
-        <View style={[styles.header, { top: insets.top + Spacing.md }]}>
-          <Pressable
-            style={[styles.backButton, { backgroundColor: theme.backgroundRoot }]}
-            onPress={() => navigation.goBack()}
-          >
-            <Ionicons name="arrow-back-outline" size={24} color={theme.text} />
-          </Pressable>
-        </View>
+      <View style={styles.mapContainer}>{renderMap()}</View>
+
+      <View style={[styles.header, { top: insets.top + Spacing.md }]}>
+        <Pressable
+          style={[styles.backButton, { backgroundColor: theme.backgroundRoot }]}
+          onPress={() => navigation.goBack()}
+        >
+          <Ionicons name="arrow-back-outline" size={24} color={theme.text} />
+        </Pressable>
       </View>
 
-      {/* Bottom panel - contains all ride info and buttons */}
-      <ScrollView 
+      <ScrollView
         style={[styles.bottomPanel, { backgroundColor: theme.backgroundRoot }]}
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, Spacing.lg) }}
       >
-        {/* Status Header */}
+        <StatusProgressStrip status={ride?.status ?? "accepted"} />
+
         <View style={styles.statusHeader}>
           <View style={[styles.statusIndicator, { backgroundColor: Colors.travonyGreen }]} />
           <View style={styles.statusInfo}>
@@ -285,16 +391,34 @@ export default function DriverActiveRideScreen() {
           </View>
         </View>
 
-        {/* Customer Info */}
+        {ride?.status === "arriving" ? (
+          <View style={[styles.otpBanner, { backgroundColor: Colors.travonyGreen + "12" }]}>
+            <Ionicons name="shield-checkmark-outline" size={18} color={Colors.travonyGreen} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={[styles.otpBannerText, { color: Colors.travonyGreen }]}>
+                Rider will show you a 4-digit code. Match it to start the trip.
+              </ThemedText>
+              {ride.otp ? (
+                <View style={styles.otpCodeRow}>
+                  <ThemedText style={[styles.otpCodeLabel, { color: Colors.travonyGreen }]}>
+                    Expected code:
+                  </ThemedText>
+                  <ThemedText style={[styles.otpCode, { color: Colors.travonyGreen }]}>
+                    {ride.otp}
+                  </ThemedText>
+                </View>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
         {ride ? (
           <View style={[styles.customerInfo, { backgroundColor: theme.backgroundElevated }]}>
             <View style={styles.customerAvatar}>
               <Ionicons name="person-outline" size={20} color={theme.textMuted} />
             </View>
             <View style={styles.customerDetails}>
-              <ThemedText style={styles.customerName}>
-                {ride.customer?.name || "Customer"}
-              </ThemedText>
+              <ThemedText style={styles.customerName}>{ride.customer?.name || "Customer"}</ThemedText>
               <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
                 <ThemedText style={[styles.fareAmount, { color: Colors.travonyGreen }]}>
                   AED {ride.estimatedFare || "0.00"}
@@ -323,69 +447,75 @@ export default function DriverActiveRideScreen() {
               >
                 <Ionicons name="call-outline" size={18} color={Colors.travonyGreen} />
               </Pressable>
-              <Pressable
-                style={[styles.actionButton, { borderColor: theme.border }]}
-                onPress={handleNavigate}
-              >
-                <Ionicons name="navigate-outline" size={18} color={Colors.travonyGreen} />
-              </Pressable>
             </View>
           </View>
         ) : null}
 
-        {/* Action Buttons */}
         <View style={styles.buttonSection}>
+          <Pressable
+            style={[styles.navigateButton, { backgroundColor: Colors.travonyGreen }]}
+            onPress={handleNavigate}
+          >
+            <Ionicons name="navigate" size={22} color="#fff" />
+            <ThemedText style={styles.navigateButtonText}>
+              Navigate to {(ride?.status === "started" || ride?.status === "in_progress") ? "Drop-off" : "Pickup"}
+            </ThemedText>
+          </Pressable>
+
           {statusInfo.nextStatus ? (
             <Pressable
-              style={[styles.primaryButton, { backgroundColor: Colors.travonyGreen }]}
+              style={[styles.primaryButton, { backgroundColor: theme.backgroundElevated, borderColor: theme.border, borderWidth: 1 }]}
               onPress={handleStatusUpdate}
               disabled={updateStatusMutation.isPending}
             >
-              <ThemedText style={styles.primaryButtonText}>
+              <ThemedText style={[styles.primaryButtonText, { color: theme.textPrimary }]}>
                 {updateStatusMutation.isPending ? "Updating..." : statusInfo.action}
               </ThemedText>
             </Pressable>
           ) : null}
 
-          {ride?.status !== "in_progress" && ride?.status !== "completed" ? (
+          {ride?.status !== "started" && ride?.status !== "in_progress" && ride?.status !== "completed" ? (
             <Pressable
               style={[styles.cancelButton, { borderColor: theme.error }]}
               onPress={handleCancelRide}
             >
-              <ThemedText style={[styles.cancelButtonText, { color: theme.error }]}>
-                Cancel Ride
-              </ThemedText>
+              <ThemedText style={[styles.cancelButtonText, { color: theme.error }]}>Cancel Ride</ThemedText>
             </Pressable>
           ) : null}
         </View>
       </ScrollView>
+
+      {showEarningsFlash ? (
+        <Animated.View style={[styles.earningsFlash, earningsFlashStyle]}>
+          <View style={[styles.earningsFlashCard, { backgroundColor: Colors.travonyGreen }]}>
+            <ThemedText style={styles.earningsFlashFare}>AED {postRideFare} earned</ThemedText>
+            {todayTotal ? (
+              <ThemedText style={styles.earningsFlashTotal}>Today: AED {todayTotal}</ThemedText>
+            ) : null}
+            {rideTruthScore !== null ? (
+              <ThemedText style={styles.earningsFlashScore}>
+                Ride score: {rideTruthScore}/100
+              </ThemedText>
+            ) : null}
+          </View>
+        </Animated.View>
+      ) : null}
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  centered: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  mapContainer: {
-    flex: 1,
-  },
-  map: {
-    ...StyleSheet.absoluteFillObject,
-  },
+  container: { flex: 1 },
+  centered: { justifyContent: "center", alignItems: "center" },
+  mapContainer: { flex: 1 },
+  map: { ...StyleSheet.absoluteFillObject },
   mapPlaceholder: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     gap: Spacing.md,
   },
-  mapPlaceholderText: {
-    ...Typography.body,
-  },
+  mapPlaceholderText: { ...Typography.body },
   header: {
     position: "absolute",
     left: Spacing.lg,
@@ -404,9 +534,7 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 4,
       },
-      android: {
-        elevation: 4,
-      },
+      android: { elevation: 4 },
     }),
   },
   bottomPanel: {
@@ -421,35 +549,50 @@ const styles = StyleSheet.create({
         shadowOpacity: 0.1,
         shadowRadius: 8,
       },
-      android: {
-        elevation: 8,
-      },
+      android: { elevation: 8 },
     }),
-  },
-  buttonSection: {
-    gap: Spacing.sm,
-    marginTop: Spacing.md,
   },
   statusHeader: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
-    marginBottom: Spacing.xl,
+    marginBottom: Spacing.md,
   },
   statusIndicator: {
     width: 12,
     height: 12,
     borderRadius: 6,
   },
-  statusInfo: {
-    flex: 1,
+  statusInfo: { flex: 1 },
+  statusTitle: { ...Typography.h4, marginBottom: 2 },
+  statusSubtitle: { ...Typography.body },
+  otpBanner: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: Spacing.sm,
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
   },
-  statusTitle: {
-    ...Typography.h4,
-    marginBottom: 2,
-  },
-  statusSubtitle: {
+  otpBannerText: {
     ...Typography.body,
+    fontWeight: "600",
+    marginBottom: 4,
+  },
+  otpCodeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: 4,
+  },
+  otpCodeLabel: {
+    ...Typography.bodyMedium,
+    fontWeight: "500",
+  },
+  otpCode: {
+    ...Typography.h3,
+    fontWeight: "800",
+    letterSpacing: 4,
   },
   customerInfo: {
     flexDirection: "row",
@@ -457,7 +600,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
     marginBottom: Spacing.xl,
     padding: Spacing.lg,
-    backgroundColor: "rgba(0,0,0,0.03)",
     borderRadius: BorderRadius.xl,
   },
   customerAvatar: {
@@ -468,17 +610,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  customerDetails: {
-    flex: 1,
-  },
-  customerName: {
-    ...Typography.h4,
-    marginBottom: 2,
-  },
-  fareAmount: {
-    ...Typography.body,
-    fontWeight: "600",
-  },
+  customerDetails: { flex: 1 },
+  customerName: { ...Typography.h4, marginBottom: 2 },
+  fareAmount: { ...Typography.body, fontWeight: "600" },
   customerActions: {
     flexDirection: "row",
     gap: Spacing.sm,
@@ -491,29 +625,49 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
   },
-  actions: {
-    gap: Spacing.md,
+  buttonSection: {
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  navigateButton: {
+    height: 60,
+    borderRadius: 30,
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: Spacing.sm,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.travonyGreen,
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.3,
+        shadowRadius: 8,
+      },
+      android: { elevation: 6 },
+    }),
+  },
+  navigateButtonText: {
+    ...Typography.button,
+    color: "#fff",
+    fontSize: 17,
   },
   primaryButton: {
-    height: 56,
-    borderRadius: 28,
+    height: 52,
+    borderRadius: 26,
     justifyContent: "center",
     alignItems: "center",
   },
   primaryButtonText: {
     ...Typography.button,
-    color: "#fff",
   },
   cancelButton: {
-    height: 48,
-    borderRadius: 24,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
   },
-  cancelButtonText: {
-    ...Typography.button,
-  },
+  cancelButtonText: { ...Typography.button },
   paymentBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -521,5 +675,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 10,
+  },
+  earningsFlash: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 200,
+    backgroundColor: "rgba(0,0,0,0.35)",
+  },
+  earningsFlashCard: {
+    borderRadius: BorderRadius["2xl"],
+    paddingHorizontal: Spacing.xl * 2,
+    paddingVertical: Spacing.xl,
+    alignItems: "center",
+    gap: Spacing.sm,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.travonyGreen,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.4,
+        shadowRadius: 16,
+      },
+      android: { elevation: 12 },
+    }),
+  },
+  earningsFlashFare: {
+    ...Typography.h2,
+    color: "#fff",
+    fontWeight: "800",
+  },
+  earningsFlashTotal: {
+    ...Typography.body,
+    color: "rgba(255,255,255,0.85)",
+    fontWeight: "600",
+  },
+  earningsFlashScore: {
+    ...Typography.caption,
+    color: "rgba(255,255,255,0.7)",
+    marginTop: 2,
   },
 });

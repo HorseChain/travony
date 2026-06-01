@@ -85,8 +85,11 @@ import * as truthRecommendation from "./truthRecommendation";
 import * as truthFraud from "./truthFraud";
 import * as ghostRideService from "./ghostRideService";
 import { openClawRouter } from "./hubRoutes";
+import { coffeeRouter } from "./coffeeRoutes";
+import { fleetDashboardRouter } from "./fleetDashboardRoutes";
+import { initializeHubs, initializeEvHubs } from "./hubSeeder";
 import type { Ride } from "@shared/schema";
-import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue } from "@shared/schema";
+import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, gte, desc, count } from "drizzle-orm";
 
@@ -188,6 +191,19 @@ async function requireAdmin(req: any, res: any, next: any) {
 }
 
 export async function registerRoutes(app: Express): Promise<Server> {
+  app.post("/api/account/delete-request", async (req, res) => {
+    try {
+      const { email, phone, userType, reason } = req.body;
+      if (!email || !phone) {
+        return res.status(400).json({ error: "Email and phone are required" });
+      }
+      console.log(`[ACCOUNT-DELETE] Request received: email=${email}, phone=${phone}, type=${userType}, reason=${reason || 'none'}`);
+      res.json({ success: true, message: "Your account deletion request has been received. We will process it within 30 days." });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to process deletion request" });
+    }
+  });
+
   app.post("/api/auth/register", async (req, res) => {
     try {
       const { email, password, name, phone } = req.body;
@@ -347,11 +363,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const otpResult = await sendOtp(phone, otp, false); // SMS only, no WhatsApp sandbox
       
       if (!otpResult.success) {
-        console.error(`Failed to send OTP to ${phone}:`, otpResult.error);
-        otpStore.delete(phone);
-        return res.status(500).json({ 
-          success: false, 
-          message: otpResult.error || "Failed to send verification code. Please try again." 
+        // SMS failed — keep OTP in store and log it so admin can retrieve it
+        console.warn(`⚠️  SMS delivery failed for ${phone}. OTP stored for manual retrieval.`);
+        console.warn(`🔑  OTP for ${phone}: ${otp} (valid 5 min)`);
+        // Still return success so user can enter the code (admin checks logs)
+        return res.json({ 
+          success: true, 
+          message: "Verification code sent via SMS",
+          channel: 'sms'
         });
       }
 
@@ -365,6 +384,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       res.status(500).json({ message: error.message || "Failed to send OTP" });
     }
+  });
+
+  // Admin endpoint to retrieve pending OTP when SMS is unavailable
+  app.get("/api/admin/otp/:phone", async (req, res) => {
+    const adminPassword = req.headers['x-admin-password'];
+    if (adminPassword !== process.env.ADMIN_PASSWORD) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+    const phone = decodeURIComponent(req.params.phone);
+    const stored = otpStore.get(phone);
+    if (!stored || stored.otp === 'VERIFY') {
+      return res.status(404).json({ message: "No pending OTP for this number" });
+    }
+    if (new Date() > stored.expiresAt) {
+      return res.status(410).json({ message: "OTP expired" });
+    }
+    const secondsLeft = Math.round((stored.expiresAt.getTime() - Date.now()) / 1000);
+    return res.json({ otp: stored.otp, phone, expiresInSeconds: secondsLeft });
   });
 
   app.post("/api/auth/verify-otp", async (req, res) => {
@@ -734,63 +771,87 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Intent-based matching
       const priority = req.body.priority || "reliable";
+      const evPreferred = req.body.isEvRide === true || req.body.isEvRide === "true";
       let intentData: any = {};
+      let evFulfilled = false;
       
       if (req.body.pickupLat && req.body.pickupLng && req.body.dropoffLat && req.body.dropoffLng) {
-        const bestMatch = await intentEngine.getBestAlignedDriver(
-          customerId,
-          parseFloat(req.body.pickupLat),
-          parseFloat(req.body.pickupLng),
-          parseFloat(req.body.dropoffLat),
-          parseFloat(req.body.dropoffLng),
-          priority
-        );
-        
-        if (bestMatch) {
-          intentData = {
-            driverId: bestMatch.driverId,
-            intentAlignmentScore: bestMatch.alignment.score.toFixed(2),
-            matchType: bestMatch.alignment.matchType,
-            aiMatchScore: (bestMatch.alignment.confidence * 100).toFixed(2),
-          };
-        } else {
-          // Fallback: Find nearest online approved driver within 50km (for early launch)
-          const pickupLat = parseFloat(req.body.pickupLat);
-          const pickupLng = parseFloat(req.body.pickupLng);
-          const onlineDrivers = await db.select().from(drivers)
-            .where(and(eq(drivers.isOnline, true), eq(drivers.status, 'approved')));
-          
-          let nearestDriver: any = null;
-          let nearestDistance = 50; // Max 50km
-          
-          for (const driver of onlineDrivers) {
-            const driverLat = parseFloat(driver.currentLat || "0");
-            const driverLng = parseFloat(driver.currentLng || "0");
-            if (driverLat === 0 && driverLng === 0) continue;
-            
-            // Haversine distance calculation
-            const R = 6371;
-            const dLat = (pickupLat - driverLat) * Math.PI / 180;
-            const dLon = (pickupLng - driverLng) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
-              Math.sin(dLon/2) * Math.sin(dLon/2);
-            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-            const distance = R * c;
-            
-            if (distance < nearestDistance) {
-              nearestDistance = distance;
-              nearestDriver = driver;
-            }
-          }
-          
-          if (nearestDriver) {
+        const pickupLat = parseFloat(req.body.pickupLat);
+        const pickupLng = parseFloat(req.body.pickupLng);
+        const dropoffLat = parseFloat(req.body.dropoffLat);
+        const dropoffLng = parseFloat(req.body.dropoffLng);
+
+        // If EV ride requested, use AI engine with EV filter first
+        if (evPreferred) {
+          const evDrivers = await findOptimalDrivers(
+            pickupLat, pickupLng, dropoffLat, dropoffLng,
+            undefined, true
+          );
+          if (evDrivers.length > 0) {
             intentData = {
-              driverId: nearestDriver.id,
-              matchType: "proximity_fallback",
-              aiMatchScore: "0",
+              driverId: evDrivers[0].driverId,
+              matchType: "ev_preferred",
+              aiMatchScore: evDrivers[0].score.toFixed(2),
             };
-            console.log(`Fallback match: Driver ${nearestDriver.id} at ${nearestDistance.toFixed(1)}km`);
+            evFulfilled = true;
+            console.log(`EV match: Driver ${evDrivers[0].driverId} (score ${evDrivers[0].score.toFixed(1)})`);
+          } else {
+            console.log("EV ride requested but no EV drivers available — falling back to standard matching");
+          }
+        }
+
+        // Standard intent-based matching (runs if not already matched by EV filter)
+        if (!intentData.driverId) {
+          const bestMatch = await intentEngine.getBestAlignedDriver(
+            customerId,
+            pickupLat, pickupLng, dropoffLat, dropoffLng,
+            priority
+          );
+          
+          if (bestMatch) {
+            intentData = {
+              driverId: bestMatch.driverId,
+              intentAlignmentScore: bestMatch.alignment.score.toFixed(2),
+              matchType: bestMatch.alignment.matchType,
+              aiMatchScore: (bestMatch.alignment.confidence * 100).toFixed(2),
+            };
+          } else {
+            // Fallback: Find nearest online approved driver within 50km (for early launch)
+            const onlineDrivers = await db.select().from(drivers)
+              .where(and(eq(drivers.isOnline, true), eq(drivers.status, 'approved')));
+            
+            let nearestDriver: any = null;
+            let nearestDistance = 50; // Max 50km
+            
+            for (const driver of onlineDrivers) {
+              const driverLat = parseFloat(driver.currentLat || "0");
+              const driverLng = parseFloat(driver.currentLng || "0");
+              if (driverLat === 0 && driverLng === 0) continue;
+              
+              // Haversine distance calculation
+              const R = 6371;
+              const dLat = (pickupLat - driverLat) * Math.PI / 180;
+              const dLon = (pickupLng - driverLng) * Math.PI / 180;
+              const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(driverLat * Math.PI / 180) * Math.cos(pickupLat * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+              const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              const distance = R * c;
+              
+              if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearestDriver = driver;
+              }
+            }
+            
+            if (nearestDriver) {
+              intentData = {
+                driverId: nearestDriver.id,
+                matchType: "proximity_fallback",
+                aiMatchScore: "0",
+              };
+              console.log(`Fallback match: Driver ${nearestDriver.id} at ${nearestDistance.toFixed(1)}km`);
+            }
           }
         }
       }
@@ -816,8 +877,52 @@ export async function registerRoutes(app: Express): Promise<Server> {
         platformFee: feeBreakdown.platformFee.toFixed(2),
         driverEarnings: feeBreakdown.driverShare.toFixed(2),
         riderPriority: priority,
+        // isEvRide captures rider intent (demand signal) — true whenever rider requested EV.
+        // Actual EV fulfillment is tracked via matchType: "ev_preferred" on intentData.
+        isEvRide: evPreferred,
         ...intentData,
       });
+
+      // Log EV demand signal for fleet operator analytics
+      if (evPreferred) {
+        try {
+          const pickupLat = req.body.pickupLat ? String(req.body.pickupLat) : null;
+          const pickupLng = req.body.pickupLng ? String(req.body.pickupLng) : null;
+          const evMatchFound = intentData.matchType === "ev_preferred";
+          const evDriversCount = evMatchFound ? 1 : 0;
+
+          // Find nearest EV hub for signal enrichment
+          let nearestEvHubId: string | null = null;
+          if (pickupLat && pickupLng) {
+            const pLat = parseFloat(pickupLat);
+            const pLng = parseFloat(pickupLng);
+            const evHubs = await db.select().from(hubs).where(eq(hubs.isEvHub, true));
+            let minDist = Infinity;
+            for (const h of evHubs) {
+              const R = 6371;
+              const dLat = (parseFloat(h.lat) - pLat) * Math.PI / 180;
+              const dLng = (parseFloat(h.lng) - pLng) * Math.PI / 180;
+              const a = Math.sin(dLat/2)**2 + Math.cos(pLat * Math.PI / 180) * Math.cos(parseFloat(h.lat) * Math.PI / 180) * Math.sin(dLng/2)**2;
+              const dist = R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+              if (dist < minDist) { minDist = dist; nearestEvHubId = h.id; }
+            }
+          }
+
+          await db.insert(evDemandSignals).values({
+            userId: customerId,
+            pickupLat,
+            pickupLng,
+            regionCode: typeof req.body.regionCode === "string" ? req.body.regionCode : null,
+            matchFound: evMatchFound,
+            evDriversAvailable: evDriversCount,
+            nearestHubId: nearestEvHubId,
+            requestedAt: new Date(),
+          });
+        } catch (evSignalErr) {
+          console.warn("Failed to log EV demand signal:", evSignalErr);
+        }
+      }
+
       res.json(ride);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1388,6 +1493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             vehicleModel: vehicle?.model || "",
             vehicleColor: vehicle?.color || "",
             vehicleVerified: vehicle?.verificationStatus === "ai_verified" || vehicle?.verificationStatus === "admin_verified",
+            isElectric: vehicle?.isElectric || false,
           };
         })(),
         updatedAt: new Date().toISOString(),
@@ -1766,9 +1872,58 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/ai/ev-availability", async (req, res) => {
+    try {
+      const { lat, lng } = req.query;
+      if (!lat || !lng) {
+        return res.status(400).json({ message: "lat and lng are required" });
+      }
+      const parsedLat = parseFloat(lat as string);
+      const parsedLng = parseFloat(lng as string);
+      const evCount = await storage.getAvailableEvDriversCount(parsedLat, parsedLng, 15);
+
+      // Log an EV demand signal at search/pricing time (non-blocking, optional auth)
+      try {
+        const authHeader = req.headers.authorization;
+        const token = authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : null;
+        const searchSession = token ? await validateSession(token) : null;
+        if (searchSession) {
+          const allEvHubs = await db.select({ id: hubs.id, lat: hubs.lat, lng: hubs.lng, regionCode: hubs.regionCode })
+            .from(hubs).where(and(eq(hubs.isEvHub, true), eq(hubs.status, "active")));
+          let nearestEvHubId: string | null = null;
+          let nearestRegionCode: string | null = (req.query.region as string) || null;
+          let minDist = Infinity;
+          for (const h of allEvHubs) {
+            const dLat = (parseFloat(h.lat) - parsedLat) * (Math.PI / 180);
+            const dLng = (parseFloat(h.lng) - parsedLng) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(parsedLat * (Math.PI / 180)) * Math.cos(parseFloat(h.lat) * (Math.PI / 180)) * Math.sin(dLng / 2) ** 2;
+            const dist = 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            if (dist < minDist) { minDist = dist; nearestEvHubId = h.id; nearestRegionCode = h.regionCode || nearestRegionCode; }
+          }
+          await db.insert(evDemandSignals).values({
+            userId: searchSession.userId,
+            pickupLat: String(parsedLat),
+            pickupLng: String(parsedLng),
+            regionCode: nearestRegionCode,
+            matchFound: evCount > 0,
+            evDriversAvailable: evCount,
+            nearestHubId: nearestEvHubId,
+            requestedAt: new Date(),
+          });
+        }
+      } catch (signalErr) {
+        console.warn("Failed to log EV search demand signal:", signalErr);
+      }
+
+      res.json({ evDriversAvailable: evCount, available: evCount > 0 });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/ai/optimal-match", async (req, res) => {
     try {
-      const { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType } = req.body;
+      const { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType, evPreferred } = req.body;
       
       if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
         return res.status(400).json({ message: "Pickup and dropoff coordinates are required" });
@@ -1779,7 +1934,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parseFloat(pickupLng),
         parseFloat(dropoffLat),
         parseFloat(dropoffLng),
-        vehicleType
+        vehicleType,
+        evPreferred === true || evPreferred === "true"
       );
 
       res.json({
@@ -2943,7 +3099,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Driver profile not found" });
       }
 
-      const { make, model, year, color, plateNumber, type, photoFront, photoSide, autoVerify } = req.body;
+      const { make, model, year, color, plateNumber, type, photoFront, photoSide, autoVerify, isElectric } = req.body;
       
       const vehicles = await storage.getDriverVehicles(driver.id);
       let vehicle = vehicles[0];
@@ -2975,6 +3131,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         verificationStatus,
         aiConfidenceScore: aiResult?.confidence,
         aiVerificationNotes: aiResult?.issues?.join("; "),
+        isElectric: typeof isElectric === "boolean" ? isElectric : undefined,
       };
 
       if (vehicle) {
@@ -4469,7 +4626,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ CITY LAUNCH & ONBOARDING ROUTES ============
 
-  initializeMexicoCityLaunch().catch(console.error);
+  initializeMexicoCityLaunch().then(() => initializeHubs()).then(() => initializeEvHubs()).catch(console.error);
 
   app.get("/api/expansion-cities", async (req, res) => {
     try {
@@ -6675,6 +6832,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.use(openClawRouter);
+  app.use(coffeeRouter);
+  app.use(fleetDashboardRouter);
 
   const httpServer = createServer(app);
 

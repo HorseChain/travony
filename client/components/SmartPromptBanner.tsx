@@ -1,12 +1,5 @@
-import React, { useEffect } from "react";
-import { View, StyleSheet, Pressable } from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  FadeInDown,
-} from "react-native-reanimated";
+import React, { useEffect, useRef } from "react";
+import { View, StyleSheet, Pressable, Animated } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -58,29 +51,23 @@ export default function SmartPromptBanner({
   onDismiss,
 }: SmartPromptBannerProps) {
   const { theme } = useTheme();
-  const translateY = useSharedValue(100);
-  const opacity = useSharedValue(0);
+  const opacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    if (prompt) {
-      translateY.value = withSpring(0, { damping: 18, stiffness: 120, mass: 0.8 });
-      opacity.value = withTiming(1, { duration: 300 });
+    try {
+      if (prompt) {
+        Animated.timing(opacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
 
-      const timer = setTimeout(() => {
-        onDismiss?.();
-      }, 10000);
+        const timer = setTimeout(() => {
+          onDismiss?.();
+        }, 10000);
 
-      return () => clearTimeout(timer);
-    } else {
-      translateY.value = withTiming(100, { duration: 250 });
-      opacity.value = withTiming(0, { duration: 200 });
-    }
+        return () => clearTimeout(timer);
+      } else {
+        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start();
+      }
+    } catch (e) {}
   }, [prompt]);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: translateY.value }],
-    opacity: opacity.value,
-  }));
 
   if (!prompt) {
     return null;
@@ -93,10 +80,8 @@ export default function SmartPromptBanner({
     <Animated.View
       style={[
         styles.container,
-        { backgroundColor: theme.card },
-        animatedStyle,
+        { backgroundColor: theme.card, opacity },
       ]}
-      entering={FadeInDown.springify().damping(18)}
     >
       <View style={[styles.accentStripe, { backgroundColor: accentColor }]} />
 

@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
-import { View, StyleSheet, Platform, Pressable } from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { View, StyleSheet, Platform, Pressable, Animated } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import Animated, { FadeIn, FadeOut, useSharedValue, useAnimatedStyle, withSpring, withSequence } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -40,7 +39,7 @@ export function CreditToast() {
   const queryClient = useQueryClient();
   const [currentCredit, setCurrentCredit] = useState<Credit | null>(null);
   const [visible, setVisible] = useState(false);
-  const pulseScale = useSharedValue(1);
+  const toastOpacity = useRef(new Animated.Value(0)).current;
 
   const { data: creditsData } = useQuery<CreditsResponse>({
     queryKey: ["/api/credits/recent"],
@@ -66,17 +65,17 @@ export function CreditToast() {
         const credit = unseen[0];
         setCurrentCredit(credit);
         setVisible(true);
+        Animated.timing(toastOpacity, { toValue: 1, duration: 300, useNativeDriver: true }).start();
         
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        pulseScale.value = withSequence(
-          withSpring(1.1),
-          withSpring(1)
-        );
+        try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (e) {}
 
         const timer = setTimeout(() => {
-          setVisible(false);
+          Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start();
           markSeenMutation.mutate([credit.id]);
-          setTimeout(() => setCurrentCredit(null), 400);
+          setTimeout(() => {
+            setVisible(false);
+            setCurrentCredit(null);
+          }, 350);
         }, 5000);
 
         return () => clearTimeout(timer);
@@ -84,15 +83,14 @@ export function CreditToast() {
     }
   }, [creditsData?.credits]);
 
-  const pulseStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseScale.value }],
-  }));
-
   const handleDismiss = () => {
     if (currentCredit) {
-      setVisible(false);
+      Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }).start();
       markSeenMutation.mutate([currentCredit.id]);
-      setTimeout(() => setCurrentCredit(null), 300);
+      setTimeout(() => {
+        setVisible(false);
+        setCurrentCredit(null);
+      }, 350);
     }
   };
 
@@ -102,15 +100,11 @@ export function CreditToast() {
 
   return (
     <Animated.View
-      entering={FadeIn.duration(300)}
-      exiting={FadeOut.duration(300)}
-      style={[styles.container, { backgroundColor: Colors.travonyGreen }]}
+      style={[styles.container, { backgroundColor: Colors.travonyGreen, opacity: toastOpacity }]}
     >
-      <Animated.View style={pulseStyle}>
-        <View style={styles.iconContainer}>
-          <Ionicons name="wallet" size={20} color="#fff" />
-        </View>
-      </Animated.View>
+      <View style={styles.iconContainer}>
+        <Ionicons name="wallet" size={20} color="#fff" />
+      </View>
       <View style={styles.content}>
         <ThemedText style={styles.title}>{label}</ThemedText>
         <ThemedText style={styles.amount}>

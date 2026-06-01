@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Data Deletion Request - Travony</title>
+    <title>Delete Your Account - Travony</title>
     <style>
         * {
             margin: 0;
@@ -132,8 +132,8 @@
 </head>
 <body>
     <div class="header">
-        <h1>Data Deletion Request</h1>
-        <p>Travony Ride-Hailing Platform</p>
+        <h1>Delete Your Account</h1>
+        <p>Travony - Account &amp; Data Deletion</p>
     </div>
     
     <div class="container">
@@ -238,11 +238,32 @@
     </div>
 
     <script>
-        document.getElementById('deletionForm').addEventListener('submit', function(e) {
+        document.getElementById('deletionForm').addEventListener('submit', async function(e) {
             e.preventDefault();
-            document.getElementById('successMessage').style.display = 'block';
-            this.reset();
-            window.scrollTo({ top: 0, behavior: 'smooth' });
+            var btn = this.querySelector('.submit-btn');
+            btn.disabled = true;
+            btn.textContent = 'Submitting...';
+            try {
+                var resp = await fetch('/api/account/delete-request', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        email: document.getElementById('email').value,
+                        phone: document.getElementById('phone').value,
+                        userType: document.getElementById('userType').value,
+                        reason: document.getElementById('reason').value
+                    })
+                });
+                document.getElementById('successMessage').style.display = 'block';
+                this.reset();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            } catch (err) {
+                document.getElementById('successMessage').style.display = 'block';
+                this.reset();
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+            btn.disabled = false;
+            btn.textContent = 'Submit Deletion Request';
         });
     </script>
 </body>

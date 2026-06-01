@@ -1,20 +1,23 @@
 {
-  "id": "7ad2520f-bb7a-427f-b580-c9a4e6ba1c25",
-  "createdAt": "2026-01-15T11:53:53.206Z",
+  "id": "0c20d2d8-4427-49e7-a882-b429502694e0",
+  "createdAt": "2026-04-09T18:14:15.630Z",
   "runtimeVersion": "exposdk:54.0.0",
   "launchAsset": {
-    "key": "bundle-1768478033206-5902",
+    "key": "bundle-1775758455630-2672",
     "contentType": "application/javascript",
-    "url": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/1768478033206-5902/_expo/static/js/ios/bundle.js"
+    "url": "https://cc61802e-01a1-4ec5-9322-2ba43eb91774-00-2p719e2d7m17d.riker.replit.dev:5000/1775758455630-2672/_expo/static/js/ios/bundle.js"
   },
   "assets": [],
   "metadata": {},
   "extra": {
-    "eas": {},
+    "eas": {
+      "projectId": "366f0f57-2f25-4053-a69b-1905365f8013"
+    },
     "expoClient": {
       "name": "Travony",
-      "slug": "travony",
-      "version": "1.0.0",
+      "slug": "trav-ride",
+      "owner": "travoney_1",
+      "version": "4.5.0",
       "orientation": "portrait",
       "icon": "./assets/images/icon.png",
       "scheme": "travony",
@@ -36,7 +39,13 @@
         },
         "edgeToEdgeEnabled": true,
         "predictiveBackGestureEnabled": false,
-        "package": "com.travony.app"
+        "package": "com.travony.app",
+        "versionCode": 46,
+        "config": {
+          "googleMaps": {
+            "apiKey": "${GOOGLE_API_KEY}"
+          }
+        }
       },
       "web": {
         "output": "single",
@@ -55,15 +64,27 @@
             }
           }
         ],
-        "expo-web-browser"
+        "expo-web-browser",
+        [
+          "@stripe/stripe-react-native",
+          {
+            "merchantIdentifier": "merchant.com.travony",
+            "enableGooglePay": true
+          }
+        ]
       ],
       "experiments": {
-        "reactCompiler": true
+        "reactCompiler": false
+      },
+      "extra": {
+        "eas": {
+          "projectId": "366f0f57-2f25-4053-a69b-1905365f8013"
+        }
       },
       "_internal": {
         "isDebug": false,
         "projectRoot": "/home/runner/workspace",
-        "dynamicConfigPath": {},
+        "dynamicConfigPath": "/home/runner/workspace/app.config.js",
         "staticConfigPath": "/home/runner/workspace/app.json",
         "packageJsonPath": "/home/runner/workspace/package.json",
         "pluginHistory": {
@@ -74,6 +95,10 @@
           "expo-web-browser": {
             "name": "expo-web-browser",
             "version": "15.0.10"
+          },
+          "@stripe/stripe-react-native": {
+            "name": "@stripe/stripe-react-native",
+            "version": "0.50.3"
           }
         }
       },
@@ -100,6 +125,6 @@
       },
       "mainModuleName": "client/index"
     },
-    "scopeKey": "@anonymous/travony-45f6806a-4083-47a5-bbf5-554a7673f11b"
+    "scopeKey": "@anonymous/trav-ride-53e43c0d-750c-4d06-b04e-9f727cd8fe39"
   }
 }

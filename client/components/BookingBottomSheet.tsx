@@ -16,14 +16,13 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withSpring,
-  withTiming,
-  interpolate,
-} from "react-native-reanimated";
+import { Animated as RNAnimated } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigation, CompositeNavigationProp } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import type { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
+import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
+import type { MainTabParamList } from "@/navigation/MainTabNavigator26";
 
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
@@ -55,6 +54,11 @@ interface BookingBottomSheetProps {
   onLocationChange: (pickup: LocationData | null, dropoff: LocationData | null) => void;
   onBookingComplete: (rideId: string) => void;
   bottomInset: number;
+  onEvModeChange?: (isEvMode: boolean) => void;
+  initialDropoff?: LocationData | null;
+  initialPickup?: LocationData | null;
+  initialTab?: "location" | "rides" | "confirm";
+  onInitialConsumed?: () => void;
 }
 
 interface VehicleType {
@@ -317,10 +321,20 @@ export default function BookingBottomSheet({
   onLocationChange,
   onBookingComplete,
   bottomInset,
+  onEvModeChange,
+  initialDropoff,
+  initialPickup,
+  initialTab,
+  onInitialConsumed,
 }: BookingBottomSheetProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  type BookingNavProp = CompositeNavigationProp<
+    NativeStackNavigationProp<HomeStackParamList>,
+    BottomTabNavigationProp<MainTabParamList>
+  >;
+  const navigation = useNavigation<BookingNavProp>();
 
   const [activeTab, setActiveTab] = useState<TabType>("location");
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(null);
@@ -334,8 +348,9 @@ export default function BookingBottomSheet({
   const [selectedPmgthDriver, setSelectedPmgthDriver] = useState<PmgthDriver | null>(null);
   const [selectedPriority, setSelectedPriority] = useState<"fastest" | "cheapest" | "reliable">("reliable");
   const [detectedRegion, setDetectedRegion] = useState<string>("AE");
+  const [evModeSelected, setEvModeSelected] = useState(false);
 
-  const tabProgress = useSharedValue(0);
+  const tabProgress = useRef(new RNAnimated.Value(0)).current;
 
   useEffect(() => {
     if (currentLocation) {
@@ -349,13 +364,19 @@ export default function BookingBottomSheet({
     enabled: !!detectedRegion,
   });
 
-  // Fetch wallet balance for payment validation
   const { data: walletData } = useQuery<{ balance: string }>({
     queryKey: [`/api/wallet/balance/${user?.id}`],
     enabled: !!user?.id,
   });
 
   const walletBalance = parseFloat(walletData?.balance || "0");
+
+  const { data: evAvailData } = useQuery<{ evDriversAvailable: number; available: boolean }>({
+    queryKey: ["/api/ai/ev-availability", currentLocation?.lat, currentLocation?.lng],
+    enabled: currentLocation !== null,
+    staleTime: 30000,
+  });
+  const evDriversAvailable = evAvailData?.evDriversAvailable ?? 0;
 
   const vehicleTypes = useMemo(() => {
     const config = regionConfig as { vehicleTypes?: any[] } | undefined;
@@ -389,9 +410,28 @@ export default function BookingBottomSheet({
   }, [pickupLocation, dropoffLocation]);
 
   useEffect(() => {
-    if (activeTab === "location") tabProgress.value = withSpring(0);
-    else if (activeTab === "rides") tabProgress.value = withSpring(1);
-    else tabProgress.value = withSpring(2);
+    if (initialDropoff && initialDropoff.address) {
+      setDropoffLocation(initialDropoff);
+      setDropoffSearch(initialDropoff.address);
+      if (initialPickup && initialPickup.address) {
+        setPickupLocation(initialPickup);
+        setPickupSearch(initialPickup.address);
+      }
+      if (initialTab) setActiveTab(initialTab);
+      onInitialConsumed?.();
+    }
+  }, [initialDropoff]);
+
+  const handleEvModeToggle = () => {
+    const next = !evModeSelected;
+    setEvModeSelected(next);
+    onEvModeChange?.(next);
+  };
+
+  useEffect(() => {
+    if (activeTab === "location") RNAnimated.spring(tabProgress, { toValue: 0, useNativeDriver: true }).start();
+    else if (activeTab === "rides") RNAnimated.spring(tabProgress, { toValue: 1, useNativeDriver: true }).start();
+    else RNAnimated.spring(tabProgress, { toValue: 2, useNativeDriver: true }).start();
   }, [activeTab]);
 
   const distance = useMemo(() => {
@@ -462,6 +502,7 @@ export default function BookingBottomSheet({
           driverEarnings: driverEarnings.toFixed(2),
           priceBreakdown: JSON.stringify(aiPricing || {}),
           priority: selectedPriority,
+          isEvRide: evModeSelected,
         }),
         headers: { "Content-Type": "application/json" },
       });
@@ -601,6 +642,10 @@ export default function BookingBottomSheet({
     if (activeTab === "location" && pickupLocation && dropoffLocation) {
       setActiveTab("rides");
     } else if (activeTab === "rides") {
+      if (!pickupLocation || !dropoffLocation) {
+        setActiveTab("location");
+        return;
+      }
       setActiveTab("confirm");
     }
   };
@@ -617,9 +662,10 @@ export default function BookingBottomSheet({
     return popularLocations.filter((loc) => loc.address.toLowerCase().includes(query));
   }, [pickupSearch, dropoffSearch, activeInput, popularLocations]);
 
-  const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: interpolate(tabProgress.value, [0, 1, 2], [0, (SCREEN_WIDTH - 48) / 3, (SCREEN_WIDTH - 48) * 2 / 3]) }],
-  }));
+  const indicatorTranslateX = tabProgress.interpolate({
+    inputRange: [0, 1, 2],
+    outputRange: [0, (SCREEN_WIDTH - 48) / 3, (SCREEN_WIDTH - 48) * 2 / 3],
+  });
 
   const renderLocationTab = () => (
     <View style={styles.tabContent}>
@@ -740,6 +786,33 @@ export default function BookingBottomSheet({
 
   const renderRidesTab = () => (
     <View style={styles.tabContent}>
+      {evModeSelected ? (
+        evDriversAvailable > 0 ? (
+          <View style={[styles.evIndicatorBanner, { backgroundColor: Colors.travonyGreen + "15" }]}>
+            <Ionicons name={"flash" as any} size={14} color={Colors.travonyGreen} />
+            <ThemedText style={[styles.evIndicatorText, { color: Colors.travonyGreen }]}>
+              {evDriversAvailable} EV vehicles available nearby
+            </ThemedText>
+          </View>
+        ) : (
+          <View style={[styles.evIndicatorBanner, { backgroundColor: theme.backgroundDefault }]}>
+            <Ionicons name={"flash-outline" as any} size={14} color={theme.textMuted} />
+            <ThemedText style={[styles.evIndicatorText, { color: theme.textMuted }]}>
+              No EV vehicles available nearby
+            </ThemedText>
+          </View>
+        )
+      ) : evDriversAvailable > 0 ? (
+        <Pressable
+          style={[styles.evIndicatorBanner, { backgroundColor: Colors.travonyGreen + "10", borderColor: Colors.travonyGreen + "30", borderWidth: 1 }]}
+          onPress={() => { setEvModeSelected(true); onEvModeChange?.(true); }}
+        >
+          <Ionicons name={"flash-outline" as any} size={14} color={Colors.travonyGreen} />
+          <ThemedText style={[styles.evIndicatorText, { color: Colors.travonyGreen }]}>
+            Switch to EV — {evDriversAvailable} available
+          </ThemedText>
+        </Pressable>
+      ) : null}
       <View style={styles.tripSummary}>
         <View style={styles.tripRow}>
           <Ionicons name="location-outline" size={14} color={theme.primary} />
@@ -857,6 +930,30 @@ export default function BookingBottomSheet({
           </View>
         ) : null}
 
+        <Pressable
+          onPress={handleEvModeToggle}
+          style={[
+            styles.evToggleRow,
+            {
+              backgroundColor: evModeSelected ? Colors.travonyGreen + "15" : theme.backgroundElevated,
+              borderColor: evModeSelected ? Colors.travonyGreen : theme.border,
+            },
+          ]}
+        >
+          <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={18} color={evModeSelected ? Colors.travonyGreen : theme.textMuted} />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontSize: 13, fontWeight: "600", color: evModeSelected ? Colors.travonyGreen : theme.text }}>
+              EV Preferred
+            </ThemedText>
+            <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+              {evModeSelected ? "Requesting electric vehicle — hubs shown on map" : "Request electric vehicle for this ride"}
+            </ThemedText>
+          </View>
+          <View style={[styles.evToggleCheck, { backgroundColor: evModeSelected ? Colors.travonyGreen : theme.border }]}>
+            {evModeSelected ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+          </View>
+        </Pressable>
+
         <View style={[styles.fareDivider, { backgroundColor: theme.border }]} />
 
         <View style={styles.fareBreakdown}>
@@ -935,29 +1032,53 @@ export default function BookingBottomSheet({
         ))}
       </View>
 
+      <View style={[styles.fareLockRow, { borderColor: theme.primary + "30" }]}>
+        <Ionicons name="shield-checkmark-outline" size={14} color={theme.primary} />
+        <ThemedText style={[styles.fareLockText, { color: theme.textSecondary }]}>
+          Fare locked at AED {(Number(calculateFare(selectedVehicle)) + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)} — verified on Travony's network
+        </ThemedText>
+      </View>
+
       <ThemedText style={styles.sectionLabel}>Payment</ThemedText>
       <View style={styles.paymentRow}>
-        {paymentMethods.map((method) => (
-          <Pressable
-            key={method.id}
-            style={[
-              styles.paymentOption,
-              {
-                backgroundColor: selectedPayment.id === method.id ? theme.primary + "10" : theme.card,
-                borderColor: selectedPayment.id === method.id ? theme.primary : theme.border,
-              },
-            ]}
-            onPress={() => {
-              setSelectedPayment(method);
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            }}
-          >
-            <Ionicons name={method.icon as any} size={18} color={selectedPayment.id === method.id ? theme.primary : theme.text} />
-            <ThemedText style={[styles.paymentText, { color: selectedPayment.id === method.id ? theme.primary : theme.text }]}>
-              {method.name}
-            </ThemedText>
-          </Pressable>
-        ))}
+        {paymentMethods.map((method) => {
+          const isWallet = method.id === "wallet";
+          const fareAmount = parseFloat(calculateFare(selectedVehicle));
+          const walletInsufficient = isWallet && walletBalance < fareAmount;
+          return (
+            <Pressable
+              key={method.id}
+              style={[
+                styles.paymentOption,
+                {
+                  backgroundColor: selectedPayment.id === method.id ? theme.primary + "10" : theme.card,
+                  borderColor: walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => {
+                if (isWallet && walletInsufficient) {
+                  navigation.navigate("WalletTab");
+                  return;
+                }
+                setSelectedPayment(method);
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+            >
+              <Ionicons name={method.icon as any} size={18} color={walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.text} />
+              {isWallet ? (
+                <View style={{ flex: 1, alignItems: "center" }}>
+                  <ThemedText style={[styles.paymentText, { color: walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.text }]}>
+                    {walletInsufficient ? `Wallet · AED ${walletBalance.toFixed(2)} (top up needed)` : `Wallet · AED ${walletBalance.toFixed(2)}`}
+                  </ThemedText>
+                </View>
+              ) : (
+                <ThemedText style={[styles.paymentText, { color: selectedPayment.id === method.id ? theme.primary : theme.text }]}>
+                  {method.name}
+                </ThemedText>
+              )}
+            </Pressable>
+          );
+        })}
       </View>
 
       <View style={styles.tabButtons}>
@@ -1024,11 +1145,10 @@ export default function BookingBottomSheet({
             </ThemedText>
           </Pressable>
         ))}
-        <Animated.View
+        <RNAnimated.View
           style={[
             styles.tabIndicator,
-            { backgroundColor: theme.primary },
-            indicatorStyle,
+            { backgroundColor: theme.primary, transform: [{ translateX: indicatorTranslateX }] },
           ]}
         />
       </View>
@@ -1302,6 +1422,22 @@ const styles = StyleSheet.create({
     ...Typography.small,
     fontWeight: "600",
   },
+  evToggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    padding: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginTop: Spacing.sm,
+  },
+  evToggleCheck: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   fareTotal: {
     ...Typography.h3,
     fontWeight: "700",
@@ -1411,5 +1547,32 @@ const styles = StyleSheet.create({
     ...Typography.button,
     color: "#FFFFFF",
     opacity: 0.9,
+  },
+  evIndicatorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.sm,
+    marginBottom: Spacing.sm,
+    gap: Spacing.xs,
+  },
+  evIndicatorText: {
+    ...Typography.caption,
+    fontWeight: "600",
+  },
+  fareLockRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    marginBottom: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+  },
+  fareLockText: {
+    ...Typography.caption,
+    flex: 1,
+    fontStyle: "italic",
   },
 });

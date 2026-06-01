@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo } from "react";
 import {
   View,
   StyleSheet,
@@ -64,6 +64,7 @@ export default function ConfirmRideScreen() {
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0]);
   const [promoCode, setPromoCode] = useState("");
   const [showTransparency, setShowTransparency] = useState(false);
+  const [evPreferred, setEvPreferred] = useState(false);
 
   const distance = useMemo(() => {
     const R = 6371;
@@ -97,6 +98,19 @@ export default function ConfirmRideScreen() {
   const { data: walletData } = useQuery<{ balance: string }>({
     queryKey: [`/api/wallet/balance/${user?.id}`],
     enabled: !!user?.id,
+  });
+
+  // Check if EV drivers are available near pickup
+  const { data: evAvailability } = useQuery<{ evDriversAvailable: number; available: boolean }>({
+    queryKey: ["/api/ai/ev-availability", pickup.lat, pickup.lng],
+    queryFn: async () => {
+      const response = await apiRequest(
+        `/api/ai/ev-availability?lat=${pickup.lat}&lng=${pickup.lng}`,
+        { method: "GET" }
+      );
+      return response;
+    },
+    staleTime: 30000,
   });
 
   const walletBalance = parseFloat(walletData?.balance || "0");
@@ -134,6 +148,7 @@ export default function ConfirmRideScreen() {
           platformFee: platformFee.toFixed(2),
           driverEarnings: driverEarnings.toFixed(2),
           priceBreakdown: JSON.stringify(aiPricing || {}),
+          isEvRide: evPreferred,
         }),
         headers: { "Content-Type": "application/json" },
       });
@@ -223,6 +238,37 @@ export default function ConfirmRideScreen() {
           </View>
         </View>
       </Card>
+
+      {evAvailability?.available ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.evOptionCard,
+            {
+              backgroundColor: evPreferred ? "#16a34a" : theme.card,
+              borderColor: evPreferred ? "#16a34a" : theme.border,
+              opacity: pressed ? 0.9 : 1,
+            },
+          ]}
+          onPress={() => setEvPreferred(!evPreferred)}
+        >
+          <View style={[styles.evOptionIcon, { backgroundColor: evPreferred ? "rgba(255,255,255,0.2)" : "#16a34a20" }]}>
+            <Ionicons name="flash" size={22} color={evPreferred ? "#fff" : "#16a34a"} />
+          </View>
+          <View style={styles.evOptionText}>
+            <ThemedText style={[styles.evOptionTitle, evPreferred ? { color: "#fff" } : {}]}>
+              EV Ride
+            </ThemedText>
+            <ThemedText style={[styles.evOptionSubtitle, evPreferred ? { color: "rgba(255,255,255,0.8)" } : { color: theme.textMuted }]}>
+              {evAvailability.evDriversAvailable} electric {evAvailability.evDriversAvailable === 1 ? "vehicle" : "vehicles"} nearby
+            </ThemedText>
+          </View>
+          {evPreferred ? (
+            <View style={styles.evSelectedBadge}>
+              <Ionicons name="checkmark-circle" size={20} color="#fff" />
+            </View>
+          ) : null}
+        </Pressable>
+      ) : null}
 
       <ThemedText style={styles.sectionTitle}>Select Vehicle</ThemedText>
       <ScrollView
@@ -361,11 +407,20 @@ export default function ConfirmRideScreen() {
         )}
       </Card>
 
+      {evPreferred ? (
+        <View style={[styles.evConfirmBadge, { backgroundColor: "#16a34a15", borderColor: "#16a34a30" }]}>
+          <Ionicons name="flash" size={16} color="#16a34a" />
+          <ThemedText style={[styles.evConfirmText, { color: "#16a34a" }]}>
+            EV Preferred — system will match the nearest electric vehicle
+          </ThemedText>
+        </View>
+      ) : null}
+
       <Pressable
         style={({ pressed }) => [
           styles.bookButton,
           {
-            backgroundColor: theme.primary,
+            backgroundColor: evPreferred ? "#16a34a" : theme.primary,
             opacity: bookRideMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
           },
         ]}
@@ -375,7 +430,9 @@ export default function ConfirmRideScreen() {
         {bookRideMutation.isPending ? (
           <ActivityIndicator color="#FFFFFF" />
         ) : (
-          <ThemedText style={styles.bookButtonText}>Request Movement</ThemedText>
+          <ThemedText style={styles.bookButtonText}>
+            {evPreferred ? "Request EV Preferred" : "Request Movement"}
+          </ThemedText>
         )}
       </Pressable>
     </ScrollView>
@@ -593,5 +650,49 @@ const styles = StyleSheet.create({
   bookButtonText: {
     ...Typography.button,
     color: "#FFFFFF",
+  },
+  evOptionCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  evOptionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: Spacing.md,
+  },
+  evOptionText: {
+    flex: 1,
+  },
+  evOptionTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+  },
+  evOptionSubtitle: {
+    ...Typography.small,
+    marginTop: 2,
+  },
+  evSelectedBadge: {
+    marginLeft: Spacing.sm,
+  },
+  evConfirmBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  evConfirmText: {
+    ...Typography.bodyMedium,
+    fontWeight: "600",
+    marginLeft: Spacing.sm,
+    flex: 1,
   },
 });

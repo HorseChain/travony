@@ -1,11 +1,5 @@
-import React from "react";
-import { StyleSheet, Pressable, ViewStyle } from "react-native";
-import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSpring,
-  WithSpringConfig,
-} from "react-native-reanimated";
+import React, { useRef } from "react";
+import { StyleSheet, Pressable, ViewStyle, Animated } from "react-native";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -19,14 +13,6 @@ interface CardProps {
   onPress?: () => void;
   style?: ViewStyle;
 }
-
-const springConfig: WithSpringConfig = {
-  damping: 15,
-  mass: 0.3,
-  stiffness: 150,
-  overshootClamping: true,
-  energyThreshold: 0.001,
-};
 
 const getBackgroundColorForElevation = (
   elevation: number,
@@ -55,20 +41,16 @@ export function Card({
   style,
 }: CardProps) {
   const { theme } = useTheme();
-  const scale = useSharedValue(1);
+  const scale = useRef(new Animated.Value(1)).current;
 
   const cardBackgroundColor = getBackgroundColorForElevation(elevation, theme);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
   const handlePressIn = () => {
-    scale.value = withSpring(0.98, springConfig);
+    Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 50, bounciness: 4 }).start();
   };
 
   const handlePressOut = () => {
-    scale.value = withSpring(1, springConfig);
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 50, bounciness: 4 }).start();
   };
 
   return (
@@ -80,8 +62,8 @@ export function Card({
         styles.card,
         {
           backgroundColor: cardBackgroundColor,
+          transform: [{ scale }],
         },
-        animatedStyle,
         style,
       ]}
     >

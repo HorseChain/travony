@@ -10,17 +10,19 @@ let RN_PROVIDER_GOOGLE: any = null;
 let RNAnimatedRegion: any = null;
 let mapsLoadError: string | null = null;
 
-try {
-  const Maps = require("react-native-maps");
-  RNMapView = Maps.default;
-  RNMarker = Maps.Marker;
-  RNMarkerAnimated = Maps.Marker?.Animated;
-  RNPolyline = Maps.Polyline;
-  RN_PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-  RNAnimatedRegion = Maps.AnimatedRegion;
-} catch (error: any) {
-  mapsLoadError = error?.message || "Maps not available";
-  console.warn("react-native-maps load error:", error);
+if (Platform.OS !== "android") {
+  try {
+    const Maps = require("react-native-maps");
+    RNMapView = Maps.default;
+    RNMarker = Maps.Marker;
+    RNMarkerAnimated = Maps.Marker?.Animated;
+    RNPolyline = Maps.Polyline;
+    RN_PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+    RNAnimatedRegion = Maps.AnimatedRegion;
+  } catch (error: any) {
+    mapsLoadError = error?.message || "Maps not available";
+    console.warn("react-native-maps load error:", error);
+  }
 }
 
 export const mapsAvailable = RNMapView !== null;
@@ -59,7 +61,7 @@ const MapFallbackView = ({ style, message }: { style?: any; message?: string }) 
   <View style={[styles.fallbackContainer, style]}>
     <View style={styles.fallbackContent}>
       <View style={styles.mapIcon}>
-        <Text style={styles.mapIconText}>📍</Text>
+        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#FFFFFF" }} />
       </View>
       <Text style={styles.fallbackTitle}>Map View</Text>
       <Text style={styles.fallbackMessage}>
@@ -72,14 +74,15 @@ const MapFallbackView = ({ style, message }: { style?: any; message?: string }) 
 const SafeMapView = forwardRef((props: any, ref: any) => {
   const [isReady, setIsReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [renderFailed, setRenderFailed] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
       if (!RNMapView) {
-        setLoadError(mapsLoadError || "Google Maps not available");
+        setLoadError(mapsLoadError || "Maps not available on this device");
       }
       setIsReady(true);
-    }, 100);
+    }, Platform.OS === "android" ? 2000 : 500);
     return () => clearTimeout(timer);
   }, []);
 
@@ -92,12 +95,14 @@ const SafeMapView = forwardRef((props: any, ref: any) => {
     );
   }
 
-  if (!RNMapView || loadError) {
+  if (!RNMapView || loadError || renderFailed) {
     return <MapFallbackView style={props.style} message={loadError || "Map not available"} />;
   }
 
+  const { children, provider, ...restProps } = props;
+
   const safeProps = {
-    ...props,
+    ...restProps,
     onMapReady: () => {
       try {
         props.onMapReady?.();
@@ -112,21 +117,40 @@ const SafeMapView = forwardRef((props: any, ref: any) => {
         console.warn("onRegionChangeComplete error:", e);
       }
     },
+    onPress: undefined,
+    onLongPress: undefined,
   };
 
-  return (
-    <MapErrorBoundary fallback={<MapFallbackView style={props.style} message="Map temporarily unavailable" />}>
-      <RNMapView ref={ref} {...safeProps} />
-    </MapErrorBoundary>
-  );
+  try {
+    return (
+      <MapErrorBoundary fallback={<MapFallbackView style={props.style} message="Map temporarily unavailable" />}>
+        <RNMapView ref={ref} {...safeProps}>
+          {children}
+        </RNMapView>
+      </MapErrorBoundary>
+    );
+  } catch (e) {
+    console.warn("MapView render error:", e);
+    return <MapFallbackView style={props.style} message="Map temporarily unavailable" />;
+  }
 });
 
 const SafeMarker = (props: any) => {
   if (!RNMarker) return null;
   
+  const coord = props.coordinate;
+  if (!coord || typeof coord.latitude !== "number" || typeof coord.longitude !== "number" ||
+      isNaN(coord.latitude) || isNaN(coord.longitude) ||
+      coord.latitude < -90 || coord.latitude > 90 ||
+      coord.longitude < -180 || coord.longitude > 180) {
+    return null;
+  }
+
+  const { children, ...safeProps } = props;
+  
   return (
     <MapErrorBoundary fallback={null}>
-      <RNMarker {...props} />
+      <RNMarker {...safeProps} />
     </MapErrorBoundary>
   );
 };
@@ -187,9 +211,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     marginBottom: Spacing.lg,
-  },
-  mapIconText: {
-    fontSize: 36,
   },
   fallbackTitle: {
     fontSize: 20,

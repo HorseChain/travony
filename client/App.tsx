@@ -1,8 +1,7 @@
 import React, { useEffect, useCallback } from "react";
-import { StyleSheet } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { NavigationContainer } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -15,7 +14,25 @@ import { queryClient } from "@/lib/query-client";
 import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
+let KeyboardProvider: React.ComponentType<{ children: React.ReactNode }> | null = null;
+try {
+  KeyboardProvider = require("react-native-keyboard-controller").KeyboardProvider;
+} catch (e) {
+  KeyboardProvider = null;
+}
+
 SplashScreen.preventAutoHideAsync();
+
+function SafeKeyboardProvider({ children }: { children: React.ReactNode }) {
+  if (KeyboardProvider) {
+    try {
+      return <KeyboardProvider>{children}</KeyboardProvider>;
+    } catch (e) {
+      return <>{children}</>;
+    }
+  }
+  return <>{children}</>;
+}
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
@@ -44,12 +61,12 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
           <GestureHandlerRootView style={styles.root} onLayout={onLayoutRootView}>
-            <KeyboardProvider>
+            <SafeKeyboardProvider>
               <NavigationContainer>
                 <RootStackNavigator />
               </NavigationContainer>
               <StatusBar style="auto" />
-            </KeyboardProvider>
+            </SafeKeyboardProvider>
           </GestureHandlerRootView>
         </SafeAreaProvider>
       </QueryClientProvider>

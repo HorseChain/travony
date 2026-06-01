@@ -1,13 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { View, StyleSheet, Platform, Pressable } from "react-native";
-import Animated, {
-  useSharedValue,
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  withSequence,
-  Easing,
-} from "react-native-reanimated";
+import React, { useEffect, useRef, useMemo, useState } from "react";
+import { View, StyleSheet, Platform, Pressable, Animated } from "react-native";
 import { Colors, Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/useTheme";
 import { ThemedText } from "@/components/ThemedText";
@@ -51,23 +43,21 @@ function HotspotMarker({
   onPress?: (hotspot: HotspotData) => void;
 }) {
   const { theme } = useTheme();
-  const pulseOpacity = useSharedValue(0.3);
+  const pulseOpacity = useRef(new Animated.Value(0.3)).current;
   const [showInfo, setShowInfo] = useState(false);
 
   useEffect(() => {
-    pulseOpacity.value = withRepeat(
-      withSequence(
-        withTiming(0.7, { duration: 1500, easing: Easing.inOut(Easing.ease) }),
-        withTiming(0.3, { duration: 1500, easing: Easing.inOut(Easing.ease) })
-      ),
-      -1,
-      false
-    );
+    try {
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulseOpacity, { toValue: 0.7, duration: 1500, useNativeDriver: true }),
+          Animated.timing(pulseOpacity, { toValue: 0.3, duration: 1500, useNativeDriver: true }),
+        ])
+      );
+      animation.start();
+      return () => animation.stop();
+    } catch (e) {}
   }, []);
-
-  const animatedStyle = useAnimatedStyle(() => ({
-    opacity: pulseOpacity.value,
-  }));
 
   const color = getIntensityColor(hotspot.intensity);
   const size = getIntensitySize(hotspot.intensity);
@@ -82,8 +72,8 @@ function HotspotMarker({
       <Animated.View
         style={[
           styles.hotspotCircle,
-          animatedStyle,
           {
+            opacity: pulseOpacity,
             width: size,
             height: size,
             borderRadius: size / 2,

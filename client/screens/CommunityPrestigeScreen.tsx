@@ -1,7 +1,6 @@
 import React from "react";
 import { View, StyleSheet, ScrollView, FlatList, Dimensions } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -145,8 +144,7 @@ export default function CommunityPrestigeScreen() {
       )}
       ListHeaderComponent={
         <>
-          <Animated.View
-            entering={FadeInDown.delay(0).duration(400)}
+          <View
             style={[styles.prestigeCard, { backgroundColor: theme.backgroundDefault }]}
           >
             <View style={styles.prestigeHeader}>
@@ -186,9 +184,9 @@ export default function CommunityPrestigeScreen() {
                 {score}/{nextTierScore} pts to next tier
               </ThemedText>
             </View>
-          </Animated.View>
+          </View>
 
-          <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+          <View>
             <ThemedText style={styles.sectionTitle}>Prestige Tiers</ThemedText>
             <ScrollView
               horizontal
@@ -199,11 +197,11 @@ export default function CommunityPrestigeScreen() {
                 <TierCard key={t.key} tier={t} isActive={t.key === tier} theme={theme} />
               ))}
             </ScrollView>
-          </Animated.View>
+          </View>
 
-          <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+          <View>
             <ThemedText style={styles.sectionTitle}>Leaderboard</ThemedText>
-          </Animated.View>
+          </View>
         </>
       }
       ListEmptyComponent={

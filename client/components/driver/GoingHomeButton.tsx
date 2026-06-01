@@ -1,8 +1,7 @@
-import { useState, useEffect } from "react";
-import { View, StyleSheet, Pressable, Platform, Modal, TextInput, FlatList, Alert, KeyboardAvoidingView } from "react-native";
+import { useState, useEffect, useRef } from "react";
+import { View, StyleSheet, Pressable, Platform, Modal, TextInput, FlatList, Alert, KeyboardAvoidingView, Animated } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withRepeat, withSequence } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 
@@ -33,6 +32,7 @@ interface SavedAddress {
 interface Props {
   isOnline: boolean;
   currentLocation: { lat: number; lng: number } | null;
+  cardMode?: boolean;
 }
 
 const POPULAR_HOME_LOCATIONS = [
@@ -53,10 +53,10 @@ const POPULAR_HOME_LOCATIONS = [
   { id: "15", address: "Khalifa City, Abu Dhabi", lat: 24.4217, lng: 54.5692 },
 ];
 
-export function GoingHomeButton({ isOnline, currentLocation }: Props) {
+export function GoingHomeButton({ isOnline, currentLocation, cardMode = false }: Props) {
   const { theme } = useTheme();
   const queryClient = useQueryClient();
-  const pulseAnim = useSharedValue(1);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
   const [showModal, setShowModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [isGettingLocation, setIsGettingLocation] = useState(false);
@@ -82,13 +82,16 @@ export function GoingHomeButton({ isOnline, currentLocation }: Props) {
 
   useEffect(() => {
     if (sessionData?.active) {
-      pulseAnim.value = withRepeat(
-        withSequence(withSpring(1.08), withSpring(1)),
-        -1,
-        true
+      const animation = Animated.loop(
+        Animated.sequence([
+          Animated.spring(pulseAnim, { toValue: 1.08, useNativeDriver: true }),
+          Animated.spring(pulseAnim, { toValue: 1, useNativeDriver: true }),
+        ])
       );
+      animation.start();
+      return () => animation.stop();
     } else {
-      pulseAnim.value = 1;
+      pulseAnim.setValue(1);
     }
   }, [sessionData?.active]);
 
@@ -99,9 +102,6 @@ export function GoingHomeButton({ isOnline, currentLocation }: Props) {
     }
   }, [pendingActivation, homeAddress?.homeAddress]);
 
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: pulseAnim.value }],
-  }));
 
   const activateWithHome = (home: SavedAddress) => {
     apiRequest("/api/pmgth/activate", {
@@ -263,9 +263,135 @@ export function GoingHomeButton({ isOnline, currentLocation }: Props) {
   const hasHome = !!homeAddress?.homeAddress;
   const isPending = activateMutation.isPending || deactivateMutation.isPending || saveHomeMutation.isPending;
 
+  if (cardMode) {
+    return (
+      <>
+        <View style={[styles.pmgthCard, { backgroundColor: theme.backgroundRoot }]}>
+          <View style={styles.pmgthCardContent}>
+            <View style={[styles.pmgthCardIcon, { backgroundColor: isActive ? Colors.travonyGreen : Colors.travonyGreen + "15" }]}>
+              <Ionicons name="home" size={22} color={isActive ? "#fff" : Colors.travonyGreen} />
+            </View>
+            <View style={{ flex: 1 }}>
+              {isActive && stats ? (
+                <>
+                  <ThemedText style={[styles.pmgthCardTitle, { color: Colors.travonyGreen }]}>
+                    Going Home Mode Active
+                  </ThemedText>
+                  <ThemedText style={[styles.pmgthCardSub, { color: theme.textSecondary }]}>
+                    {sessionData?.session?.destinationAddress ?? "Home"} · +AED {parseFloat(stats.totalPremiumEarnings).toFixed(2)} earned · {stats.minutesRemaining}m left
+                  </ThemedText>
+                </>
+              ) : (
+                <>
+                  <ThemedText style={styles.pmgthCardTitle}>Heading home soon?</ThemedText>
+                  <ThemedText style={[styles.pmgthCardSub, { color: theme.textSecondary }]}>
+                    Activate Going Home mode to earn on your commute
+                  </ThemedText>
+                </>
+              )}
+            </View>
+            <Pressable
+              style={[
+                styles.pmgthCardButton,
+                { backgroundColor: isActive ? theme.error + "18" : Colors.travonyGreen },
+              ]}
+              onPress={handlePress}
+              disabled={isPending}
+            >
+              <ThemedText style={[styles.pmgthCardButtonText, { color: isActive ? theme.error : "#fff" }]}>
+                {isPending ? "..." : isActive ? "Deactivate" : "Activate"}
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+
+        <Modal
+          visible={showModal}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowModal(false)}
+        >
+          <KeyboardAvoidingView
+            style={[styles.modalContainer, { backgroundColor: theme.backgroundRoot }]}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+          >
+            <View style={styles.modalHeader}>
+              <ThemedText style={styles.modalTitle}>Set Your Home</ThemedText>
+              <Pressable onPress={() => setShowModal(false)} style={styles.closeButton}>
+                <Ionicons name="close" size={24} color={theme.text} />
+              </Pressable>
+            </View>
+            <ThemedText style={[styles.modalSubtitle, { color: theme.textSecondary }]}>
+              Select your home location to get rides going your way
+            </ThemedText>
+            <Pressable
+              style={[styles.currentLocationBtn, { backgroundColor: Colors.travonyGreen + "15" }]}
+              onPress={handleUseCurrentLocation}
+              disabled={isGettingLocation || saveHomeMutation.isPending}
+            >
+              <Ionicons name="locate" size={20} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.currentLocationText, { color: Colors.travonyGreen }]}>
+                {isGettingLocation ? "Getting location..." : "Use my current location as home"}
+              </ThemedText>
+            </Pressable>
+            <View style={[styles.divider, { backgroundColor: theme.border }]}>
+              <ThemedText style={[styles.dividerText, { color: theme.textMuted, backgroundColor: theme.backgroundRoot }]}>
+                or select from list
+              </ThemedText>
+            </View>
+            <View style={[styles.searchContainer, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
+              <Ionicons name="search" size={18} color={theme.textMuted} />
+              <TextInput
+                style={[styles.searchInput, { color: theme.text }]}
+                placeholder="Search area..."
+                placeholderTextColor={theme.textMuted}
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+              {searchQuery.length > 0 ? (
+                <Pressable onPress={() => setSearchQuery("")}>
+                  <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+                </Pressable>
+              ) : null}
+            </View>
+            <FlatList
+              data={filteredLocations}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.locationItem,
+                    { backgroundColor: pressed ? theme.backgroundPressed : "transparent", borderBottomColor: theme.border },
+                  ]}
+                  onPress={() => handleSelectLocation(item)}
+                  disabled={saveHomeMutation.isPending}
+                >
+                  <View style={[styles.locationIcon, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                    <Ionicons name="home-outline" size={18} color={Colors.travonyGreen} />
+                  </View>
+                  <ThemedText style={styles.locationText}>{item.address}</ThemedText>
+                  <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+                </Pressable>
+              )}
+              style={styles.locationList}
+              contentContainerStyle={styles.locationListContent}
+              keyboardShouldPersistTaps="handled"
+            />
+            {saveHomeMutation.isPending ? (
+              <View style={[styles.savingOverlay, { backgroundColor: theme.backgroundRoot + "E0" }]}>
+                <Ionicons name="home" size={32} color={Colors.travonyGreen} />
+                <ThemedText style={styles.savingText}>Setting home & activating...</ThemedText>
+              </View>
+            ) : null}
+          </KeyboardAvoidingView>
+        </Modal>
+      </>
+    );
+  }
+
   return (
     <>
-      <Animated.View style={animatedStyle}>
+      <Animated.View style={{ transform: [{ scale: pulseAnim }] }}>
         <Pressable
           style={[
             styles.button,
@@ -538,5 +664,47 @@ const styles = StyleSheet.create({
   savingText: {
     ...Typography.body,
     fontWeight: "600",
+  },
+  pmgthCard: {
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.lg,
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.1,
+        shadowRadius: 8,
+      },
+      android: { elevation: 4 },
+    }),
+  },
+  pmgthCardContent: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
+  pmgthCardIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pmgthCardTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+    marginBottom: 2,
+  },
+  pmgthCardSub: {
+    ...Typography.caption,
+  },
+  pmgthCardButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+  },
+  pmgthCardButtonText: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
   },
 });

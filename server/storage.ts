@@ -509,6 +509,7 @@ export class DatabaseStorage implements IStorage {
       vehicleMake: vehicles.make,
       vehicleModel: vehicles.model,
       plateNumber: vehicles.plateNumber,
+      isElectric: vehicles.isElectric,
     })
     .from(drivers)
     .innerJoin(vehicles, eq(vehicles.driverId, drivers.id))
@@ -529,6 +530,11 @@ export class DatabaseStorage implements IStorage {
       ...driver,
       name: "Driver",
     }));
+  }
+
+  async getAvailableEvDriversCount(lat: number, lng: number, radius: number): Promise<number> {
+    const all = await this.getAvailableDriversWithVehicles(lat, lng, radius);
+    return all.filter(d => d.isElectric).length;
   }
 
   async createSession(token: string, userId: string, role: string, expiresAt: Date): Promise<Session> {

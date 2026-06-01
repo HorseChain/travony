@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { View, StyleSheet, ScrollView, Dimensions } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import Animated, { FadeInDown } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -33,8 +32,7 @@ const screenWidth = Dimensions.get("window").width;
 
 function StatCard({ icon, label, value, delay, theme }: { icon: string; label: string; value: string | number; delay: number; theme: any }) {
   return (
-    <Animated.View
-      entering={FadeInDown.delay(delay).duration(400)}
+    <View
       style={[styles.statCard, { backgroundColor: theme.backgroundDefault }]}
     >
       <View style={[styles.statIconContainer, { backgroundColor: theme.primary + "15" }]}>
@@ -42,7 +40,7 @@ function StatCard({ icon, label, value, delay, theme }: { icon: string; label: s
       </View>
       <ThemedText style={styles.statValue}>{value}</ThemedText>
       <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>{label}</ThemedText>
-    </Animated.View>
+    </View>
   );
 }
 
@@ -111,8 +109,7 @@ export default function NetworkAnalyticsScreen() {
         <StatCard icon="navigate-outline" label="Routes Near Hubs" value={routesNearHubs} delay={200} theme={theme} />
       </View>
 
-      <Animated.View
-        entering={FadeInDown.delay(300).duration(400)}
+      <View
         style={[styles.prestigeCard, { backgroundColor: theme.backgroundDefault }]}
       >
         <View style={styles.prestigeHeader}>
@@ -137,9 +134,9 @@ export default function NetworkAnalyticsScreen() {
             {Math.round(progress * 100)}% to next tier ({nextTierScore} pts)
           </ThemedText>
         </View>
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={FadeInDown.delay(400).duration(400)}>
+      <View>
         <ThemedText style={styles.sectionTitle}>Recent Hub Activity</ThemedText>
         {recentActivity.map((activity: any, index: number) => (
           <View
@@ -156,9 +153,9 @@ export default function NetworkAnalyticsScreen() {
             <Ionicons name="chevron-forward-outline" size={16} color={theme.textMuted} />
           </View>
         ))}
-      </Animated.View>
+      </View>
 
-      <Animated.View entering={FadeInDown.delay(500).duration(400)}>
+      <View>
         <ThemedText style={styles.sectionTitle}>Weekly Trends</ThemedText>
         <View style={[styles.chartContainer, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.barsRow}>
@@ -189,7 +186,7 @@ export default function NetworkAnalyticsScreen() {
             })}
           </View>
         </View>
-      </Animated.View>
+      </View>
     </ScrollView>
   );
 }
