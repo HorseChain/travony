@@ -6,6 +6,7 @@ import * as path from "path";
 import swaggerUi from "swagger-ui-express";
 import { apiSpec } from "./apiSpec";
 import { apiKeyMiddleware } from "./apiKeyMiddleware";
+import { setupTaxiModeRoutes } from "./taxiModeRoutes";
 
 const app = express();
 const log = console.log;
@@ -711,6 +712,7 @@ async function setupApiKeyRoutes(app: express.Application) {
 
   setupDeveloperPortal(app);
   await setupApiKeyRoutes(app);
+  setupTaxiModeRoutes(app);
 
   configureExpoAndLanding(app);
 

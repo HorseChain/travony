@@ -660,9 +660,133 @@
 </section>
 
 <!-- EV ONBOARDING FLOW -->
+<section id="taxi-mode" style="border-top: 1px solid var(--border)">
+  <div class="section-label">Taxi Mode API</div>
+  <div class="section-title">Three calls. That's the whole API.</div>
+  <div class="section-desc">
+    The simplest way to put an EV to work. Onboard a car, flip the switch, check on it. One API key, three endpoints — clean enough to wire straight into a car's dashboard button.
+  </div>
+
+  <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: start;">
+    <div class="flow">
+
+      <div class="flow-step">
+        <div class="flow-num">1</div>
+        <div class="flow-body">
+          <h3>Onboard a car</h3>
+          <p>One call registers the car and its owner. It comes back with a <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">carId</code>. The car stays private — it won't get rides yet.</p>
+          <div class="flow-api">
+            <span class="method method-post">POST</span>
+            /v1/cars
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-num">2</div>
+        <div class="flow-body">
+          <h3>Flip the switch</h3>
+          <p>Send <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">{ "active": true }</code> and the car becomes a taxi. Send <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">false</code> and it's a private car again. This is the in-car "Earn" button.</p>
+          <div class="flow-api">
+            <span class="method method-post">POST</span>
+            /v1/cars/{carId}/taxi-mode
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-step">
+        <div class="flow-num">3</div>
+        <div class="flow-body">
+          <h3>Check on it</h3>
+          <p>Get one car or all of them: taxi mode on/off, battery, today's trips and earnings, and the ride it's on right now.</p>
+          <div class="flow-api">
+            <span class="method method-get">GET</span>
+            /v1/cars/{carId}
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="position:sticky;top:80px">
+      <div class="auth-note" style="margin-bottom:20px">
+        <div class="auth-note-icon">🔑</div>
+        <div>
+          <h4>One header on every call</h4>
+          <p>Authenticate with your partner key: <code>X-API-Key: tvny_live_xxxx</code>. Each car belongs to the key that created it, so you only ever see your own.</p>
+        </div>
+      </div>
+
+      <div class="code-section">
+        <div class="code-tabs">
+          <button class="code-tab active" onclick="switchTab(this, 'tm1')">1. Onboard</button>
+          <button class="code-tab" onclick="switchTab(this, 'tm2')">2. Taxi Mode</button>
+          <button class="code-tab" onclick="switchTab(this, 'tm3')">3. Status</button>
+        </div>
+        <div class="code-block active" id="tm1">
+<pre><span class="cmt">// Step 1: onboard a car (and its owner)</span>
+<span class="kw">const</span> <span class="var">res</span> = <span class="kw">await</span> fetch(<span class="str">'/api/v1/cars'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: {
+    <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>,
+    <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span>,
+  },
+  body: <span class="fn">JSON.stringify</span>({
+    ownerName: <span class="str">'Ahmed Al Rashid'</span>,
+    ownerEmail: <span class="str">'ahmed@example.com'</span>,
+    make: <span class="str">'BYD'</span>,
+    model: <span class="str">'Atto 3'</span>,
+    plateNumber: <span class="str">'DXB-A-12345'</span>,
+    isElectric: <span class="kw">true</span>,
+  })
+});
+
+<span class="kw">const</span> { carId } = <span class="kw">await</span> res.<span class="fn">json</span>();
+<span class="cmt">// car is onboarded — still private</span></pre>
+        </div>
+        <div class="code-block" id="tm2">
+<pre><span class="cmt">// Step 2: the one switch — turn taxi mode ON</span>
+<span class="kw">await</span> fetch(<span class="str">`/api/v1/cars/${carId}/taxi-mode`</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: {
+    <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>,
+    <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span>,
+  },
+  body: <span class="fn">JSON.stringify</span>({
+    active: <span class="kw">true</span>,        <span class="cmt">// false = back to private</span>
+    lat: <span class="num">25.2048</span>,
+    lng: <span class="num">55.2708</span>,
+  })
+});
+
+<span class="cmt">// the car can now receive rides</span></pre>
+        </div>
+        <div class="code-block" id="tm3">
+<pre><span class="cmt">// Step 3: check status (one car, or all)</span>
+<span class="kw">const</span> <span class="var">car</span> = <span class="kw">await</span> fetch(<span class="str">`/api/v1/cars/${carId}`</span>, {
+  headers: { <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span> }
+}).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>());
+
+<span class="cmt">// {</span>
+<span class="cmt">//   carId, taxiMode: true,</span>
+<span class="cmt">//   battery: { percent: 78, source: 'manual' },</span>
+<span class="cmt">//   stats: { totalTrips, totalEarnings },</span>
+<span class="cmt">//   currentRide: { pickup, dropoff, fare }</span>
+<span class="cmt">// }</span>
+
+<span class="cmt">// all your cars:</span>
+<span class="kw">await</span> fetch(<span class="str">'/api/v1/cars'</span>, {
+  headers: { <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span> }
+});</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="onboarding" style="border-top: 1px solid var(--border)">
-  <div class="section-label">EV Fleet Onboarding</div>
-  <div class="section-title">Turn any EV into a networked taxi in 5 steps</div>
+  <div class="section-label">EV Fleet Onboarding (Advanced)</div>
+  <div class="section-title">Full control: the 5-step EV pipeline</div>
   <div class="section-desc">
     Designed for car brands, leasing companies, and fleet operators. Every EV is automatically tagged, verified, and tracked across the charging hub network.
   </div>

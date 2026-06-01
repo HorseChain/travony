@@ -40,11 +40,13 @@ Travony is an intelligent mobility network that transforms private vehicles — 
     },
   ],
   tags: [
+    { name: "Taxi Mode (Partners)", description: "The simplest API: onboard a car, flip taxi mode on/off, check status. Built for EV brands and fleets. Uses your X-API-Key." },
     { name: "Authentication", description: "OTP phone login and session management" },
     { name: "Rides", description: "Request, track, and complete rides" },
     { name: "Drivers", description: "Driver status, location, earnings, and documents" },
     { name: "Fleet", description: "Fleet owner dashboard — multi-vehicle management" },
     { name: "EV Hubs (OpenClaw)", description: "EV charging hub network — check-in, staging, demand signals" },
+    { name: "EV Driver", description: "Individual EV driver experience — car connection (Smartcar), live battery, public chargers, range checks" },
     { name: "Vehicles", description: "Register and verify vehicles (including EVs)" },
     { name: "Wallet & Payments", description: "Wallet top-up, driver payouts, payment records" },
     { name: "Blockchain", description: "Immutable ride verification on Polygon Amoy Testnet" },
@@ -163,6 +165,66 @@ Travony is an intelligent mobility network that transforms private vehicles — 
           demandScore: { type: "number", example: 87.5 },
         },
       },
+      Car: {
+        type: "object",
+        description: "A car onboarded through the Taxi Mode API. `carId` is what you pass to every other call.",
+        properties: {
+          carId: { type: "string", format: "uuid" },
+          taxiMode: { type: "boolean", example: false, description: "true = available for rides, false = private" },
+          status: { type: "string", enum: ["pending", "approved", "rejected", "suspended"], example: "approved" },
+          owner: {
+            type: "object",
+            nullable: true,
+            properties: {
+              id: { type: "string", format: "uuid" },
+              name: { type: "string", example: "Ahmed Al Rashid" },
+              email: { type: "string", format: "email" },
+            },
+          },
+          vehicle: {
+            type: "object",
+            properties: {
+              make: { type: "string", example: "BYD" },
+              model: { type: "string", example: "Atto 3" },
+              year: { type: "integer", nullable: true, example: 2024 },
+              color: { type: "string", nullable: true, example: "White" },
+              plateNumber: { type: "string", example: "DXB-A-12345" },
+              isElectric: { type: "boolean", example: true },
+              verificationStatus: { type: "string", example: "approved" },
+            },
+          },
+          battery: {
+            type: "object",
+            nullable: true,
+            description: "Only present for electric cars.",
+            properties: {
+              percent: { type: "integer", nullable: true, example: 78 },
+              source: { type: "string", example: "manual", enum: ["manual", "unknown"] },
+              updatedAt: { type: "string", format: "date-time", nullable: true },
+            },
+          },
+          stats: {
+            type: "object",
+            properties: {
+              rating: { type: "string", example: "5.00" },
+              totalTrips: { type: "integer", example: 0 },
+              totalEarnings: { type: "string", example: "0.00" },
+            },
+          },
+          currentRide: {
+            type: "object",
+            nullable: true,
+            description: "The ride this car is on right now, or null.",
+            properties: {
+              id: { type: "string", format: "uuid" },
+              status: { type: "string", example: "started" },
+              pickup: { type: "string", example: "Dubai Mall, Dubai" },
+              dropoff: { type: "string", example: "Dubai Airport T3, Dubai" },
+              fare: { type: "string", nullable: true, example: "32.50" },
+            },
+          },
+        },
+      },
       ApiKey: {
         type: "object",
         properties: {
@@ -183,6 +245,128 @@ Travony is an intelligent mobility network that transforms private vehicles — 
   },
   security: [{ BearerAuth: [] }],
   paths: {
+    "/v1/cars": {
+      post: {
+        tags: ["Taxi Mode (Partners)"],
+        summary: "Onboard a car (Step 1)",
+        description:
+          "Register a car and its owner in a single call. The car starts in PRIVATE mode — it will not receive rides until you turn taxi mode on. Returns a `carId` you use for every other call. Defaults to electric (isElectric: true).",
+        security: [{ ApiKeyAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["ownerName", "ownerEmail", "make", "model", "plateNumber"],
+                properties: {
+                  ownerName: { type: "string", example: "Ahmed Al Rashid" },
+                  ownerEmail: { type: "string", format: "email", example: "ahmed@example.com" },
+                  ownerPhone: { type: "string", example: "+971501234567" },
+                  make: { type: "string", example: "BYD" },
+                  model: { type: "string", example: "Atto 3" },
+                  plateNumber: { type: "string", example: "DXB-A-12345" },
+                  color: { type: "string", example: "White" },
+                  year: { type: "integer", example: 2024 },
+                  type: { type: "string", enum: ["economy", "comfort", "premium", "xl", "suv", "minivan"], example: "comfort" },
+                  isElectric: { type: "boolean", example: true, default: true },
+                  batteryCapacityKwh: { type: "number", example: 60.5 },
+                  ratedRangeKm: { type: "integer", example: 420 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Car onboarded (still private)", content: { "application/json": { schema: { $ref: "#/components/schemas/Car" } } } },
+          "400": { description: "Missing required fields", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "401": { description: "API key required", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "409": { description: "An owner with this email already exists" },
+        },
+      },
+      get: {
+        tags: ["Taxi Mode (Partners)"],
+        summary: "List all your cars (Step 3)",
+        description: "Returns every car onboarded under your API key, with how many are currently in taxi mode.",
+        security: [{ ApiKeyAuth: [] }],
+        responses: {
+          "200": {
+            description: "Your cars",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    count: { type: "integer", example: 3 },
+                    online: { type: "integer", example: 1 },
+                    cars: { type: "array", items: { $ref: "#/components/schemas/Car" } },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    "/v1/cars/{carId}/taxi-mode": {
+      post: {
+        tags: ["Taxi Mode (Partners)"],
+        summary: "Turn taxi mode on or off (Step 2)",
+        description:
+          "The one switch. Send `{ \"active\": true }` to make the car available for rides, or `{ \"active\": false }` to make it private again. Optionally include the car's current `lat`/`lng`. This is the exact same action the driver app's 'Go Online' switch performs.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [{ name: "carId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["active"],
+                properties: {
+                  active: { type: "boolean", example: true },
+                  lat: { type: "number", example: 25.2048 },
+                  lng: { type: "number", example: 55.2708 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Taxi mode switched",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    carId: { type: "string", format: "uuid" },
+                    taxiMode: { type: "boolean", example: true },
+                    message: { type: "string", example: "Taxi mode ON. This car can now receive rides." },
+                    since: { type: "string", format: "date-time", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "Missing 'active' flag", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
+          "404": { description: "Car not found under your API key" },
+        },
+      },
+    },
+    "/v1/cars/{carId}": {
+      get: {
+        tags: ["Taxi Mode (Partners)"],
+        summary: "Check one car's status (Step 3)",
+        description: "Returns whether the car is in taxi mode, its battery (if electric), lifetime stats, and the ride it is on right now (if any).",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [{ name: "carId", in: "path", required: true, schema: { type: "string", format: "uuid" } }],
+        responses: {
+          "200": { description: "Car status", content: { "application/json": { schema: { $ref: "#/components/schemas/Car" } } } },
+          "404": { description: "Car not found under your API key" },
+        },
+      },
+    },
     "/auth/send-otp": {
       post: {
         tags: ["Authentication"],
@@ -736,6 +920,240 @@ Travony is an intelligent mobility network that transforms private vehicles — 
         description: "Fleet-level view: which EVs are charging, which are ready to dispatch, which are departing — across all hubs.",
         security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
         responses: { "200": { description: "Fleet-wide EV staging status" } },
+      },
+    },
+    "/ev/connection": {
+      get: {
+        tags: ["EV Driver"],
+        summary: "Get the driver's car connection + best-available battery snapshot",
+        description:
+          "Returns the current EV car connection state plus the best battery snapshot available, resolved across sources: live (Smartcar) → simulated → manual entry → none. The `source` and `updatedAt` fields tell you how fresh the data is. `liveDataAvailable` reports whether Smartcar credentials are configured on the server.",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          "200": {
+            description: "Connection + battery snapshot",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    connected: { type: "boolean" },
+                    liveDataAvailable: { type: "boolean", description: "True when Smartcar credentials are configured" },
+                    source: { type: "string", enum: ["live", "simulated", "stale", "manual", "none"] },
+                    status: { type: "string", enum: ["connected", "expired", "error", "disconnected"] },
+                    batteryPercent: { type: "integer", nullable: true, example: 64 },
+                    rangeKm: { type: "number", nullable: true, example: 210 },
+                    isCharging: { type: "boolean" },
+                    chargingState: { type: "string", nullable: true, example: "CHARGING" },
+                    targetChargePercent: { type: "integer", example: 80 },
+                    timeToReadyMinutes: { type: "integer", nullable: true, example: 35 },
+                    updatedAt: { type: "string", format: "date-time", nullable: true },
+                    provider: { type: "string", nullable: true, example: "smartcar" },
+                    isSimulated: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Driver profile not found" },
+        },
+      },
+    },
+    "/ev/connect": {
+      post: {
+        tags: ["EV Driver"],
+        summary: "Start an EV car connection",
+        description:
+          "Starts linking the driver's car. When Smartcar credentials are configured the response is `{ mode: 'live', authUrl }` — open `authUrl` so the driver can authorize, then the car is linked via the callback. When no credentials are configured a simulated connection is created immediately and the battery snapshot is returned.",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  vehicleId: { type: "string", description: "Optional — defaults to the driver's primary active vehicle" },
+                  targetChargePercent: { type: "integer", minimum: 50, maximum: 100, example: 80 },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Live auth URL ({ mode:'live', authUrl }) or a simulated connection snapshot" },
+          "401": { description: "Unauthorized" },
+          "403": { description: "Drivers only" },
+        },
+      },
+    },
+    "/ev/connect/callback": {
+      get: {
+        tags: ["EV Driver"],
+        summary: "Smartcar OAuth redirect target (live mode)",
+        description:
+          "The redirect URI Smartcar calls after the driver authorizes. Exchanges the code for tokens, persists the connection, and returns a small confirmation page. Not called directly by clients.",
+        parameters: [
+          { name: "code", in: "query", schema: { type: "string" } },
+          { name: "state", in: "query", schema: { type: "string" } },
+          { name: "error", in: "query", schema: { type: "string" } },
+        ],
+        responses: { "200": { description: "HTML confirmation page" } },
+      },
+    },
+    "/ev/disconnect": {
+      post: {
+        tags: ["EV Driver"],
+        summary: "Disconnect the driver's car",
+        description: "Clears stored tokens and marks the connection disconnected. Manual battery entry remains available as a fallback.",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          "200": { description: "Disconnected" },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Driver profile not found" },
+        },
+      },
+    },
+    "/ev/refresh": {
+      post: {
+        tags: ["EV Driver"],
+        summary: "Force a fresh battery snapshot",
+        description:
+          "Pulls a fresh snapshot (refreshing the access token first if needed), persists it, and auto-updates hub staging (charging/ready/departing) unless the driver set staging manually. Degrades to last-known data on failure.",
+        security: [{ BearerAuth: [] }],
+        responses: {
+          "200": { description: "Fresh battery snapshot" },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Driver profile not found" },
+        },
+      },
+    },
+    "/ev/manual-battery": {
+      post: {
+        tags: ["EV Driver"],
+        summary: "Set battery level manually (fallback)",
+        description: "Manual fallback when no live connection exists. Stores the battery percent on the driver's primary vehicle and derives range from its rated range.",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["batteryPercent"],
+                properties: { batteryPercent: { type: "integer", minimum: 0, maximum: 100, example: 70 } },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": { description: "Battery saved + refreshed snapshot" },
+          "400": { description: "batteryPercent must be 0-100" },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Driver profile or vehicle not found" },
+        },
+      },
+    },
+    "/ev/chargers/nearby": {
+      get: {
+        tags: ["EV Driver"],
+        summary: "Find nearby public chargers (Open Charge Map)",
+        description:
+          "Proxies Open Charge Map for public charging stations near a location. Results are cached for ~10 minutes. `source` is `live`/`cache` when an `OPENCHARGEMAP_API_KEY` is configured, `simulated` otherwise (a plausible local set), or `unavailable` on failure. `keyed` reports whether a real API key is in use.",
+        security: [{ BearerAuth: [] }],
+        parameters: [
+          { name: "lat", in: "query", required: true, schema: { type: "number" } },
+          { name: "lng", in: "query", required: true, schema: { type: "number" } },
+          { name: "radius", in: "query", schema: { type: "number", minimum: 1, maximum: 50, default: 8 }, description: "Search radius in km" },
+          { name: "max", in: "query", schema: { type: "integer", minimum: 1, maximum: 50, default: 25 } },
+        ],
+        responses: {
+          "200": {
+            description: "Nearby chargers",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    source: { type: "string", enum: ["live", "cache", "simulated", "unavailable"] },
+                    keyed: { type: "boolean" },
+                    chargers: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          id: { type: "string" },
+                          name: { type: "string" },
+                          lat: { type: "number" },
+                          lng: { type: "number" },
+                          operator: { type: "string", nullable: true },
+                          numberOfPoints: { type: "integer", nullable: true },
+                          connectorTypes: { type: "array", items: { type: "string" } },
+                          maxPowerKw: { type: "number", nullable: true },
+                          isOperational: { type: "boolean" },
+                          distanceKm: { type: "number" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          "400": { description: "lat and lng are required" },
+          "401": { description: "Unauthorized" },
+        },
+      },
+    },
+    "/ev/range-check": {
+      post: {
+        tags: ["EV Driver"],
+        summary: "Soft low-battery check before accepting a trip",
+        description:
+          "Advisory only — never blocks. Given a trip distance (or pickup/dropoff coordinates), compares the driver's available range (with a 25% safety buffer) against the trip and flags a warning if range is tight or battery is at/below 20%. When warning, includes up to 3 nearby chargers. Returns `warn:false, canComplete:true` for non-EVs or when no battery data is available.",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  tripDistanceKm: { type: "number", description: "Direct trip distance; if omitted, computed from coordinates" },
+                  pickupLat: { type: "number" },
+                  pickupLng: { type: "number" },
+                  dropoffLat: { type: "number" },
+                  dropoffLng: { type: "number" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "200": {
+            description: "Range advisory",
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    warn: { type: "boolean" },
+                    canComplete: { type: "boolean" },
+                    lowBattery: { type: "boolean" },
+                    tripDistanceKm: { type: "number", nullable: true },
+                    requiredRangeKm: { type: "number" },
+                    rangeKm: { type: "number", nullable: true },
+                    batteryPercent: { type: "integer", nullable: true },
+                    source: { type: "string" },
+                    updatedAt: { type: "string", format: "date-time", nullable: true },
+                    nearbyChargers: { type: "array", items: { type: "object" } },
+                  },
+                },
+              },
+            },
+          },
+          "401": { description: "Unauthorized" },
+          "404": { description: "Driver profile not found" },
+        },
       },
     },
     "/vehicles": {
