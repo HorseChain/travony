@@ -2,7 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { db } from "./db";
 import { users, drivers, vehicles, rides } from "@shared/schema";
 import { and, eq, inArray, desc } from "drizzle-orm";
-import { randomBytes, createHash, scryptSync } from "crypto";
+import { randomBytes, scryptSync } from "crypto";
 import { v4 as uuidv4 } from "uuid";
 
 /**
@@ -23,7 +23,13 @@ const ACTIVE_RIDE_STATUSES = ["accepted", "arriving", "started", "in_progress"] 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64).toString("hex");
-  return `${hash}.${salt}`;
+  return `${salt}:${hash}`;
+}
+
+const VEHICLE_TYPES = ["economy", "comfort", "premium", "xl", "suv", "minivan"];
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
 function requireKey(scope: string) {
@@ -131,6 +137,59 @@ export function setupTaxiModeRoutes(app: Express) {
         });
       }
 
+      if (!isValidEmail(ownerEmail)) {
+        return res.status(400).json({
+          error: "Invalid email",
+          code: "INVALID_EMAIL",
+          message: "ownerEmail must be a valid email address.",
+        });
+      }
+
+      if (type != null && !VEHICLE_TYPES.includes(type)) {
+        return res.status(400).json({
+          error: "Invalid type",
+          code: "INVALID_TYPE",
+          message: `type must be one of: ${VEHICLE_TYPES.join(", ")}.`,
+        });
+      }
+
+      let yearValue: number | null = null;
+      if (year != null) {
+        yearValue = Number(year);
+        if (!Number.isInteger(yearValue) || yearValue < 1980 || yearValue > 2100) {
+          return res.status(400).json({
+            error: "Invalid year",
+            code: "INVALID_YEAR",
+            message: "year must be a whole number between 1980 and 2100.",
+          });
+        }
+      }
+
+      let batteryKwh: string | null = null;
+      if (batteryCapacityKwh != null) {
+        const n = Number(batteryCapacityKwh);
+        if (!Number.isFinite(n) || n <= 0) {
+          return res.status(400).json({
+            error: "Invalid batteryCapacityKwh",
+            code: "INVALID_BATTERY",
+            message: "batteryCapacityKwh must be a positive number.",
+          });
+        }
+        batteryKwh = String(n);
+      }
+
+      let rangeKm: number | null = null;
+      if (ratedRangeKm != null) {
+        rangeKm = Number(ratedRangeKm);
+        if (!Number.isInteger(rangeKm) || rangeKm <= 0) {
+          return res.status(400).json({
+            error: "Invalid ratedRangeKm",
+            code: "INVALID_RANGE",
+            message: "ratedRangeKm must be a positive whole number.",
+          });
+        }
+      }
+
       const existing = await db.select().from(users).where(eq(users.email, ownerEmail)).limit(1);
       if (existing.length) {
         return res.status(409).json({
@@ -141,54 +200,60 @@ export function setupTaxiModeRoutes(app: Express) {
       }
 
       const tempPassword = randomBytes(12).toString("hex");
-      const [owner] = await db
-        .insert(users)
-        .values({
-          id: uuidv4(),
-          email: ownerEmail,
-          password: hashPassword(tempPassword),
-          name: ownerName,
-          phone: ownerPhone || null,
-          role: "driver",
-        })
-        .returning();
 
-      const [driver] = await db
-        .insert(drivers)
-        .values({
-          id: uuidv4(),
-          userId: owner.id,
-          status: "approved",
-          isOnline: false,
-          fleetOwnerId: req.apiKey!.ownerId,
-        })
-        .returning();
+      const { owner, driver, vehicle } = await db.transaction(async (tx) => {
+        const [owner] = await tx
+          .insert(users)
+          .values({
+            id: uuidv4(),
+            email: ownerEmail,
+            password: hashPassword(tempPassword),
+            name: ownerName,
+            phone: ownerPhone || null,
+            role: "driver",
+          })
+          .returning();
 
-      const [vehicle] = await db
-        .insert(vehicles)
-        .values({
-          id: uuidv4(),
-          driverId: driver.id,
-          type: type || "economy",
-          make,
-          model,
-          plateNumber,
-          color: color || null,
-          year: year || null,
-          isElectric: isElectric ?? true,
-          evBatteryCapacityKwh: batteryCapacityKwh != null ? String(batteryCapacityKwh) : null,
-          evRatedRangeKm: ratedRangeKm != null ? Number(ratedRangeKm) : null,
-          verificationStatus: "admin_verified",
-          isActive: true,
-        })
-        .returning();
+        const [driver] = await tx
+          .insert(drivers)
+          .values({
+            id: uuidv4(),
+            userId: owner.id,
+            status: "approved",
+            isOnline: false,
+            fleetOwnerId: req.apiKey!.ownerId,
+          })
+          .returning();
+
+        const [vehicle] = await tx
+          .insert(vehicles)
+          .values({
+            id: uuidv4(),
+            driverId: driver.id,
+            type: type || "economy",
+            make,
+            model,
+            plateNumber,
+            color: color || null,
+            year: yearValue,
+            isElectric: isElectric ?? true,
+            evBatteryCapacityKwh: batteryKwh,
+            evRatedRangeKm: rangeKm,
+            verificationStatus: "admin_verified",
+            isActive: true,
+          })
+          .returning();
+
+        return { owner, driver, vehicle };
+      });
 
       res.status(201).json({
         message: "Car onboarded. It is private until you turn taxi mode on.",
         ...carView(vehicle, driver, owner),
       });
     } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to onboard car" });
+      console.error("Taxi Mode onboard error:", err);
+      res.status(500).json({ error: "Failed to onboard car", code: "ONBOARD_FAILED" });
     }
   });
 
@@ -230,7 +295,8 @@ export function setupTaxiModeRoutes(app: Express) {
         since: updatedDriver.lastOnlineAt,
       });
     } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to switch taxi mode" });
+      console.error("Taxi Mode switch error:", err);
+      res.status(500).json({ error: "Failed to switch taxi mode", code: "TAXI_MODE_FAILED" });
     }
   });
 
@@ -249,7 +315,8 @@ export function setupTaxiModeRoutes(app: Express) {
         .limit(1);
       res.json(carView(car.vehicle, car.driver, car.owner, currentRide));
     } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load car" });
+      console.error("Taxi Mode load car error:", err);
+      res.status(500).json({ error: "Failed to load car", code: "LOAD_CAR_FAILED" });
     }
   });
 
@@ -275,7 +342,8 @@ export function setupTaxiModeRoutes(app: Express) {
         cars,
       });
     } catch (err: unknown) {
-      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list cars" });
+      console.error("Taxi Mode list cars error:", err);
+      res.status(500).json({ error: "Failed to list cars", code: "LIST_CARS_FAILED" });
     }
   });
 

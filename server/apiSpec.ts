@@ -190,7 +190,7 @@ Travony is an intelligent mobility network that transforms private vehicles — 
               color: { type: "string", nullable: true, example: "White" },
               plateNumber: { type: "string", example: "DXB-A-12345" },
               isElectric: { type: "boolean", example: true },
-              verificationStatus: { type: "string", example: "approved" },
+              verificationStatus: { type: "string", example: "admin_verified" },
             },
           },
           battery: {

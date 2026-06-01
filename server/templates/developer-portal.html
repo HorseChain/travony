@@ -698,7 +698,7 @@
         <div class="flow-num">3</div>
         <div class="flow-body">
           <h3>Check on it</h3>
-          <p>Get one car or all of them: taxi mode on/off, battery, today's trips and earnings, and the ride it's on right now.</p>
+          <p>Get one car or all of them: taxi mode on/off, battery, lifetime trips and earnings, and the ride it's on right now.</p>
           <div class="flow-api">
             <span class="method method-get">GET</span>
             /v1/cars/{carId}
@@ -714,6 +714,7 @@
         <div>
           <h4>One header on every call</h4>
           <p>Authenticate with your partner key: <code>X-API-Key: tvny_live_xxxx</code>. Each car belongs to the key that created it, so you only ever see your own.</p>
+          <p style="margin-top:10px">Scopes: onboarding needs <code>fleet:write</code>, the taxi-mode switch needs <code>rides:write</code>, and reading status needs <code>fleet:read</code>.</p>
         </div>
       </div>
 
