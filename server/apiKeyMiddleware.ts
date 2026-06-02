@@ -3,11 +3,13 @@ import { db } from "./db";
 import { apiKeys } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
 import { randomBytes } from "crypto";
+import { scopesSatisfy } from "./partnerApi";
 
 export interface ApiKeyPayload {
   keyId: string;
   ownerId: string;
   scopes: string[];
+  planTier: string;
 }
 
 declare global {
@@ -51,6 +53,7 @@ export async function apiKeyMiddleware(req: Request, res: Response, next: NextFu
       keyId: match.id,
       ownerId: match.ownerId,
       scopes: match.scopes as string[],
+      planTier: match.planTier ?? "free",
     };
 
     next();
@@ -60,12 +63,20 @@ export async function apiKeyMiddleware(req: Request, res: Response, next: NextFu
   }
 }
 
+// Public-API scope guard. Requires a valid API key carrying the scope — there
+// is intentionally NO session bypass here: this protects partner endpoints, and
+// a logged-in browser session must never be able to skip scope enforcement.
+// Honours scope aliases (e.g. ev-hubs:read -> hubs:read).
 export function requireScope(scope: string) {
   return (req: Request, res: Response, next: NextFunction) => {
-    if (req.apiKey && req.apiKey.scopes.includes(scope)) {
-      return next();
+    if (!req.apiKey) {
+      return res.status(401).json({
+        error: "API key required",
+        code: "API_KEY_REQUIRED",
+        message: "Pass your partner key in the 'X-API-Key' header.",
+      });
     }
-    if ((req as any).session || (req as any).userId) {
+    if (scopesSatisfy(req.apiKey.scopes, scope)) {
       return next();
     }
     res.status(403).json({

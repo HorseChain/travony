@@ -1030,7 +1030,7 @@ console.<span class="fn">log</span>(<span class="str">`Fare: ${estimatedFare} ${
 <span class="fn">setInterval</span>(() => <span class="fn">fetch</span>(<span class="str">`/api/rides/${ride.id}`</span>), <span class="num">3000</span>);</pre>
     </div>
     <div class="code-block" id="qs4">
-<pre><span class="cmt">// Create a B2B API key (fleet owners & admins only)</span>
+<pre><span class="cmt">// Create a partner API key — any signed-in account, self-serve</span>
 <span class="kw">const</span> { key } = <span class="kw">await</span> fetch(<span class="str">'/api/api-keys'</span>, {
   method: <span class="str">'POST'</span>,
   headers: { ...headers, <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span> },
@@ -1038,28 +1038,34 @@ console.<span class="fn">log</span>(<span class="str">`Fare: ${estimatedFare} ${
     name: <span class="str">'BYD Fleet Integration'</span>,
     scopes: [
       <span class="str">'fleet:read'</span>,
-      <span class="str">'ev-hubs:read'</span>,
+      <span class="str">'hubs:read'</span>,
       <span class="str">'demand:read'</span>,
     ]
   })
 }).<span class="fn">then</span>(r => r.<span class="fn">json</span>());
 
 <span class="cmt">// key = "tvny_live_ab12cd34ef56gh78..."</span>
-<span class="cmt">// Store this securely — shown only once!</span>
+<span class="cmt">// Store this securely — shown only once! New keys start on the Free plan.</span>
 
 <span class="cmt">// Use it in future requests:</span>
-fetch(<span class="str">'/api/fleet/dashboard/vehicles'</span>, {
+fetch(<span class="str">'/api/partner/v1/hubs?evOnly=true'</span>, {
   headers: { <span class="str">'X-API-Key'</span>: key }
-});</pre>
+});
+
+<span class="cmt">// Check your usage & remaining quota any time:</span>
+<span class="kw">const</span> usage = <span class="kw">await</span> fetch(<span class="str">'/api/partner/usage'</span>, {
+  headers: { <span class="str">'X-API-Key'</span>: key }
+}).<span class="fn">then</span>(r => r.<span class="fn">json</span>());
+<span class="cmt">// → { plan: { name: 'Free' }, callsThisPeriod, remaining, rateLimitPerMin }</span></pre>
     </div>
   </div>
 </section>
 
 <!-- API KEY SCOPES -->
 <section style="border-top: 1px solid var(--border)">
-  <div class="section-label">B2B API Keys</div>
+  <div class="section-label">Partner API Keys</div>
   <div class="section-title">Scope-based access control</div>
-  <div class="section-desc">Each API key is granted only the permissions it needs. Grant <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">fleet:read</code> for monitoring, add <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">rides:write</code> to dispatch programmatically.</div>
+  <div class="section-desc">Self-serve: any signed-in account can create keys. Each key is granted only the scopes it needs. Grant <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">fleet:read</code> for monitoring, add <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">rides:write</code> to dispatch programmatically. The legacy <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">ev-hubs:read</code> name still works and maps to <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">hubs:read</code>.</div>
 
   <div class="code-section">
     <table class="scopes-table">
@@ -1071,16 +1077,42 @@ fetch(<span class="str">'/api/fleet/dashboard/vehicles'</span>, {
         </tr>
       </thead>
       <tbody>
-        <tr><td>fleet:read</td><td>View all fleet vehicles, driver positions, earnings</td><td>Fleet operators, car brands</td></tr>
-        <tr><td>fleet:write</td><td>Add vehicles, update driver assignments</td><td>Fleet management systems</td></tr>
-        <tr><td>ev-hubs:read</td><td>Hub status, port availability, EV staging, demand signals</td><td>EV manufacturers, charging operators</td></tr>
-        <tr><td>rides:read</td><td>View ride history, status, telemetry</td><td>Analytics platforms, insurers</td></tr>
-        <tr><td>rides:write</td><td>Create and update rides programmatically</td><td>Booking platforms, autonomous vehicle systems</td></tr>
-        <tr><td>drivers:read</td><td>Driver profiles, ratings, earnings</td><td>HR systems, compliance tools</td></tr>
-        <tr><td>demand:read</td><td>Demand heatmaps, EV demand signals, dispatch suggestions</td><td>City planners, fleet optimizers</td></tr>
+        <tr><td>fleet:read</td><td>List and read the cars you onboarded (status, battery, stats, current ride)</td><td>Fleet operators, EV brands</td></tr>
+        <tr><td>fleet:write</td><td>Onboard cars and their owners under your account</td><td>Fleet management systems</td></tr>
+        <tr><td>rides:read</td><td>Read ride records and lifecycle status for your fleet</td><td>Analytics platforms, insurers</td></tr>
+        <tr><td>rides:write</td><td>Create rides and flip taxi mode on/off programmatically</td><td>Booking platforms, AV systems</td></tr>
+        <tr><td>hubs:read</td><td>EV charging hub network — locations, port availability, EV staging</td><td>EV manufacturers, charging operators</td></tr>
+        <tr><td>pricing:read</td><td>Dynamic fare quotes for a pickup/dropoff and vehicle type</td><td>Booking apps, aggregators</td></tr>
+        <tr><td>demand:read</td><td>EV demand signals and hub demand heatmap data</td><td>City planners, fleet optimizers</td></tr>
       </tbody>
     </table>
   </div>
+</section>
+
+<!-- PLANS & RATE LIMITS -->
+<section style="border-top: 1px solid var(--border)">
+  <div class="section-label">Plans &amp; Quotas</div>
+  <div class="section-title">Simple, usage-based pricing</div>
+  <div class="section-desc">Every key starts on <strong>Free</strong>. Upgrade any time from your account via Stripe Checkout. Each metered call counts against a monthly quota and a per-minute rate limit. Over the rate limit you get <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">429</code> with a <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">Retry-After</code> header; over the monthly quota you get <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">429 QUOTA_EXCEEDED</code>.</div>
+
+  <div class="code-section">
+    <table class="scopes-table">
+      <thead>
+        <tr>
+          <th>Plan</th>
+          <th>Price</th>
+          <th>Monthly quota</th>
+          <th>Rate limit</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Free</td><td>$0</td><td>1,000 calls</td><td>30 req/min</td></tr>
+        <tr><td>Starter</td><td>$49 / mo</td><td>50,000 calls</td><td>120 req/min</td></tr>
+        <tr><td>Growth</td><td>$199 / mo</td><td>500,000 calls</td><td>600 req/min</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="section-desc" style="margin-top:16px">Every metered response includes <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">X-Quota-Limit</code>, <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">X-Quota-Remaining</code> and <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">X-RateLimit-Limit</code> headers. Inspect your consumption with <code style="font-family:monospace;background:var(--code-bg);padding:2px 6px;border-radius:4px;font-size:13px">GET /api/partner/usage</code>.</div>
 </section>
 
 <!-- USE CASES -->
@@ -1115,7 +1147,7 @@ fetch(<span class="str">'/api/fleet/dashboard/vehicles'</span>, {
         </div>
       </div>
       <div class="use-case-body">
-        <div class="step"><div class="step-num">1</div><div class="step-content"><h4>Get API key with ev-hubs:read + demand:read</h4><p>Read-only access to all EV hub intelligence.</p></div></div>
+        <div class="step"><div class="step-num">1</div><div class="step-content"><h4>Get API key with hubs:read + demand:read</h4><p>Read-only access to all EV hub intelligence.</p></div></div>
         <div class="step"><div class="step-num">2</div><div class="step-content"><h4>Monitor port utilization live</h4><p>GET /openclaw/hubs/{id}/ev-status — charging, ready, departing counts.</p></div></div>
         <div class="step"><div class="step-num">3</div><div class="step-content"><h4>Read demand forecasts</h4><p>Use EV demand signals to plan port expansion and pricing.</p></div></div>
         <div class="step"><div class="step-num">4</div><div class="step-content"><h4>Fleet-wide staging view</h4><p>GET /openclaw/fleet/ev-staging shows every EV across all hubs.</p></div></div>

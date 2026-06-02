@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -29,6 +29,7 @@ export const currencyEnum = pgEnum("currency", ["AED", "USDT", "USD", "EUR", "GB
 export const invoiceTypeEnum = pgEnum("invoice_type", ["customer", "driver"]);
 export const disputeStatusEnum = pgEnum("dispute_status", ["open", "investigating", "resolved_rider_favor", "resolved_driver_favor", "resolved_partial", "closed"]);
 export const evStagingStatusEnum = pgEnum("ev_staging_status_enum", ["charging", "ready", "departing"]);
+export const evConnectionStatusEnum = pgEnum("ev_connection_status_enum", ["connected", "expired", "error", "disconnected"]);
 export const disputeTypeEnum = pgEnum("dispute_type", ["fare", "route", "rating", "payment", "safety", "behavior", "damage"]);
 export const disputeResolutionEnum = pgEnum("dispute_resolution", ["refund_full", "refund_partial", "no_action", "warning_driver", "warning_rider", "suspend_driver", "suspend_rider", "rating_removed"]);
 export const vehicleVerificationStatusEnum = pgEnum("vehicle_verification_status", ["pending", "ai_verified", "admin_verified", "rejected"]);
@@ -81,6 +82,8 @@ export const drivers = pgTable("drivers", {
   walletBalance: decimal("wallet_balance", { precision: 12, scale: 2 }).default("0.00"),
   minRiderRating: decimal("min_rider_rating", { precision: 3, scale: 2 }),
   minRiderRatingEnabled: boolean("min_rider_rating_enabled").default(false),
+  evReady: boolean("ev_ready").default(false),
+  evReadyAt: timestamp("ev_ready_at"),
   fleetOwnerId: varchar("fleet_owner_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -111,6 +114,10 @@ export const vehicles = pgTable("vehicles", {
   adminNotes: text("admin_notes"),
   isActive: boolean("is_active").default(true),
   isElectric: boolean("is_electric").default(false),
+  evBatteryCapacityKwh: decimal("ev_battery_capacity_kwh", { precision: 6, scale: 2 }),
+  evRatedRangeKm: integer("ev_rated_range_km"),
+  manualBatteryPercent: integer("manual_battery_percent"),
+  manualBatteryUpdatedAt: timestamp("manual_battery_updated_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -521,6 +528,8 @@ export type Translation = typeof translations.$inferSelect;
 export type RideMessage = typeof rideMessages.$inferSelect;
 export type RegionalEmergencyContact = typeof regionalEmergencyContacts.$inferSelect;
 export type ExchangeRate = typeof exchangeRates.$inferSelect;
+export type EvCarConnection = typeof evCarConnections.$inferSelect;
+export type InsertEvCarConnection = typeof evCarConnections.$inferInsert;
 
 export const documentTypeEnum = pgEnum("document_type", ["id_card", "drivers_license", "vehicle_registration", "insurance", "selfie_video"]);
 export const documentStatusEnum = pgEnum("document_status", ["pending", "approved", "rejected", "expired"]);
@@ -1203,6 +1212,7 @@ export const hubCheckIns = pgTable("hub_check_ins", {
   checkedInAt: timestamp("checked_in_at").defaultNow().notNull(),
   checkedOutAt: timestamp("checked_out_at"),
   evStagingStatus: evStagingStatusEnum("ev_staging_status"),
+  evStagingSource: text("ev_staging_source"),
 });
 
 export const evDemandSignals = pgTable("ev_demand_signals", {
@@ -1216,6 +1226,33 @@ export const evDemandSignals = pgTable("ev_demand_signals", {
   nearestHubId: varchar("nearest_hub_id").references(() => hubs.id),
   requestedAt: timestamp("requested_at").defaultNow().notNull(),
 });
+
+export const evCarConnections = pgTable("ev_car_connections", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").references(() => drivers.id).notNull().unique(),
+  vehicleId: varchar("vehicle_id").references(() => vehicles.id),
+  provider: text("provider").default("smartcar").notNull(),
+  status: evConnectionStatusEnum("status").default("connected").notNull(),
+  isSimulated: boolean("is_simulated").default(false),
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiresAt: timestamp("token_expires_at"),
+  externalVehicleId: text("external_vehicle_id"),
+  batteryPercent: integer("battery_percent"),
+  rangeKm: decimal("range_km", { precision: 6, scale: 1 }),
+  isCharging: boolean("is_charging").default(false),
+  chargingState: text("charging_state"),
+  targetChargePercent: integer("target_charge_percent").default(80),
+  snapshotAt: timestamp("snapshot_at"),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const evCarConnectionsRelations = relations(evCarConnections, ({ one }) => ({
+  driver: one(drivers, { fields: [evCarConnections.driverId], references: [drivers.id] }),
+  vehicle: one(vehicles, { fields: [evCarConnections.vehicleId], references: [vehicles.id] }),
+}));
 
 export const communityPrestige = pgTable("community_prestige", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1358,9 +1395,55 @@ export const apiKeys = pgTable("api_keys", {
   keyHash: text("key_hash").notNull(),
   scopes: text("scopes").array().notNull().default(sql`'{}'::text[]`),
   isActive: boolean("is_active").default(true).notNull(),
+  // Billing / plan tier — drives quota + rate limit. See PLAN_TIERS in server/partnerApi.ts
+  planTier: varchar("plan_tier", { length: 24 }).notNull().default("free"),
+  stripeCustomerId: text("stripe_customer_id"),
+  stripeSubscriptionId: text("stripe_subscription_id"),
   lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type InsertApiKey = typeof apiKeys.$inferInsert;
+
+// Immutable per-call audit log for partner API metering (which key called which
+// endpoint, when, and the response status). Written fire-and-forget so a logging
+// failure never blocks a partner request.
+export const apiUsageEvents = pgTable("api_usage_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  keyId: varchar("key_id").references(() => apiKeys.id).notNull(),
+  ownerId: varchar("owner_id").notNull(),
+  endpoint: text("endpoint").notNull(),
+  method: varchar("method", { length: 8 }).notNull(),
+  statusCode: integer("status_code").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type ApiUsageEvent = typeof apiUsageEvents.$inferSelect;
+export type InsertApiUsageEvent = typeof apiUsageEvents.$inferInsert;
+
+// Aggregate counter per key per billing period ("YYYY-MM"). Upserted on every
+// metered call so the monthly quota check is a single indexed read.
+export const apiUsageCounters = pgTable("api_usage_counters", {
+  keyId: varchar("key_id").references(() => apiKeys.id).notNull(),
+  period: varchar("period", { length: 7 }).notNull(),
+  callCount: integer("call_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.keyId, t.period] }),
+}));
+
+export type ApiUsageCounter = typeof apiUsageCounters.$inferSelect;
+export type InsertApiUsageCounter = typeof apiUsageCounters.$inferInsert;
+
+// Persists each Telegram rider chat's in-progress booking wizard state so that
+// riders mid-booking are not lost when the backend restarts. Keyed by chat id;
+// rows are deleted once the booking completes or is cancelled.
+export const telegramBookingSessions = pgTable("telegram_booking_sessions", {
+  chatId: varchar("chat_id").primaryKey(),
+  data: text("data").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type TelegramBookingSession = typeof telegramBookingSessions.$inferSelect;
+export type InsertTelegramBookingSession = typeof telegramBookingSessions.$inferInsert;

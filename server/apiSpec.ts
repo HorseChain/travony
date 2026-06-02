@@ -18,7 +18,26 @@ Travony is an intelligent mobility network that transforms private vehicles — 
 - **User sessions:** Pass \`Authorization: Bearer <session_token>\` after OTP login
 - **B2B partners:** Pass \`X-API-Key: tvny_live_xxxx\` (request a key at /developer)
 
-**10% Platform Commission** — Travony takes 10% per ride. The rest goes to the driver/fleet.`,
+**10% Platform Commission** — Travony takes 10% per ride. The rest goes to the driver/fleet.
+
+## Plans, quotas & rate limits
+
+Every partner key belongs to a plan tier. Each metered call counts against your monthly quota and a per-minute rate limit:
+
+| Plan | Price | Monthly quota | Rate limit |
+| --- | --- | --- | --- |
+| Free | $0 | 1,000 calls | 30 req/min |
+| Starter | $49/mo | 50,000 calls | 120 req/min |
+| Growth | $199/mo | 500,000 calls | 600 req/min |
+
+- Exceeding the per-minute rate returns **429** with a \`Retry-After\` header.
+- Exceeding the monthly quota returns **429** with code \`QUOTA_EXCEEDED\` — upgrade at /developer.
+- Responses include \`X-Quota-Limit\`, \`X-Quota-Remaining\` and \`X-RateLimit-Limit\` headers.
+- Check your own consumption any time with \`GET /api/partner/usage\` (send your key).
+
+## Scopes
+
+Keys carry granular scopes (\`resource:action\`): \`fleet:read\`, \`fleet:write\`, \`rides:read\`, \`rides:write\`, \`hubs:read\`, \`pricing:read\`, \`demand:read\`. The legacy \`ev-hubs:read\` alias maps to \`hubs:read\`.`,
     contact: {
       name: "Travony Developer Relations",
       url: "https://travony.app/developer",
@@ -41,6 +60,8 @@ Travony is an intelligent mobility network that transforms private vehicles — 
   ],
   tags: [
     { name: "Taxi Mode (Partners)", description: "The simplest API: onboard a car, flip taxi mode on/off, check status. Built for EV brands and fleets. Uses your X-API-Key." },
+    { name: "Partner Data API", description: "Metered, scope-gated read access to hubs, pricing, rides and EV demand. Authenticate with X-API-Key. Counts against your plan quota." },
+    { name: "Partner Usage & Billing", description: "Inspect your API consumption and manage your plan (Free/Starter/Growth) via Stripe." },
     { name: "Authentication", description: "OTP phone login and session management" },
     { name: "Rides", description: "Request, track, and complete rides" },
     { name: "Drivers", description: "Driver status, location, earnings, and documents" },
@@ -364,6 +385,138 @@ Travony is an intelligent mobility network that transforms private vehicles — 
         responses: {
           "200": { description: "Car status", content: { "application/json": { schema: { $ref: "#/components/schemas/Car" } } } },
           "404": { description: "Car not found under your API key" },
+        },
+      },
+    },
+    "/partner/v1/hubs": {
+      get: {
+        tags: ["Partner Data API"],
+        summary: "List EV charging hubs",
+        description: "Returns the active hub network with locations, EV charging port availability and demand scores. Requires the `hubs:read` scope. Metered.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          { name: "evOnly", in: "query", required: false, schema: { type: "boolean" }, description: "When true, only return designated EV charging hubs." },
+        ],
+        responses: {
+          "200": { description: "Hub list", content: { "application/json": { schema: { type: "object", properties: { count: { type: "integer" }, hubs: { type: "array", items: { type: "object" } } } } } } },
+          "401": { description: "Missing API key" },
+          "403": { description: "Key lacks hubs:read scope" },
+          "429": { description: "Rate limit or monthly quota exceeded" },
+        },
+      },
+    },
+    "/partner/v1/pricing": {
+      get: {
+        tags: ["Partner Data API"],
+        summary: "Get a dynamic fare quote",
+        description: "Returns an AI-computed fare breakdown (base, distance, time, demand/time/traffic multipliers, platform fee) for a pickup/dropoff and vehicle type. Requires the `pricing:read` scope. Metered.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          { name: "pickupLat", in: "query", required: true, schema: { type: "number" } },
+          { name: "pickupLng", in: "query", required: true, schema: { type: "number" } },
+          { name: "dropoffLat", in: "query", required: true, schema: { type: "number" } },
+          { name: "dropoffLng", in: "query", required: true, schema: { type: "number" } },
+          { name: "vehicleType", in: "query", required: false, schema: { type: "string", default: "economy" } },
+        ],
+        responses: {
+          "200": { description: "Fare quote", content: { "application/json": { schema: { type: "object" } } } },
+          "400": { description: "Missing coordinates" },
+          "401": { description: "Missing API key" },
+          "403": { description: "Key lacks pricing:read scope" },
+          "429": { description: "Rate limit or monthly quota exceeded" },
+        },
+      },
+    },
+    "/partner/v1/rides": {
+      get: {
+        tags: ["Partner Data API"],
+        summary: "List rides for your fleet",
+        description: "Returns ride records served by the cars you onboarded under this key (status, fare, blockchain hash). Requires the `rides:read` scope. Metered.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          { name: "limit", in: "query", required: false, schema: { type: "integer", default: 50, maximum: 200 } },
+          { name: "status", in: "query", required: false, schema: { type: "string" } },
+        ],
+        responses: {
+          "200": { description: "Ride list", content: { "application/json": { schema: { type: "object", properties: { count: { type: "integer" }, rides: { type: "array", items: { type: "object" } } } } } } },
+          "401": { description: "Missing API key" },
+          "403": { description: "Key lacks rides:read scope" },
+          "429": { description: "Rate limit or monthly quota exceeded" },
+        },
+      },
+    },
+    "/partner/v1/ev-demand-signals": {
+      get: {
+        tags: ["Partner Data API"],
+        summary: "EV demand signals",
+        description: "Returns recent EV demand signals and the match rate — useful for fleet positioning and city planning. Requires the `demand:read` scope. Metered.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          { name: "limit", in: "query", required: false, schema: { type: "integer", default: 100, maximum: 500 } },
+        ],
+        responses: {
+          "200": { description: "Demand signals", content: { "application/json": { schema: { type: "object", properties: { count: { type: "integer" }, matched: { type: "integer" }, matchRate: { type: "integer" }, signals: { type: "array", items: { type: "object" } } } } } } },
+          "401": { description: "Missing API key" },
+          "403": { description: "Key lacks demand:read scope" },
+          "429": { description: "Rate limit or monthly quota exceeded" },
+        },
+      },
+    },
+    "/partner/usage": {
+      get: {
+        tags: ["Partner Usage & Billing"],
+        summary: "Check your API usage",
+        description: "Returns your current plan, billing period, calls used this month, remaining quota and rate limit. Send your X-API-Key — any valid key works regardless of scope.",
+        security: [{ ApiKeyAuth: [] }],
+        responses: {
+          "200": { description: "Usage summary", content: { "application/json": { schema: { type: "object", properties: { keyId: { type: "string" }, callsThisPeriod: { type: "integer" }, monthlyQuota: { type: "integer" }, remaining: { type: "integer" }, rateLimitPerMin: { type: "integer" } } } } } },
+          "401": { description: "Missing API key" },
+        },
+      },
+    },
+    "/partner/billing/plans": {
+      get: {
+        tags: ["Partner Usage & Billing"],
+        summary: "List plan tiers",
+        description: "Public list of plan tiers (Free/Starter/Growth) with price, monthly quota and rate limit.",
+        security: [],
+        responses: {
+          "200": { description: "Plan list", content: { "application/json": { schema: { type: "object", properties: { plans: { type: "array", items: { type: "object" } } } } } } },
+        },
+      },
+    },
+    "/partner/billing/checkout": {
+      post: {
+        tags: ["Partner Usage & Billing"],
+        summary: "Start a plan upgrade (Stripe Checkout)",
+        description: "Creates a Stripe Checkout subscription session for a paid tier, tied to one of your API keys. Session-authenticated (Bearer). Returns a `checkoutUrl` to redirect the user to.",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", required: ["keyId", "tier"], properties: { keyId: { type: "string", format: "uuid" }, tier: { type: "string", enum: ["starter", "growth"] } } } } },
+        },
+        responses: {
+          "200": { description: "Checkout session created", content: { "application/json": { schema: { type: "object", properties: { checkoutUrl: { type: "string" }, sessionId: { type: "string" } } } } } },
+          "400": { description: "Invalid tier or free plan requested" },
+          "401": { description: "Sign in required" },
+          "404": { description: "API key not found" },
+        },
+      },
+    },
+    "/partner/billing/cancel": {
+      post: {
+        tags: ["Partner Usage & Billing"],
+        summary: "Downgrade to Free",
+        description: "Cancels any active Stripe subscription for the key and drops it back to the Free plan. Session-authenticated (Bearer).",
+        security: [{ BearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", required: ["keyId"], properties: { keyId: { type: "string", format: "uuid" } } } } },
+        },
+        responses: {
+          "200": { description: "Downgraded to Free" },
+          "401": { description: "Sign in required" },
+          "404": { description: "API key not found" },
         },
       },
     },

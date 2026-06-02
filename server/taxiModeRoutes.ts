@@ -4,6 +4,7 @@ import { users, drivers, vehicles, rides } from "@shared/schema";
 import { and, eq, inArray, desc } from "drizzle-orm";
 import { randomBytes, scryptSync } from "crypto";
 import { v4 as uuidv4 } from "uuid";
+import { requirePartner } from "./partnerApi";
 
 /**
  * Taxi Mode API (v1) — the simplest way for an EV brand or fleet to turn a
@@ -32,25 +33,9 @@ function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 
-function requireKey(scope: string) {
-  return (req: Request, res: Response, next: NextFunction) => {
-    if (!req.apiKey) {
-      return res.status(401).json({
-        error: "API key required",
-        code: "API_KEY_REQUIRED",
-        message: "Pass your partner key in the 'X-API-Key' header. Get one at /developer.",
-      });
-    }
-    if (!req.apiKey.scopes.includes(scope)) {
-      return res.status(403).json({
-        error: "Forbidden",
-        code: "INSUFFICIENT_SCOPE",
-        message: `This call needs the '${scope}' scope on your API key.`,
-      });
-    }
-    next();
-  };
-}
+// Taxi Mode calls run through the shared partner guard so they are scope-checked,
+// rate-limited, quota-checked and metered exactly like the rest of the partner API.
+const requireKey = requirePartner;
 
 async function getOwnedCar(carId: string, ownerId: string) {
   const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, carId)).limit(1);

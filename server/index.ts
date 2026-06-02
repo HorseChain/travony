@@ -223,6 +223,12 @@ function configureExpoAndLanding(app: express.Application) {
   const fleetLoginTemplate = fs.existsSync(fleetLoginTemplatePath)
     ? fs.readFileSync(fleetLoginTemplatePath, "utf-8")
     : null;
+  const healthTemplatePath = path.resolve(
+    process.cwd(), "server", "templates", "system-health.html",
+  );
+  const healthTemplate = fs.existsSync(healthTemplatePath)
+    ? fs.readFileSync(healthTemplatePath, "utf-8")
+    : null;
   const appName = getAppName();
 
   log("Serving static Expo files with dynamic manifest routing");
@@ -233,6 +239,17 @@ function configureExpoAndLanding(app: express.Application) {
       res.status(200).send(adminDashboardTemplate);
     } else {
       res.status(404).send("Admin dashboard not found");
+    }
+  });
+
+  // Internal "system wiring" health page. Auth happens client-side against the
+  // admin-only /api/admin/health endpoint (same Bearer-token pattern as /admin).
+  app.get("/admin/health", (_req: Request, res: Response) => {
+    if (healthTemplate) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(healthTemplate);
+    } else {
+      res.status(404).send("System health page not found");
     }
   });
 
@@ -618,11 +635,14 @@ async function resolveSessionUser(req: Request) {
 async function setupApiKeyRoutes(app: express.Application) {
   app.use(apiKeyMiddleware);
 
+  // Self-serve: any authenticated user can create and manage their own partner
+  // keys. This is what makes the Partner API a self-serve product rather than an
+  // admin-gated one.
   app.get("/api/api-keys", async (req: Request, res: Response) => {
     try {
       const user = await resolveSessionUser(req);
-      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
-        return res.status(403).json({ error: "Fleet owners and admins only" });
+      if (!user) {
+        return res.status(401).json({ error: "Sign in to manage API keys" });
       }
       const { db } = await import("./db");
       const { apiKeys } = await import("@shared/schema");
@@ -632,6 +652,7 @@ async function setupApiKeyRoutes(app: express.Application) {
         name: apiKeys.name,
         keyPrefix: apiKeys.keyPrefix,
         scopes: apiKeys.scopes,
+        planTier: apiKeys.planTier,
         isActive: apiKeys.isActive,
         lastUsedAt: apiKeys.lastUsedAt,
         createdAt: apiKeys.createdAt,
@@ -645,13 +666,25 @@ async function setupApiKeyRoutes(app: express.Application) {
   app.post("/api/api-keys", async (req: Request, res: Response) => {
     try {
       const user = await resolveSessionUser(req);
-      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
-        return res.status(403).json({ error: "Fleet owners and admins only" });
+      if (!user) {
+        return res.status(401).json({ error: "Sign in to create an API key" });
       }
       const { name, scopes } = req.body;
-      if (!name || !Array.isArray(scopes)) {
-        return res.status(400).json({ error: "name and scopes array are required" });
+      if (!name || !Array.isArray(scopes) || scopes.length === 0) {
+        return res.status(400).json({ error: "name and a non-empty scopes array are required" });
       }
+      const { isValidScope, canonicalScope } = await import("./partnerApi");
+      const invalid = scopes.filter((s: unknown) => typeof s !== "string" || !isValidScope(s));
+      if (invalid.length) {
+        return res.status(400).json({
+          error: "Invalid scopes",
+          code: "INVALID_SCOPE",
+          invalid,
+          message: "One or more requested scopes are not part of the partner scope catalog.",
+        });
+      }
+      // Store canonical scope names so aliases never end up persisted.
+      const normalizedScopes = Array.from(new Set(scopes.map((s: string) => canonicalScope(s))));
       const { generateApiKey } = await import("./apiKeyMiddleware");
       const { key, prefix, hash } = generateApiKey();
       const { db } = await import("./db");
@@ -663,7 +696,8 @@ async function setupApiKeyRoutes(app: express.Application) {
         name,
         keyPrefix: prefix,
         keyHash: hash,
-        scopes,
+        scopes: normalizedScopes,
+        planTier: "free",
         isActive: true,
       }).returning();
       res.status(201).json({
@@ -671,6 +705,7 @@ async function setupApiKeyRoutes(app: express.Application) {
         id: created.id,
         name: created.name,
         scopes: created.scopes,
+        planTier: created.planTier,
         warning: "Store this key securely — it will not be shown again.",
       });
     } catch (err: unknown) {
@@ -678,11 +713,33 @@ async function setupApiKeyRoutes(app: express.Application) {
     }
   });
 
+  // Per-key usage for the owner's dashboard (session-authenticated).
+  app.get("/api/api-keys/:id/usage", async (req: Request, res: Response) => {
+    try {
+      const user = await resolveSessionUser(req);
+      if (!user) {
+        return res.status(401).json({ error: "Sign in to view usage" });
+      }
+      const { db } = await import("./db");
+      const { apiKeys } = await import("@shared/schema");
+      const { eq, and } = await import("drizzle-orm");
+      const [keyRow] = await db.select().from(apiKeys)
+        .where(and(eq(apiKeys.id, req.params.id), eq(apiKeys.ownerId, user.id)))
+        .limit(1);
+      if (!keyRow) return res.status(404).json({ error: "API key not found" });
+      const { getUsageSummary } = await import("./partnerApi");
+      const summary = await getUsageSummary(keyRow.id, keyRow.planTier);
+      res.json({ keyId: keyRow.id, name: keyRow.name, ...summary });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : "Failed to load usage" });
+    }
+  });
+
   app.delete("/api/api-keys/:id", async (req: Request, res: Response) => {
     try {
       const user = await resolveSessionUser(req);
-      if (!user || !["fleet_owner", "admin"].includes(user.role)) {
-        return res.status(403).json({ error: "Fleet owners and admins only" });
+      if (!user) {
+        return res.status(401).json({ error: "Sign in to revoke API keys" });
       }
       const { db } = await import("./db");
       const { apiKeys } = await import("@shared/schema");
@@ -696,7 +753,12 @@ async function setupApiKeyRoutes(app: express.Application) {
     }
   });
 
-  log("API key routes: GET/POST /api/api-keys, DELETE /api/api-keys/:id");
+  // Partner data + billing surface (api-key metered data routes, session billing).
+  const { partnerRouter } = await import("./partnerRoutes");
+  app.use(partnerRouter);
+
+  log("API key routes: GET/POST /api/api-keys, GET /api/api-keys/:id/usage, DELETE /api/api-keys/:id");
+  log("Partner API: /api/partner/v1/* (metered), /api/partner/usage, /api/partner/billing/*");
 }
 
 (async () => {
