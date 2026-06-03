@@ -49,6 +49,22 @@ interface RideChatProps {
   otherPartyName: string;
 }
 
+interface RideConversationProps {
+  rideId: string;
+  myUserId: string;
+  otherPartyName: string;
+  // Controls background polling. Modal passes its `visible`; the embedded
+  // full-screen version is always active.
+  active?: boolean;
+  // Inline full-screen (Messages screen) vs. bottom-sheet modal chrome.
+  embedded?: boolean;
+  // When provided, a close button is shown in the header (modal use).
+  onClose?: () => void;
+  topInset?: number;
+  bottomInset?: number;
+  keyboardOffset?: number;
+}
+
 const LANG_KEY = "@travony_chat_lang";
 
 // Shown only until the localized quick replies load from the server.
@@ -72,7 +88,22 @@ async function syncLanguageToServer(code: string) {
   }
 }
 
-export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }: RideChatProps) {
+/**
+ * The full chat conversation UI (message list, quick replies, composer, and
+ * language picker) without any surrounding modal chrome. Used both inside the
+ * RideChat bottom-sheet modal and embedded full-screen on the Messages screen.
+ */
+export function RideConversation({
+  rideId,
+  myUserId,
+  otherPartyName,
+  active = true,
+  embedded = false,
+  onClose,
+  topInset = 0,
+  bottomInset,
+  keyboardOffset = 0,
+}: RideConversationProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
@@ -86,31 +117,31 @@ export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }:
   // Load the saved language once and make sure the server knows it so the other
   // side can translate their messages into the language this user speaks.
   useEffect(() => {
-    let active = true;
+    let isActive = true;
     AsyncStorage.getItem(LANG_KEY).then((stored) => {
       const lang = stored || "en";
-      if (active && stored) setMyLang(stored);
+      if (isActive && stored) setMyLang(stored);
       syncLanguageToServer(lang);
     });
     return () => {
-      active = false;
+      isActive = false;
     };
   }, []);
 
   const { data: messages, isLoading } = useQuery<RideMessage[]>({
     queryKey: messagesKey,
-    enabled: visible && !!rideId,
-    refetchInterval: visible ? 4000 : false,
+    enabled: active && !!rideId,
+    refetchInterval: active ? 4000 : false,
   });
 
   const { data: quickReplies } = useQuery<QuickReply[]>({
     queryKey: ["/api/quick-replies", myLang],
-    enabled: visible,
+    enabled: active,
   });
 
   const { data: languages } = useQuery<Language[]>({
     queryKey: ["/api/languages"],
-    enabled: visible,
+    enabled: active,
   });
 
   const sendMutation = useMutation({
@@ -141,11 +172,11 @@ export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }:
   });
 
   useEffect(() => {
-    if (visible && messages && messages.length > 0) {
+    if (active && messages && messages.length > 0) {
       const t = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
       return () => clearTimeout(t);
     }
-  }, [messages, visible]);
+  }, [messages, active]);
 
   const handleSendText = () => {
     const body = text.trim();
@@ -203,120 +234,122 @@ export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }:
   const chips = quickReplies && quickReplies.length > 0 ? quickReplies : FALLBACK_QUICK;
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={styles.backdrop}>
-        <Pressable style={styles.backdropTouch} onPress={onClose} />
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={keyboardOffset}
+      style={[
+        embedded ? styles.embedded : styles.sheet,
+        {
+          backgroundColor: theme.backgroundRoot,
+          paddingTop: topInset,
+          paddingBottom: (bottomInset ?? insets.bottom) + Spacing.sm,
+        },
+      ]}
+    >
+      {!embedded ? <View style={styles.handle} /> : null}
+      <View style={styles.header}>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.title}>{otherPartyName}</ThemedText>
+          <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
+            Messages stay in your trip
+          </ThemedText>
+        </View>
+        <Pressable
+          onPress={() => setShowLangPicker(true)}
+          style={[styles.langBtn, { backgroundColor: theme.card }]}
+          hitSlop={8}
+        >
+          <Ionicons name="language" size={16} color={theme.primary} />
+          <ThemedText style={[styles.langCode, { color: theme.text }]}>
+            {myLang.toUpperCase()}
+          </ThemedText>
+        </Pressable>
+        {onClose ? (
+          <Pressable
+            onPress={onClose}
+            style={[styles.closeBtn, { backgroundColor: theme.card }]}
+            hitSlop={8}
+          >
+            <Ionicons name="close" size={22} color={theme.text} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {isLoading ? (
+        <View style={styles.center}>
+          <ActivityIndicator color={theme.primary} />
+        </View>
+      ) : (
+        <FlatList
+          ref={listRef}
+          data={messages || []}
+          keyExtractor={(m) => m.id}
+          renderItem={renderItem}
+          contentContainerStyle={styles.listContent}
+          ListEmptyComponent={
+            <View style={styles.center}>
+              <Ionicons
+                name="chatbubbles-outline"
+                size={40}
+                color={theme.textMuted}
+              />
+              <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
+                Say hello to {otherPartyName}
+              </ThemedText>
+            </View>
+          }
+        />
+      )}
+
+      <FlatList
+        data={chips}
+        horizontal
+        keyExtractor={(q) => q.key}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.quickRow}
+        renderItem={({ item }) => (
+          <Pressable
+            onPress={() => handleQuickReply(item.key)}
+            style={[styles.quickChip, { backgroundColor: theme.card }]}
+          >
+            <ThemedText style={[styles.quickText, { color: theme.text }]}>
+              {item.text}
+            </ThemedText>
+          </Pressable>
+        )}
+      />
+
+      <View style={[styles.inputRow, { borderTopColor: theme.card }]}>
+        <TextInput
+          value={text}
+          onChangeText={setText}
+          placeholder="Type a message"
+          placeholderTextColor={theme.textMuted}
           style={[
-            styles.sheet,
-            { backgroundColor: theme.backgroundRoot, paddingBottom: insets.bottom + Spacing.sm },
+            styles.input,
+            { backgroundColor: theme.card, color: theme.text },
+          ]}
+          multiline
+          onSubmitEditing={handleSendText}
+          returnKeyType="send"
+        />
+        <Pressable
+          onPress={handleSendText}
+          disabled={!text.trim() || sendMutation.isPending}
+          style={[
+            styles.sendBtn,
+            {
+              backgroundColor: text.trim() ? theme.primary : theme.card,
+              opacity: sendMutation.isPending ? 0.6 : 1,
+            },
           ]}
         >
-          <View style={styles.handle} />
-          <View style={styles.header}>
-            <View style={{ flex: 1 }}>
-              <ThemedText style={styles.title}>{otherPartyName}</ThemedText>
-              <ThemedText style={[styles.subtitle, { color: theme.textSecondary }]}>
-                Messages stay in your trip
-              </ThemedText>
-            </View>
-            <Pressable
-              onPress={() => setShowLangPicker(true)}
-              style={[styles.langBtn, { backgroundColor: theme.card }]}
-              hitSlop={8}
-            >
-              <Ionicons name="language" size={16} color={theme.primary} />
-              <ThemedText style={[styles.langCode, { color: theme.text }]}>
-                {myLang.toUpperCase()}
-              </ThemedText>
-            </Pressable>
-            <Pressable
-              onPress={onClose}
-              style={[styles.closeBtn, { backgroundColor: theme.card }]}
-              hitSlop={8}
-            >
-              <Ionicons name="close" size={22} color={theme.text} />
-            </Pressable>
-          </View>
-
-          {isLoading ? (
-            <View style={styles.center}>
-              <ActivityIndicator color={theme.primary} />
-            </View>
-          ) : (
-            <FlatList
-              ref={listRef}
-              data={messages || []}
-              keyExtractor={(m) => m.id}
-              renderItem={renderItem}
-              contentContainerStyle={styles.listContent}
-              ListEmptyComponent={
-                <View style={styles.center}>
-                  <Ionicons
-                    name="chatbubbles-outline"
-                    size={40}
-                    color={theme.textMuted}
-                  />
-                  <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
-                    Say hello to {otherPartyName}
-                  </ThemedText>
-                </View>
-              }
-            />
-          )}
-
-          <FlatList
-            data={chips}
-            horizontal
-            keyExtractor={(q) => q.key}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.quickRow}
-            renderItem={({ item }) => (
-              <Pressable
-                onPress={() => handleQuickReply(item.key)}
-                style={[styles.quickChip, { backgroundColor: theme.card }]}
-              >
-                <ThemedText style={[styles.quickText, { color: theme.text }]}>
-                  {item.text}
-                </ThemedText>
-              </Pressable>
-            )}
+          <Ionicons
+            name="send"
+            size={20}
+            color={text.trim() ? "#FFFFFF" : theme.textMuted}
           />
-
-          <View style={[styles.inputRow, { borderTopColor: theme.card }]}>
-            <TextInput
-              value={text}
-              onChangeText={setText}
-              placeholder="Type a message"
-              placeholderTextColor={theme.textMuted}
-              style={[
-                styles.input,
-                { backgroundColor: theme.card, color: theme.text },
-              ]}
-              multiline
-              onSubmitEditing={handleSendText}
-              returnKeyType="send"
-            />
-            <Pressable
-              onPress={handleSendText}
-              disabled={!text.trim() || sendMutation.isPending}
-              style={[
-                styles.sendBtn,
-                {
-                  backgroundColor: text.trim() ? theme.primary : theme.card,
-                  opacity: sendMutation.isPending ? 0.6 : 1,
-                },
-              ]}
-            >
-              <Ionicons
-                name="send"
-                size={20}
-                color={text.trim() ? "#FFFFFF" : theme.textMuted}
-              />
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
+        </Pressable>
       </View>
 
       <Modal
@@ -376,6 +409,27 @@ export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }:
           </View>
         </View>
       </Modal>
+    </KeyboardAvoidingView>
+  );
+}
+
+/**
+ * Bottom-sheet modal wrapper around RideConversation, used on the active-ride
+ * screens via a "Chat" button.
+ */
+export function RideChat({ rideId, visible, onClose, myUserId, otherPartyName }: RideChatProps) {
+  return (
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={styles.backdrop}>
+        <Pressable style={styles.backdropTouch} onPress={onClose} />
+        <RideConversation
+          rideId={rideId}
+          myUserId={myUserId}
+          otherPartyName={otherPartyName}
+          active={visible}
+          onClose={onClose}
+        />
+      </View>
     </Modal>
   );
 }
@@ -387,6 +441,10 @@ const styles = StyleSheet.create({
     height: "78%",
     borderTopLeftRadius: BorderRadius.xl,
     borderTopRightRadius: BorderRadius.xl,
+    paddingHorizontal: Spacing.lg,
+  },
+  embedded: {
+    flex: 1,
     paddingHorizontal: Spacing.lg,
   },
   handle: {

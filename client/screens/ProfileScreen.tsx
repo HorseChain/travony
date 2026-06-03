@@ -137,9 +137,9 @@ export default function ProfileScreen() {
 
       <Card style={styles.menuCard}>
         <MenuItem
-          icon="shield-checkmark-outline"
-          title="Ride Truth Engine"
-          onPress={() => navigation.navigate("RideTruth")}
+          icon="chatbubbles-outline"
+          title="Messages"
+          onPress={() => navigation.navigate("Messages")}
         />
         <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
         <MenuItem

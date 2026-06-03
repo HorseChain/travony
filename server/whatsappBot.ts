@@ -2,9 +2,12 @@ import { db } from "./db";
 import { users, drivers, rides } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
 
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER;
+// Read env vars dynamically so secret hot-reload works, and trim stray whitespace
+function getAccountSid() { return (process.env.TWILIO_ACCOUNT_SID || "").trim(); }
+function getAuthToken() { return (process.env.TWILIO_AUTH_TOKEN || "").trim(); }
+function getWhatsappNumber() {
+  return (process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER || "").trim().replace(/\s+/g, "");
+}
 
 interface WhatsAppMessage {
   to: string;
@@ -12,6 +15,10 @@ interface WhatsAppMessage {
 }
 
 export async function sendWhatsAppMessage(to: string, body: string): Promise<boolean> {
+  const TWILIO_ACCOUNT_SID = getAccountSid();
+  const TWILIO_AUTH_TOKEN = getAuthToken();
+  const TWILIO_WHATSAPP_NUMBER = getWhatsappNumber();
+
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_WHATSAPP_NUMBER) {
     console.log("[WhatsApp] Twilio not configured. Message:", body);
     return false;
@@ -21,7 +28,8 @@ export async function sendWhatsAppMessage(to: string, body: string): Promise<boo
     ? TWILIO_WHATSAPP_NUMBER 
     : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
   
-  const toNumber = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
+  const cleanTo = to.trim().replace(/\s+/g, "");
+  const toNumber = cleanTo.startsWith("whatsapp:") ? cleanTo : `whatsapp:${cleanTo}`;
 
   try {
     const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");

@@ -5,6 +5,7 @@ import EditProfileScreen from "@/screens/EditProfileScreen";
 import SavedAddressesScreen from "@/screens/SavedAddressesScreen";
 import EmergencyContactsScreen from "@/screens/EmergencyContactsScreen";
 import HelpScreen from "@/screens/HelpScreen";
+import MessagesScreen from "@/screens/MessagesScreen";
 import RideTruthScreen from "@/screens/RideTruthScreen";
 import GhostModeScreen from "@/screens/GhostModeScreen";
 import AboutNetworkScreen from "@/screens/AboutNetworkScreen";
@@ -19,6 +20,7 @@ export type ProfileStackParamList = {
   SavedAddresses: undefined;
   EmergencyContacts: undefined;
   Help: undefined;
+  Messages: undefined;
   RideTruth: undefined;
   GhostMode: undefined;
   AboutNetwork: undefined;
@@ -58,6 +60,11 @@ export default function ProfileStackNavigator() {
         name="Help"
         component={HelpScreen}
         options={{ headerTitle: "Help & Support" }}
+      />
+      <Stack.Screen
+        name="Messages"
+        component={MessagesScreen}
+        options={{ headerTitle: "Messages" }}
       />
       <Stack.Screen
         name="RideTruth"

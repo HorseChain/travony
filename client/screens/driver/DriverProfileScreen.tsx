@@ -140,10 +140,10 @@ export default function DriverProfileScreen() {
     ],
     [
       {
-        icon: "shield-checkmark-outline",
-        label: "Ride Truth Engine",
-        subtitle: "Cross-platform ride scoring",
-        onPress: () => navigation.navigate("DriverRideTruth" as any),
+        icon: "chatbubbles-outline",
+        label: "Messages",
+        subtitle: "Chat with your rider",
+        onPress: () => navigation.navigate("DriverMessages" as any),
       },
       {
         icon: "radio-outline",

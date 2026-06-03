@@ -4493,6 +4493,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Returns the authenticated user's current active trip (as rider or driver),
+  // including the other person's name, so the standalone Messages screen can open
+  // the live conversation without the caller needing to know ride ids or roles.
+  // Only trips with an assigned driver count as a conversation (pending excluded).
+  app.get("/api/me/active-ride", requireAuth, async (req: any, res) => {
+    try {
+      const CONVERSATION_STATUSES = ["accepted", "arriving", "in_progress", "started"];
+      const userId = req.userId;
+
+      const customerRides = await storage.getRidesByCustomer(userId);
+      let ride = customerRides.find((r) => CONVERSATION_STATUSES.includes(r.status));
+      let myRole: "customer" | "driver" = "customer";
+
+      if (!ride) {
+        const driverRecord = await storage.getDriverByUserId(userId);
+        if (driverRecord) {
+          const driverRides = await storage.getRidesByDriver(driverRecord.id);
+          ride = driverRides.find((r) => CONVERSATION_STATUSES.includes(r.status));
+          myRole = "driver";
+        }
+      }
+
+      if (!ride) {
+        return res.json(null);
+      }
+
+      let otherPartyName = myRole === "customer" ? "your driver" : "your rider";
+      try {
+        if (myRole === "customer") {
+          if (ride.driverId) {
+            const rideDriver = await storage.getDriver(ride.driverId);
+            if (rideDriver?.userId) {
+              const driverUser = await storage.getUser(rideDriver.userId);
+              if (driverUser?.name) otherPartyName = driverUser.name;
+            }
+          }
+        } else if (ride.customerId) {
+          const customerUser = await storage.getUser(ride.customerId);
+          if (customerUser?.name) otherPartyName = customerUser.name;
+        }
+      } catch {
+        // Name is best-effort; fall back to the generic label.
+      }
+
+      res.json({ id: ride.id, status: ride.status, myRole, otherPartyName });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ============ QUICK WIN FEATURES ============
 
   // Trip Sharing - Generate shareable link for ride tracking
