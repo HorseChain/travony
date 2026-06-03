@@ -3,6 +3,11 @@ import { storage } from "./storage";
 import { db } from "./db";
 import { coffeeOrders, users, drivers, hubs } from "@shared/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
+import {
+  COFFEE_MENU,
+  createCoffeeOrder,
+  CoffeeValidationError,
+} from "./coffeeService";
 
 const router = Router();
 
@@ -15,26 +20,14 @@ async function getSessionUser(req: any) {
   return session;
 }
 
-const COFFEE_MENU = [
-  { id: "karak_tea", name: "Karak Tea", category: "tea", basePrice: 5, currency: "AED", description: "Traditional spiced milk tea" },
-  { id: "arabic_coffee", name: "Arabic Coffee", category: "coffee", basePrice: 8, currency: "AED", description: "Traditional gahwa with cardamom" },
-  { id: "cappuccino", name: "Cappuccino", category: "coffee", basePrice: 15, currency: "AED", description: "Espresso with steamed milk foam" },
-  { id: "latte", name: "Latte", category: "coffee", basePrice: 16, currency: "AED", description: "Espresso with steamed milk" },
-  { id: "espresso", name: "Espresso", category: "coffee", basePrice: 12, currency: "AED", description: "Rich single shot espresso" },
-  { id: "americano", name: "Americano", category: "coffee", basePrice: 13, currency: "AED", description: "Espresso with hot water" },
-  { id: "mocha", name: "Mocha", category: "coffee", basePrice: 18, currency: "AED", description: "Espresso with chocolate and steamed milk" },
-  { id: "iced_latte", name: "Iced Latte", category: "iced", basePrice: 18, currency: "AED", description: "Chilled espresso with cold milk" },
-  { id: "iced_americano", name: "Iced Americano", category: "iced", basePrice: 15, currency: "AED", description: "Chilled espresso with cold water" },
-  { id: "matcha_latte", name: "Matcha Latte", category: "specialty", basePrice: 20, currency: "AED", description: "Japanese matcha with steamed milk" },
-  { id: "turkish_coffee", name: "Turkish Coffee", category: "coffee", basePrice: 10, currency: "AED", description: "Fine ground coffee, strong and bold" },
-  { id: "hot_chocolate", name: "Hot Chocolate", category: "other", basePrice: 16, currency: "AED", description: "Rich Belgian chocolate drink" },
-];
-
-const SIZE_MULTIPLIERS: Record<string, number> = {
-  small: 0.8,
-  medium: 1.0,
-  large: 1.3,
-};
+// Push a coffee order status change to the orderer's Telegram chat, if they
+// ordered through the bot. Best-effort and lazily imported to avoid a static
+// import cycle with the Telegram bot module.
+function pushCoffeeUpdate(orderId: string): void {
+  import("./telegramRiderBot")
+    .then((m) => m.notifyCoffeeOrderUpdate(orderId))
+    .catch((error) => console.error("[Coffee] telegram notify error:", error));
+}
 
 router.get("/api/coffee/menu", async (req, res) => {
   try {
@@ -66,55 +59,28 @@ router.post("/api/coffee/orders", async (req, res) => {
       paymentMethod,
     } = req.body;
 
-    if (!coffeeName || !orderType) {
-      return res.status(400).json({ error: "Coffee name and order type are required" });
-    }
-
-    const menuItem = COFFEE_MENU.find(m => m.id === coffeeName || m.name === coffeeName);
-    if (!menuItem) {
-      return res.status(400).json({ error: "Invalid coffee selection" });
-    }
-
-    const size = coffeeSize || "medium";
-    const qty = Math.max(1, Math.min(quantity || 1, 10));
-    const sizeMultiplier = SIZE_MULTIPLIERS[size] || 1.0;
-    const itemPrice = Math.round(menuItem.basePrice * sizeMultiplier * 100) / 100;
-    const deliveryFee = orderType === "buy" ? 0 : 5;
-    const totalAmount = Math.round((itemPrice * qty + deliveryFee) * 100) / 100;
-
-    let hubData = null;
-    if (hubId) {
-      const hubResults = await db.select().from(hubs).where(eq(hubs.id, hubId));
-      hubData = hubResults[0] || null;
-    }
-
-    const [order] = await db.insert(coffeeOrders).values({
+    const order = await createCoffeeOrder({
       ordererId: session.userId,
       orderType,
-      coffeeName: menuItem.name,
-      coffeeSize: size,
-      quantity: qty,
-      specialInstructions: specialInstructions || null,
-      giftMessage: orderType === "gift" ? (giftMessage || null) : null,
-      recipientPhone: orderType === "gift" ? (recipientPhone || null) : null,
-      recipientName: orderType === "gift" ? (recipientName || null) : null,
-      hubId: hubId || null,
-      pickupLat: hubData ? hubData.lat : null,
-      pickupLng: hubData ? hubData.lng : null,
-      pickupAddress: hubData ? hubData.address : null,
-      deliveryLat: deliveryLat || null,
-      deliveryLng: deliveryLng || null,
-      deliveryAddress: deliveryAddress || null,
-      itemPrice: itemPrice.toString(),
-      deliveryFee: deliveryFee.toString(),
-      totalAmount: totalAmount.toString(),
-      paymentMethod: paymentMethod || "card",
-      estimatedDeliveryMinutes: 15,
-      status: "pending",
-    }).returning();
+      coffeeName,
+      coffeeSize,
+      quantity,
+      specialInstructions,
+      giftMessage,
+      recipientPhone,
+      recipientName,
+      hubId,
+      deliveryLat,
+      deliveryLng,
+      deliveryAddress,
+      paymentMethod,
+    });
 
     res.json({ order });
   } catch (error: any) {
+    if (error instanceof CoffeeValidationError) {
+      return res.status(400).json({ error: error.message });
+    }
     res.status(500).json({ error: error.message || "Failed to create coffee order" });
   }
 });
@@ -144,7 +110,12 @@ router.get("/api/coffee/orders/:orderId", async (req, res) => {
 
     if (!order) return res.status(404).json({ error: "Order not found" });
 
-    if (order.ordererId !== session.userId && order.driverId !== session.userId) {
+    let isAssignedDriver = false;
+    if (order.driverId) {
+      const driver = await storage.getDriverByUserId(session.userId);
+      isAssignedDriver = Boolean(driver && driver.id === order.driverId);
+    }
+    if (order.ordererId !== session.userId && !isAssignedDriver) {
       return res.status(403).json({ error: "Forbidden" });
     }
 
@@ -180,6 +151,7 @@ router.patch("/api/coffee/orders/:orderId/cancel", async (req, res) => {
       .where(eq(coffeeOrders.id, req.params.orderId))
       .returning();
 
+    pushCoffeeUpdate(updated.id);
     res.json({ order: updated });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to cancel order" });
@@ -240,6 +212,7 @@ router.patch("/api/coffee/driver/orders/:orderId/accept", async (req, res) => {
       .where(eq(coffeeOrders.id, req.params.orderId))
       .returning();
 
+    pushCoffeeUpdate(updated.id);
     res.json({ order: updated });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to accept order" });
@@ -287,6 +260,7 @@ router.patch("/api/coffee/driver/orders/:orderId/status", async (req, res) => {
       .where(eq(coffeeOrders.id, req.params.orderId))
       .returning();
 
+    pushCoffeeUpdate(updated.id);
     res.json({ order: updated });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to update order status" });
