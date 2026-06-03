@@ -427,6 +427,137 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
   }
 }
 
+interface DriverRideRequestEmailData {
+  driverName: string;
+  driverEmail: string;
+  rideId: string;
+  pickupAddress: string;
+  dropoffAddress: string;
+  fare: string;
+  earnings: string;
+  currency: string;
+  distance?: string;
+  paymentMethod?: string;
+}
+
+export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailData): Promise<boolean> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.log("Email not configured - skipping driver ride request email");
+    return false;
+  }
+
+  const payLabel = data.paymentMethod === "usdt"
+    ? "Crypto (USDT)"
+    : data.paymentMethod === "card"
+      ? "Card"
+      : data.paymentMethod === "wallet"
+        ? "Wallet"
+        : "Cash";
+
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Ride Request</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background-color: #f5f5f5;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+    <tr>
+      <td style="background-color: #00B14F; padding: 24px; text-align: center;">
+        <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">Travony</h1>
+        <p style="margin: 8px 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">New Ride Request</p>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="padding: 32px 24px;">
+        <p style="margin: 0 0 24px; color: #333; font-size: 16px;">
+          Hi ${data.driverName}, you have a new ride request.
+        </p>
+
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #E8F5E9; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: center;">
+          <tr>
+            <td>
+              <p style="margin: 0 0 8px; color: #666; font-size: 14px;">You earn (90%)</p>
+              <p style="margin: 0; color: #00B14F; font-size: 36px; font-weight: 700;">${data.currency} ${data.earnings}</p>
+            </td>
+          </tr>
+        </table>
+
+        <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9f9f9; border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+          <tr>
+            <td>
+              <p style="margin: 0 0 12px; color: #333; font-size: 14px; font-weight: 600;">Trip Details</p>
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td style="padding: 6px 0;">
+                    <span style="color: #666; font-size: 13px;">From</span>
+                    <p style="margin: 2px 0 0; color: #333; font-size: 13px;">${data.pickupAddress}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 0;">
+                    <span style="color: #666; font-size: 13px;">To</span>
+                    <p style="margin: 2px 0 0; color: #333; font-size: 13px;">${data.dropoffAddress}</p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+
+        <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom: 24px;">
+          <tr>
+            <td style="padding: 12px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666; font-size: 14px;">Estimated Fare</span>
+              <span style="float: right; color: #333; font-size: 14px; font-weight: 500;">${data.currency} ${data.fare}</span>
+            </td>
+          </tr>
+          ${data.distance ? `<tr>
+            <td style="padding: 12px 0; border-bottom: 1px solid #eee;">
+              <span style="color: #666; font-size: 14px;">Distance</span>
+              <span style="float: right; color: #333; font-size: 14px; font-weight: 500;">~${data.distance}</span>
+            </td>
+          </tr>` : ""}
+          <tr>
+            <td style="padding: 12px 0;">
+              <span style="color: #666; font-size: 14px;">Payment</span>
+              <span style="float: right; color: #333; font-size: 14px; font-weight: 500;">${payLabel}</span>
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin: 0; color: #666; font-size: 14px; text-align: center;">
+          Open your <b>T Driver app</b> to accept this ride. First driver to accept wins.
+        </p>
+      </td>
+    </tr>
+
+    <tr>
+      <td style="background-color: #f5f5f5; padding: 24px; text-align: center;">
+        <p style="margin: 0; color: #999; font-size: 11px;">
+          Travony - 90% to Drivers, Always
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `;
+
+  const textContent = `New ride request\n\nHi ${data.driverName}, you have a new ride request.\n\nFrom: ${data.pickupAddress}\nTo: ${data.dropoffAddress}\nEstimated fare: ${data.currency} ${data.fare}\nYou earn (90%): ${data.currency} ${data.earnings}${data.distance ? `\nDistance: ~${data.distance}` : ""}\nPayment: ${payLabel}\n\nOpen your T Driver app to accept. First driver to accept wins.\n\nRide ID: ${data.rideId}`;
+
+  queueEmail(
+    data.driverEmail,
+    `New ride request - earn ${data.currency} ${data.earnings}`,
+    htmlContent,
+    textContent,
+  );
+  return true;
+}
+
 interface WeeklyFeedbackData {
   driverName: string;
   driverEmail: string;
