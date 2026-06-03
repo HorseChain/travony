@@ -323,19 +323,23 @@ export async function sendRideMessage(
   recipientLanguage: string,
   isQuickReply: boolean = false
 ): Promise<{ id: string; originalMessage: string; translatedMessage: string }> {
+  // For quick replies the incoming `message` is a phrase KEY (e.g. "on_my_way").
+  // Resolve it into readable text in each side's own language so the sender sees
+  // their language and the recipient sees theirs.
+  // Typed free-text is intentionally NOT translated — it is delivered verbatim.
+  let originalMessage = message;
   let translatedMessage = message;
-  
+
   if (isQuickReply) {
+    originalMessage = getQuickReplyTranslation(message, senderLanguage);
     translatedMessage = getQuickReplyTranslation(message, recipientLanguage);
-  } else if (senderLanguage !== recipientLanguage) {
-    translatedMessage = translateMessage(message, senderLanguage, recipientLanguage);
   }
   
   const [inserted] = await db.insert(rideMessages).values({
     rideId,
     senderId,
     senderRole,
-    originalMessage: message,
+    originalMessage,
     originalLanguage: senderLanguage,
     translatedMessage,
     translatedLanguage: recipientLanguage,
@@ -344,7 +348,7 @@ export async function sendRideMessage(
   
   return {
     id: inserted.id,
-    originalMessage: message,
+    originalMessage,
     translatedMessage,
   };
 }
