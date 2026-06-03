@@ -33,9 +33,9 @@ on:
 env:
   NODE_VERSION: '20'
   JAVA_VERSION: '17'
-  TARGET_SDK_VERSION: '33'
-  COMPILE_SDK_VERSION: '34'
-  BUILD_TOOLS_VERSION: '34.0.0'
+  TARGET_SDK_VERSION: '36'
+  COMPILE_SDK_VERSION: '36'
+  BUILD_TOOLS_VERSION: '36.0.0'
 
 jobs:
   build-rider:
@@ -110,6 +110,7 @@ jobs:
         run: |
           GRADLE="android/app/build.gradle"
           sed -i "s/targetSdkVersion [0-9]\+/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
+          sed -i "s/targetSdkVersion rootProject.ext.targetSdkVersion/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
           echo "Verifying targetSdkVersion:"
           grep "targetSdkVersion" "$GRADLE"
 
@@ -366,6 +367,7 @@ jobs:
         run: |
           GRADLE="android/app/build.gradle"
           sed -i "s/targetSdkVersion [0-9]\+/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
+          sed -i "s/targetSdkVersion rootProject.ext.targetSdkVersion/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
           echo "Verifying targetSdkVersion:"
           grep "targetSdkVersion" "$GRADLE"
 
