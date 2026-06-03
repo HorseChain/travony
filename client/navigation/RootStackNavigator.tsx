@@ -6,6 +6,7 @@ import DriverTabNavigator from "@/navigation/driver/DriverTabNavigator";
 import OnboardingScreen from "@/screens/OnboardingScreen";
 import { CreditToast } from "@/components/CreditToast";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { reportCrash } from "@/lib/reportCrash";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
@@ -13,7 +14,7 @@ import { APP_VARIANT, isRiderApp, isDriverApp } from "@/lib/appVariant";
 
 function SafeMainTabNavigator() {
   return (
-    <ErrorBoundary>
+    <ErrorBoundary onError={(e, s) => reportCrash(e, s, "RiderTabs")}>
       <MainTabNavigator />
     </ErrorBoundary>
   );
@@ -21,7 +22,7 @@ function SafeMainTabNavigator() {
 
 function SafeDriverTabNavigator() {
   return (
-    <ErrorBoundary>
+    <ErrorBoundary onError={(e, s) => reportCrash(e, s, "DriverTabs")}>
       <DriverTabNavigator />
     </ErrorBoundary>
   );

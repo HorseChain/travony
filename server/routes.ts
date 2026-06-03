@@ -41,6 +41,7 @@ import {
   getSupportedLanguages 
 } from "./translationService";
 import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
+import { REVIEW_PHONE, REVIEW_OTP, REVIEW_EMAIL, isReviewLogin, isReviewUserId, seedReviewDriver } from "./reviewAccount";
 import {
   initializeMexicoCityLaunch,
   getCityBySlug,
@@ -228,6 +229,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.post("/api/client-error", async (req, res) => {
+    try {
+      const { message, stack, componentStack, screen, action, appVersion, buildNumber, platform } = req.body || {};
+      console.error(
+        `[CLIENT-ERROR] platform=${platform || "?"} v=${appVersion || "?"} build=${buildNumber || "?"} screen=${screen || "?"} action=${action || "?"} :: ${String(message || "no message").slice(0, 500)}`
+      );
+      if (componentStack) {
+        console.error(`[CLIENT-ERROR] componentStack: ${String(componentStack).slice(0, 1200)}`);
+      }
+      if (stack) {
+        console.error(`[CLIENT-ERROR] stack: ${String(stack).slice(0, 1200)}`);
+      }
+      res.json({ ok: true });
+    } catch {
+      res.json({ ok: true });
+    }
+  });
+
   app.post("/api/auth/register", async (req, res) => {
     try {
       const { email, password, name, phone } = req.body;
@@ -361,6 +380,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid phone number is required" });
       }
 
+      // App-store review account: never send an SMS, just accept the fixed code
+      // on the verify step. Reviewers cannot receive texts.
+      if (isReviewLogin(phone)) {
+        return res.json({ success: true, message: "Verification code sent via SMS", channel: 'sms' });
+      }
+
       // Try Twilio Verify first (works globally, best for production)
       if (isVerifyConfigured()) {
         console.log(`Using Twilio Verify for ${phone}`);
@@ -434,6 +459,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!phone || !otp) {
         return res.status(400).json({ message: "Phone and OTP are required" });
+      }
+
+      // App-store review account: fixed code logs straight into the demo driver,
+      // independent of the in-memory OTP store (which resets on restart).
+      if (isReviewLogin(phone)) {
+        if (otp !== REVIEW_OTP) {
+          return res.status(400).json({ message: "Invalid verification code" });
+        }
+        const reviewUser = await seedReviewDriver();
+        // Refuse if the phone is not (or no longer) the demo account, so this can
+        // never log into a real user that happens to own the number.
+        if (!reviewUser || reviewUser.email !== REVIEW_EMAIL) {
+          return res.status(500).json({ message: "Review account unavailable" });
+        }
+        const token = await createSession(reviewUser.id, reviewUser.role);
+        return res.json({
+          success: true,
+          isNewUser: false,
+          user: {
+            id: reviewUser.id,
+            email: reviewUser.email || "",
+            name: reviewUser.name || "User",
+            phone: reviewUser.phone,
+            role: reviewUser.role,
+          },
+          token,
+        });
       }
 
       // Verify OTP from store
@@ -994,6 +1046,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!isCustomer && !isDriver && !isAdmin) {
         return res.status(403).json({ message: "Access denied" });
+      }
+
+      // The app-store review demo account is fully browsable but must never take
+      // a real rider's trip. Block it from claiming/accepting a live ride.
+      if (isReviewUserId(req.userId) && existingRide.status === "pending" && req.body.status === "accepted") {
+        return res.status(403).json({ message: "This demo review account cannot accept live rides." });
       }
       
       // Restrict what fields customers can update vs drivers

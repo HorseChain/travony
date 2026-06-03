@@ -13,6 +13,7 @@ import { queryClient } from "@/lib/query-client";
 
 import RootStackNavigator from "@/navigation/RootStackNavigator";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { reportCrash } from "@/lib/reportCrash";
 
 let KeyboardProvider: React.ComponentType<{ children: React.ReactNode }> | null = null;
 try {
@@ -57,7 +58,7 @@ export default function App() {
   }
 
   return (
-    <ErrorBoundary>
+    <ErrorBoundary onError={reportCrash}>
       <QueryClientProvider client={queryClient}>
         <SafeAreaProvider>
           <GestureHandlerRootView style={styles.root} onLayout={onLayoutRootView}>

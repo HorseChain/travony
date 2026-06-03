@@ -996,7 +996,7 @@ export default function DriverHomeScreen() {
               </View>
               {incomingRequest.isPmgthRide && incomingRequest.pmgthPremiumAmount ? (
                 <View style={[styles.premiumBadge, { backgroundColor: Colors.travonyGold }]}>
-                  <ThemedText style={styles.premiumText}>+AED {incomingRequest.pmgthPremiumAmount.toFixed(2)}</ThemedText>
+                  <ThemedText style={styles.premiumText}>+AED {Number(incomingRequest.pmgthPremiumAmount).toFixed(2)}</ThemedText>
                 </View>
               ) : null}
             </View>
@@ -1012,7 +1012,7 @@ export default function DriverHomeScreen() {
                 <View style={styles.ratingBadge}>
                   <Ionicons name="star" size={12} color="#FFB800" />
                   <ThemedText style={[styles.ratingText, { color: theme.textPrimary }]}>
-                    {incomingRequest.customerRating.toFixed(1)}
+                    {Number(incomingRequest.customerRating).toFixed(1)}
                   </ThemedText>
                 </View>
               ) : null}

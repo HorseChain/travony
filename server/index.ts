@@ -775,6 +775,13 @@ async function setupApiKeyRoutes(app: express.Application) {
   log(`Blockchain: ${blockchainResult.message}`);
 
   await seedAdminUser();
+  try {
+    const { seedReviewDriver } = await import("./reviewAccount");
+    await seedReviewDriver();
+    log("Review demo driver ensured");
+  } catch (e: any) {
+    log(`Review driver seeding skipped: ${e?.message || e}`);
+  }
 
   setupDeveloperPortal(app);
   await setupApiKeyRoutes(app);
