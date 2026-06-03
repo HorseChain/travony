@@ -1,0 +1,208 @@
+name: AI Release Notes Generator
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number for release notes (e.g., v2.0.3)'
+        required: true
+        type: string
+      since_tag:
+        description: 'Generate notes since this tag (optional)'
+        required: false
+        type: string
+
+jobs:
+  generate-release-notes:
+    name: Generate AI-Powered Release Notes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Get version info
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "push" ]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version: $VERSION"
+
+      - name: Get previous tag
+        id: prev_tag
+        run: |
+          if [ -n "${{ github.event.inputs.since_tag }}" ]; then
+            PREV_TAG="${{ github.event.inputs.since_tag }}"
+          else
+            PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          fi
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+          echo "Previous tag: $PREV_TAG"
+
+      - name: Collect commit information
+        id: commits
+        run: |
+          if [ -n "${{ steps.prev_tag.outputs.prev_tag }}" ]; then
+            RANGE="${{ steps.prev_tag.outputs.prev_tag }}..HEAD"
+          else
+            RANGE="HEAD~50..HEAD"
+          fi
+          
+          echo "Collecting commits from range: $RANGE"
+          
+          # Get commit messages
+          git log $RANGE --pretty=format:"- %s" > commits.txt
+          
+          # Get changed files summary
+          git diff --stat $RANGE -- . ':!*.lock' ':!node_modules' > changes.txt 2>/dev/null || echo "No previous tag" > changes.txt
+          
+          # Count changes
+          TOTAL_COMMITS=$(git rev-list --count $RANGE 2>/dev/null || echo "0")
+          FILES_CHANGED=$(git diff --name-only $RANGE 2>/dev/null | wc -l || echo "0")
+          
+          echo "total_commits=$TOTAL_COMMITS" >> $GITHUB_OUTPUT
+          echo "files_changed=$FILES_CHANGED" >> $GITHUB_OUTPUT
+
+      - name: Generate AI release notes
+        run: |
+          cat > generate-notes.js << 'SCRIPT'
+          const fs = require('fs');
+          
+          const commits = fs.readFileSync('commits.txt', 'utf8').split('\n').filter(c => c.trim());
+          const version = process.env.VERSION;
+          const totalCommits = process.env.TOTAL_COMMITS;
+          const filesChanged = process.env.FILES_CHANGED;
+          
+          // Categorize commits using AI-like pattern matching
+          const categories = {
+            features: [],
+            fixes: [],
+            security: [],
+            performance: [],
+            ui: [],
+            payments: [],
+            drivers: [],
+            riders: [],
+            other: []
+          };
+          
+          commits.forEach(commit => {
+            const lower = commit.toLowerCase();
+            
+            if (lower.includes('feat') || lower.includes('add') || lower.includes('implement') || lower.includes('new')) {
+              categories.features.push(commit);
+            } else if (lower.includes('fix') || lower.includes('bug') || lower.includes('resolve') || lower.includes('patch')) {
+              categories.fixes.push(commit);
+            } else if (lower.includes('security') || lower.includes('auth') || lower.includes('encrypt') || lower.includes('secret')) {
+              categories.security.push(commit);
+            } else if (lower.includes('perf') || lower.includes('optim') || lower.includes('speed') || lower.includes('fast')) {
+              categories.performance.push(commit);
+            } else if (lower.includes('ui') || lower.includes('design') || lower.includes('style') || lower.includes('theme')) {
+              categories.ui.push(commit);
+            } else if (lower.includes('payment') || lower.includes('stripe') || lower.includes('wallet') || lower.includes('usdt')) {
+              categories.payments.push(commit);
+            } else if (lower.includes('driver')) {
+              categories.drivers.push(commit);
+            } else if (lower.includes('rider') || lower.includes('passenger') || lower.includes('booking')) {
+              categories.riders.push(commit);
+            } else {
+              categories.other.push(commit);
+            }
+          });
+          
+          // Generate markdown
+          let notes = `# Travony ${version} Release Notes\n\n`;
+          notes += `**Release Date:** ${new Date().toISOString().split('T')[0]}\n`;
+          notes += `**Total Commits:** ${totalCommits} | **Files Changed:** ${filesChanged}\n\n`;
+          notes += `---\n\n`;
+          
+          const sectionMap = {
+            features: '🚀 New Features',
+            fixes: '🐛 Bug Fixes',
+            security: '🔒 Security Updates',
+            performance: '⚡ Performance Improvements',
+            ui: '🎨 UI/UX Enhancements',
+            payments: '💳 Payment System',
+            drivers: '🚗 Driver App Updates',
+            riders: '👤 Rider App Updates',
+            other: '📦 Other Changes'
+          };
+          
+          for (const [key, title] of Object.entries(sectionMap)) {
+            if (categories[key].length > 0) {
+              notes += `## ${title}\n\n`;
+              categories[key].forEach(commit => {
+                notes += `${commit}\n`;
+              });
+              notes += '\n';
+            }
+          }
+          
+          // Add app-specific highlights
+          notes += `## 📱 App Highlights\n\n`;
+          notes += `### T Ride (Passenger App)\n`;
+          notes += `- Intent-Based Mobility for smarter driver matching\n`;
+          notes += `- Guaranteed First Ride™ for new users\n`;
+          notes += `- Real Stripe payments (LIVE mode)\n`;
+          notes += `- USDT blockchain payouts on Polygon\n\n`;
+          
+          notes += `### T Driver (Driver App)\n`;
+          notes += `- Pay Me to Go Home directional matching\n`;
+          notes += `- AI-powered vehicle verification\n`;
+          notes += `- Driver Trust Protection system\n`;
+          notes += `- Real-time earnings tracking\n\n`;
+          
+          notes += `---\n\n`;
+          notes += `*Generated automatically by Travony AI Release Notes*\n`;
+          
+          fs.writeFileSync('RELEASE_NOTES.md', notes);
+          console.log(notes);
+          SCRIPT
+          
+          VERSION="${{ steps.version.outputs.version }}" \
+          TOTAL_COMMITS="${{ steps.commits.outputs.total_commits }}" \
+          FILES_CHANGED="${{ steps.commits.outputs.files_changed }}" \
+          node generate-notes.js
+
+      - name: Create or update release
+        uses: softprops/action-gh-release@v1
+        if: github.event_name == 'push'
+        with:
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: ${{ contains(steps.version.outputs.version, 'beta') || contains(steps.version.outputs.version, 'alpha') }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload release notes artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes-${{ steps.version.outputs.version }}
+          path: RELEASE_NOTES.md
+          retention-days: 90
+
+      - name: Summary
+        run: |
+          echo "## Release Notes Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.version.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Commits:** ${{ steps.commits.outputs.total_commits }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Files Changed:** ${{ steps.commits.outputs.files_changed }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          cat RELEASE_NOTES.md >> $GITHUB_STEP_SUMMARY

@@ -1,0 +1,547 @@
+name: Build Android AAB
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+  workflow_dispatch:
+    inputs:
+      app_variant:
+        description: 'Which app to build'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - rider
+          - driver
+          - both
+      publish_track:
+        description: 'Publish to Google Play track'
+        required: true
+        default: 'none'
+        type: choice
+        options:
+          - none
+          - internal
+          - alpha
+          - beta
+          - production
+
+env:
+  NODE_VERSION: '20'
+  JAVA_VERSION: '17'
+  TARGET_SDK_VERSION: '33'
+  COMPILE_SDK_VERSION: '34'
+  BUILD_TOOLS_VERSION: '34.0.0'
+
+jobs:
+  build-rider:
+    name: "Build T Ride AAB"
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.app_variant == 'rider' ||
+      github.event.inputs.app_variant == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install required SDK platforms and tools
+        run: |
+          sdkmanager \
+            "platforms;android-${{ env.COMPILE_SDK_VERSION }}" \
+            "platforms;android-${{ env.TARGET_SDK_VERSION }}" \
+            "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+
+      - name: Install npm dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Prepare rider app config
+        run: |
+          cp app.rider.json app.json
+          echo "=== T Ride Build Config ==="
+          echo "App: T Ride"
+          echo "Package: com.travony.rider"
+          echo "Version: $(jq -r '.expo.version' app.json)"
+          echo "VersionCode: $(jq -r '.expo.android.versionCode' app.json)"
+
+      - name: Generate Android project with Expo prebuild
+        env:
+          APP_VARIANT: rider
+          EXPO_PUBLIC_DOMAIN: Travony.replit.app
+        run: |
+          npx expo prebuild --platform android --clean
+          echo "Prebuild completed. Checking output..."
+          ls -la android/app/build.gradle
+
+      - name: Inject Google Maps API key
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's|\${GOOGLE_API_KEY}|${{ secrets.GOOGLE_API_KEY }}|g' "$MANIFEST"
+            echo "Google Maps API key injected"
+          else
+            echo "WARNING: AndroidManifest.xml not found"
+          fi
+
+      - name: Set targetSdkVersion to ${{ env.TARGET_SDK_VERSION }}
+        run: |
+          GRADLE="android/app/build.gradle"
+          sed -i "s/targetSdkVersion [0-9]\+/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
+          echo "Verifying targetSdkVersion:"
+          grep "targetSdkVersion" "$GRADLE"
+
+      - name: Decode rider keystore
+        run: |
+          echo "${{ secrets.RIDER_KEYSTORE_BASE64 }}" | base64 -d > android/app/rider-keystore.jks
+          FILESIZE=$(stat -c%s "android/app/rider-keystore.jks")
+          echo "Keystore decoded: ${FILESIZE} bytes"
+          if [ "$FILESIZE" -lt 100 ]; then
+            echo "ERROR: Keystore file too small, likely corrupted"
+            exit 1
+          fi
+
+      - name: Configure signing in gradle.properties
+        run: |
+          cat >> android/gradle.properties << 'PROPS'
+          RELEASE_STORE_FILE=rider-keystore.jks
+          RELEASE_STORE_PASSWORD=${{ secrets.RIDER_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS=${{ secrets.RIDER_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD=${{ secrets.RIDER_KEY_PASSWORD }}
+          PROPS
+
+      - name: Inject release signing config into build.gradle
+        run: |
+          python3 - << 'EOF'
+          import sys
+
+          gradle_path = "android/app/build.gradle"
+          with open(gradle_path, "r") as f:
+              lines = f.readlines()
+
+          new_lines = []
+          inside_android = False
+          build_types_found = False
+          signing_injected = False
+          release_block_depth = 0
+          in_release_block = False
+
+          signing_block = """    signingConfigs {
+              release {
+                  storeFile file(findProperty("RELEASE_STORE_FILE") ?: "release.keystore")
+                  storePassword findProperty("RELEASE_STORE_PASSWORD") ?: ""
+                  keyAlias findProperty("RELEASE_KEY_ALIAS") ?: ""
+                  keyPassword findProperty("RELEASE_KEY_PASSWORD") ?: ""
+              }
+          }
+          """
+
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+
+              if "buildTypes" in stripped and "{" in stripped and not signing_injected:
+                  new_lines.append(signing_block)
+                  new_lines.append("\n")
+                  signing_injected = True
+
+              if "signingConfig signingConfigs.debug" in line:
+                  line = line.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+
+              new_lines.append(line)
+
+          content = "".join(new_lines)
+
+          if "signingConfig signingConfigs.release" not in content:
+              content = content.replace(
+                  "release {\n",
+                  "release {\n            signingConfig signingConfigs.release\n",
+                  1
+              )
+
+          with open(gradle_path, "w") as f:
+              f.write(content)
+
+          print("Signing config injected successfully into build.gradle")
+          EOF
+
+      - name: Validate build.gradle before build
+        run: |
+          GRADLE="android/app/build.gradle"
+          echo "=== Checking signingConfigs ==="
+          grep -c "signingConfigs" "$GRADLE" && echo "signingConfigs found" || (echo "FATAL: No signingConfigs!" && exit 1)
+          echo "=== Checking targetSdkVersion ==="
+          grep "targetSdkVersion ${{ env.TARGET_SDK_VERSION }}" "$GRADLE" && echo "targetSdkVersion OK" || (echo "FATAL: Wrong targetSdkVersion!" && exit 1)
+          echo "=== Checking release signing ==="
+          grep "signingConfig signingConfigs.release" "$GRADLE" && echo "Release signing OK" || echo "WARNING: Release signing config reference not found"
+          echo "=== Checking RELEASE_STORE_FILE ==="
+          grep "RELEASE_STORE_FILE" "$GRADLE" && echo "Store file property OK" || (echo "FATAL: No store file property!" && exit 1)
+
+      - name: Build signed AAB
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease \
+            -Dorg.gradle.jvmargs="-Xmx4096m -XX:+HeapDumpOnOutOfMemoryError" \
+            -Dorg.gradle.parallel=true \
+            -Dorg.gradle.daemon=false \
+            --stacktrace 2>&1 | tail -50
+
+      - name: Verify and collect AAB
+        run: |
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$AAB" ]; then
+            echo "ERROR: AAB not found at expected path"
+            echo "Searching for any .aab files..."
+            find android -name "*.aab" -type f 2>/dev/null
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$AAB")
+          echo "T Ride AAB built successfully: $(numfmt --to=iec $SIZE)"
+          VERSION=$(jq -r '.expo.version' app.json)
+          VCODE=$(jq -r '.expo.android.versionCode' app.json)
+          cp "$AAB" "t-ride-v${VERSION}-vc${VCODE}.aab"
+          cp "$AAB" "t-ride.aab"
+
+      - name: Build signed APK
+        working-directory: android
+        continue-on-error: true
+        run: |
+          ./gradlew assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx4096m" \
+            -Dorg.gradle.daemon=false 2>&1 | tail -20
+
+      - name: Collect APK
+        continue-on-error: true
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          if [ -f "$APK" ]; then
+            cp "$APK" t-ride.apk
+            echo "APK: $(ls -lh t-ride.apk | awk '{print $5}')"
+          fi
+
+      - name: Upload T Ride AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-ride-aab
+          path: t-ride.aab
+          retention-days: 90
+
+      - name: Upload T Ride versioned AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-ride-aab-v${{ github.run_number }}
+          path: t-ride-v*.aab
+          retention-days: 90
+
+      - name: Upload T Ride APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-ride-apk
+          path: t-ride.apk
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## T Ride Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App | T Ride |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | com.travony.rider |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | $(jq -r '.expo.version' app.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Code | $(jq -r '.expo.android.versionCode' app.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target SDK | ${{ env.TARGET_SDK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compile SDK | ${{ env.COMPILE_SDK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Java | ${{ env.JAVA_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          if [ -f "t-ride.aab" ]; then
+            echo "| AAB Size | $(ls -lh t-ride.aab | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | SUCCESS |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | FAILED |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Publish to Google Play
+        if: ${{ github.event.inputs.publish_track != 'none' && github.event.inputs.publish_track != '' }}
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+        run: |
+          npm install googleapis
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | base64 -d > service-account.json
+          node scripts/publish-to-play-store.js rider t-ride.aab ${{ github.event.inputs.publish_track }}
+
+  build-driver:
+    name: "Build T Driver AAB"
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.app_variant == 'driver' ||
+      github.event.inputs.app_variant == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Setup Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install required SDK platforms and tools
+        run: |
+          sdkmanager \
+            "platforms;android-${{ env.COMPILE_SDK_VERSION }}" \
+            "platforms;android-${{ env.TARGET_SDK_VERSION }}" \
+            "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+
+      - name: Install npm dependencies
+        run: npm install --legacy-peer-deps
+
+      - name: Prepare driver app config
+        run: |
+          cp app.driver.json app.json
+          echo "=== T Driver Build Config ==="
+          echo "App: T Driver"
+          echo "Package: com.travony.driver"
+          echo "Version: $(jq -r '.expo.version' app.json)"
+          echo "VersionCode: $(jq -r '.expo.android.versionCode' app.json)"
+
+      - name: Generate Android project with Expo prebuild
+        env:
+          APP_VARIANT: driver
+          EXPO_PUBLIC_DOMAIN: Travony.replit.app
+        run: |
+          npx expo prebuild --platform android --clean
+          echo "Prebuild completed. Checking output..."
+          ls -la android/app/build.gradle
+
+      - name: Inject Google Maps API key
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            sed -i 's|\${GOOGLE_API_KEY}|${{ secrets.GOOGLE_API_KEY }}|g' "$MANIFEST"
+            echo "Google Maps API key injected"
+          else
+            echo "WARNING: AndroidManifest.xml not found"
+          fi
+
+      - name: Set targetSdkVersion to ${{ env.TARGET_SDK_VERSION }}
+        run: |
+          GRADLE="android/app/build.gradle"
+          sed -i "s/targetSdkVersion [0-9]\+/targetSdkVersion ${{ env.TARGET_SDK_VERSION }}/g" "$GRADLE"
+          echo "Verifying targetSdkVersion:"
+          grep "targetSdkVersion" "$GRADLE"
+
+      - name: Decode driver keystore
+        run: |
+          echo "${{ secrets.DRIVER_KEYSTORE_BASE64 }}" | base64 -d > android/app/driver-keystore.jks
+          FILESIZE=$(stat -c%s "android/app/driver-keystore.jks")
+          echo "Keystore decoded: ${FILESIZE} bytes"
+          if [ "$FILESIZE" -lt 100 ]; then
+            echo "ERROR: Keystore file too small, likely corrupted"
+            exit 1
+          fi
+
+      - name: Configure signing in gradle.properties
+        run: |
+          cat >> android/gradle.properties << 'PROPS'
+          RELEASE_STORE_FILE=driver-keystore.jks
+          RELEASE_STORE_PASSWORD=${{ secrets.DRIVER_KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS=${{ secrets.DRIVER_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD=${{ secrets.DRIVER_KEY_PASSWORD }}
+          PROPS
+
+      - name: Inject release signing config into build.gradle
+        run: |
+          python3 - << 'EOF'
+          import sys
+
+          gradle_path = "android/app/build.gradle"
+          with open(gradle_path, "r") as f:
+              lines = f.readlines()
+
+          new_lines = []
+          signing_injected = False
+
+          signing_block = """    signingConfigs {
+              release {
+                  storeFile file(findProperty("RELEASE_STORE_FILE") ?: "release.keystore")
+                  storePassword findProperty("RELEASE_STORE_PASSWORD") ?: ""
+                  keyAlias findProperty("RELEASE_KEY_ALIAS") ?: ""
+                  keyPassword findProperty("RELEASE_KEY_PASSWORD") ?: ""
+              }
+          }
+          """
+
+          for i, line in enumerate(lines):
+              stripped = line.strip()
+
+              if "buildTypes" in stripped and "{" in stripped and not signing_injected:
+                  new_lines.append(signing_block)
+                  new_lines.append("\n")
+                  signing_injected = True
+
+              if "signingConfig signingConfigs.debug" in line:
+                  line = line.replace("signingConfig signingConfigs.debug", "signingConfig signingConfigs.release")
+
+              new_lines.append(line)
+
+          content = "".join(new_lines)
+
+          if "signingConfig signingConfigs.release" not in content:
+              content = content.replace(
+                  "release {\n",
+                  "release {\n            signingConfig signingConfigs.release\n",
+                  1
+              )
+
+          with open(gradle_path, "w") as f:
+              f.write(content)
+
+          print("Signing config injected successfully into build.gradle")
+          EOF
+
+      - name: Validate build.gradle before build
+        run: |
+          GRADLE="android/app/build.gradle"
+          echo "=== Checking signingConfigs ==="
+          grep -c "signingConfigs" "$GRADLE" && echo "signingConfigs found" || (echo "FATAL: No signingConfigs!" && exit 1)
+          echo "=== Checking targetSdkVersion ==="
+          grep "targetSdkVersion ${{ env.TARGET_SDK_VERSION }}" "$GRADLE" && echo "targetSdkVersion OK" || (echo "FATAL: Wrong targetSdkVersion!" && exit 1)
+          echo "=== Checking release signing ==="
+          grep "signingConfig signingConfigs.release" "$GRADLE" && echo "Release signing OK" || echo "WARNING: Release signing config reference not found"
+          echo "=== Checking RELEASE_STORE_FILE ==="
+          grep "RELEASE_STORE_FILE" "$GRADLE" && echo "Store file property OK" || (echo "FATAL: No store file property!" && exit 1)
+
+      - name: Build signed AAB
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew bundleRelease \
+            -Dorg.gradle.jvmargs="-Xmx4096m -XX:+HeapDumpOnOutOfMemoryError" \
+            -Dorg.gradle.parallel=true \
+            -Dorg.gradle.daemon=false \
+            --stacktrace 2>&1 | tail -50
+
+      - name: Verify and collect AAB
+        run: |
+          AAB="android/app/build/outputs/bundle/release/app-release.aab"
+          if [ ! -f "$AAB" ]; then
+            echo "ERROR: AAB not found at expected path"
+            echo "Searching for any .aab files..."
+            find android -name "*.aab" -type f 2>/dev/null
+            exit 1
+          fi
+          SIZE=$(stat -c%s "$AAB")
+          echo "T Driver AAB built successfully: $(numfmt --to=iec $SIZE)"
+          VERSION=$(jq -r '.expo.version' app.json)
+          VCODE=$(jq -r '.expo.android.versionCode' app.json)
+          cp "$AAB" "t-driver-v${VERSION}-vc${VCODE}.aab"
+          cp "$AAB" "t-driver.aab"
+
+      - name: Build signed APK
+        working-directory: android
+        continue-on-error: true
+        run: |
+          ./gradlew assembleRelease \
+            -Dorg.gradle.jvmargs="-Xmx4096m" \
+            -Dorg.gradle.daemon=false 2>&1 | tail -20
+
+      - name: Collect APK
+        continue-on-error: true
+        run: |
+          APK="android/app/build/outputs/apk/release/app-release.apk"
+          if [ -f "$APK" ]; then
+            cp "$APK" t-driver.apk
+            echo "APK: $(ls -lh t-driver.apk | awk '{print $5}')"
+          fi
+
+      - name: Upload T Driver AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-driver-aab
+          path: t-driver.aab
+          retention-days: 90
+
+      - name: Upload T Driver versioned AAB
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-driver-aab-v${{ github.run_number }}
+          path: t-driver-v*.aab
+          retention-days: 90
+
+      - name: Upload T Driver APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: t-driver-apk
+          path: t-driver.apk
+          retention-days: 30
+          if-no-files-found: ignore
+
+      - name: Build Summary
+        if: always()
+        run: |
+          echo "## T Driver Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Property | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| App | T Driver |" >> $GITHUB_STEP_SUMMARY
+          echo "| Package | com.travony.driver |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | $(jq -r '.expo.version' app.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version Code | $(jq -r '.expo.android.versionCode' app.json) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Target SDK | ${{ env.TARGET_SDK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Compile SDK | ${{ env.COMPILE_SDK_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Java | ${{ env.JAVA_VERSION }} |" >> $GITHUB_STEP_SUMMARY
+          if [ -f "t-driver.aab" ]; then
+            echo "| AAB Size | $(ls -lh t-driver.aab | awk '{print $5}') |" >> $GITHUB_STEP_SUMMARY
+            echo "| Status | SUCCESS |" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "| Status | FAILED |" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Publish to Google Play
+        if: ${{ github.event.inputs.publish_track != 'none' && github.event.inputs.publish_track != '' }}
+        env:
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT }}
+        run: |
+          npm install googleapis
+          echo "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" | base64 -d > service-account.json
+          node scripts/publish-to-play-store.js driver t-driver.aab ${{ github.event.inputs.publish_track }}
