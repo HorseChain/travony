@@ -100,7 +100,7 @@ async function linkTelegramAccount(chatId: number, phone: string): Promise<{ suc
   return { success: true, message: `Account linked successfully! Welcome, ${user.name}` };
 }
 
-function getCommunityWelcome(firstName: string): string {
+export function getCommunityWelcome(firstName: string): string {
   return `<b>Welcome to the Travony Network</b>
 
 ${firstName}, you've joined a mobility infrastructure built for vehicle operators.
@@ -433,6 +433,13 @@ Join the network: https://play.google.com/store/apps/details?id=com.travony.driv
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<void> {
+  try {
+    const { tryHandleRiderUpdate } = await import("./telegramRiderBot");
+    if (await tryHandleRiderUpdate(update)) return;
+  } catch (error) {
+    console.error("[Telegram] Rider handler error:", error);
+  }
+
   if (update.callback_query) {
     const cbQuery = update.callback_query;
     const chatId = cbQuery.message?.chat.id;
@@ -461,14 +468,16 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
     await sendTelegramMessage(chatId, response);
   } else {
     const lowerText = text.toLowerCase();
-    if (lowerText.includes("earn") || lowerText.includes("money") || lowerText.includes("pay")) {
-      await sendTelegramMessage(chatId, "Interested in vehicle yield? Try /calculator or /earnings\n\nOn Travony, you retain 90% of every fare.");
+    if (lowerText.includes("book") || lowerText.includes("ride") || lowerText.includes("car") || lowerText.includes("taxi")) {
+      await sendTelegramMessage(chatId, "Need a ride? Tap /book to set your pickup and destination, or /menu to see everything Travony can do.");
+    } else if (lowerText.includes("earn") || lowerText.includes("money") || lowerText.includes("drive")) {
+      await sendTelegramMessage(chatId, "Want to drive and earn? Tap /drive for the operator hub.\n\nOn Travony, you keep 90% of every fare.");
     } else if (lowerText.includes("join") || lowerText.includes("sign up") || lowerText.includes("register")) {
-      await sendTelegramMessage(chatId, "Ready to join the network? Download T Driver from Google Play:\nhttps://play.google.com/store/apps/details?id=com.travony.driver\n\nThen link your account here with /link [phone]");
+      await sendTelegramMessage(chatId, "Welcome to Travony! Tap /start to choose how you'd like to begin — ride or drive.");
     } else if (lowerText.includes("help") || lowerText.includes("problem") || lowerText.includes("issue")) {
-      await sendTelegramMessage(chatId, "Need help? Try /support or /faq\n\nFor specific feedback: /feedback [your message]");
+      await sendTelegramMessage(chatId, "Need help? Try /help or /support\n\nFor specific feedback: /feedback [your message]");
     } else {
-      await sendTelegramMessage(chatId, "Type /start to see all available commands, or try:\n/tips - Route optimization strategies\n/calculator - Project your vehicle yield\n/faq - Common questions");
+      await sendTelegramMessage(chatId, "Tap /start to begin — you can book a ride or drive and earn. /menu shows everything Travony can do.");
     }
   }
 }
@@ -635,7 +644,15 @@ export async function setBotCommands(): Promise<boolean> {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         commands: [
-          { command: "start", description: "Welcome & overview" },
+          { command: "start", description: "Start here — ride or drive" },
+          { command: "menu", description: "Open the main menu" },
+          { command: "book", description: "Book a ride" },
+          { command: "coffee", description: "Order a coffee" },
+          { command: "hubs", description: "Explore hubs near you" },
+          { command: "mytrip", description: "Check your current trip" },
+          { command: "myorders", description: "Track your coffee orders" },
+          { command: "cancelride", description: "Cancel your current ride" },
+          { command: "drive", description: "Drive & earn — operator hub" },
           { command: "link", description: "Link your driver account" },
           { command: "status", description: "Check your driver status" },
           { command: "earnings", description: "View your earnings" },
@@ -643,10 +660,11 @@ export async function setBotCommands(): Promise<boolean> {
           { command: "referral", description: "Get your referral code" },
           { command: "tips", description: "Driving tips to earn more" },
           { command: "calculator", description: "Earnings calculator" },
-          { command: "faq", description: "Frequently asked questions" },
+          { command: "whytravony", description: "Why choose Travony" },
           { command: "community", description: "Community stats" },
           { command: "invite", description: "Share invite message" },
-          { command: "whytravony", description: "Why choose Travony" },
+          { command: "faq", description: "Frequently asked questions" },
+          { command: "help", description: "How to use Travony" },
           { command: "support", description: "Get help" },
           { command: "feedback", description: "Send feedback" },
         ],
