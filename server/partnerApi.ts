@@ -1,7 +1,7 @@
 import type { Request, Response, NextFunction } from "express";
 import { db } from "./db";
-import { apiKeys, apiUsageEvents, apiUsageCounters } from "@shared/schema";
-import { eq, and, sql } from "drizzle-orm";
+import { apiKeys, apiUsageEvents, apiUsageCounters, apiRateLimits } from "@shared/schema";
+import { eq, and, lt, sql } from "drizzle-orm";
 
 /**
  * Partner API control plane — the single source of truth for:
@@ -107,37 +107,53 @@ export function currentPeriod(date: Date = new Date()): string {
 }
 
 // ---------------------------------------------------------------------------
-// In-memory per-key rate limiter (rolling 60s window)
+// Shared per-key rate limiter (Postgres-backed, fixed 60s window)
 // ---------------------------------------------------------------------------
-// In-memory keeps it low-overhead and means a partner hammering the API never
-// adds DB load — protecting the first-party T Ride / T Driver experience.
+// Backed by the api_rate_limits table so the per-minute limit survives restarts
+// and deploys and stays consistent across load-balanced instances (an in-memory
+// window would reset on every boot and let partners exceed limits when traffic
+// is spread over several servers). We use a fixed-window counter: one atomic
+// upsert+increment per request keyed by (keyId, minute bucket), mirroring the
+// single-upsert cost of the monthly counter so partner traffic stays cheap and
+// isolated from the first-party T Ride / T Driver experience.
+//
+// Tradeoff: a fixed window can allow up to ~2x the limit across a window
+// boundary (vs. a true sliding window). That's an acceptable, well-understood
+// tradeoff for a coarse abuse-prevention limit and keeps it to one DB write.
 
-const rateWindows = new Map<string, number[]>();
 const WINDOW_MS = 60_000;
 
-function checkRateLimit(keyId: string, limitPerMin: number): { ok: boolean; retryAfterSec: number } {
+async function checkRateLimit(keyId: string, limitPerMin: number): Promise<{ ok: boolean; retryAfterSec: number }> {
   const now = Date.now();
-  const cutoff = now - WINDOW_MS;
-  const hits = (rateWindows.get(keyId) ?? []).filter((t) => t > cutoff);
-  if (hits.length >= limitPerMin) {
-    const oldest = hits[0];
-    const retryAfterSec = Math.max(1, Math.ceil((oldest + WINDOW_MS - now) / 1000));
-    rateWindows.set(keyId, hits);
+  const windowStartMs = Math.floor(now / WINDOW_MS) * WINDOW_MS;
+  const windowStart = new Date(windowStartMs);
+
+  // Atomic upsert+increment: the returned hitCount is this request's position in
+  // the current window, consistent across concurrent requests on any instance.
+  const [row] = await db
+    .insert(apiRateLimits)
+    .values({ keyId, windowStart, hitCount: 1, updatedAt: new Date() })
+    .onConflictDoUpdate({
+      target: [apiRateLimits.keyId, apiRateLimits.windowStart],
+      set: { hitCount: sql`${apiRateLimits.hitCount} + 1`, updatedAt: new Date() },
+    })
+    .returning({ hitCount: apiRateLimits.hitCount });
+
+  const count = row?.hitCount ?? 1;
+  if (count > limitPerMin) {
+    const retryAfterSec = Math.max(1, Math.ceil((windowStartMs + WINDOW_MS - now) / 1000));
     return { ok: false, retryAfterSec };
   }
-  hits.push(now);
-  rateWindows.set(keyId, hits);
   return { ok: true, retryAfterSec: 0 };
 }
 
-// Periodically evict idle windows so the map can't grow unbounded.
+// Periodically delete elapsed window rows so the table can't grow unbounded.
+// Keeping a couple of windows of slack avoids racing the active window.
 setInterval(() => {
-  const cutoff = Date.now() - WINDOW_MS;
-  for (const [k, hits] of rateWindows.entries()) {
-    const live = hits.filter((t) => t > cutoff);
-    if (live.length === 0) rateWindows.delete(k);
-    else rateWindows.set(k, live);
-  }
+  const cutoff = new Date(Date.now() - 5 * WINDOW_MS);
+  db.delete(apiRateLimits)
+    .where(lt(apiRateLimits.windowStart, cutoff))
+    .catch((e) => console.error("partner rate-limit cleanup failed:", (e as Error)?.message || e));
 }, 5 * 60_000).unref?.();
 
 // ---------------------------------------------------------------------------
@@ -221,8 +237,15 @@ export function requirePartner(scope: string | null) {
 
     const plan = getPlanTier(key.planTier);
 
-    // Per-minute rate limit (in-memory, isolated from first-party traffic).
-    const rl = checkRateLimit(key.keyId, plan.rateLimitPerMin);
+    // Per-minute rate limit (shared Postgres store; consistent across restarts
+    // and instances). Degrade open on a store failure so an infra blip never
+    // takes partners down — the monthly quota remains the hard ceiling.
+    let rl = { ok: true, retryAfterSec: 0 };
+    try {
+      rl = await checkRateLimit(key.keyId, plan.rateLimitPerMin);
+    } catch (e) {
+      console.error("partner rate-limit check failed (allowing request):", (e as Error)?.message);
+    }
     if (!rl.ok) {
       res.setHeader("Retry-After", String(rl.retryAfterSec));
       res.setHeader("X-RateLimit-Limit", String(plan.rateLimitPerMin));
