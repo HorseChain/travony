@@ -14,7 +14,9 @@ import {
   generateRideHash,
   createRideReceipt
 } from "./blockchain";
-import { sendRideReceiptEmail, sendDriverEarningsEmail, sendWeeklyFeedbackEmail } from "./email";
+import { sendWeeklyFeedbackEmail } from "./email";
+import { notifyOnlineDriversOfNewRide, sendRideCompletionEmails } from "./rideNotifications";
+import { getSystemHealth } from "./healthService";
 import { nowPaymentsService } from "./nowpayments";
 import { createRideInvoices } from "./invoiceService";
 import { 
@@ -87,6 +89,7 @@ import * as ghostRideService from "./ghostRideService";
 import { openClawRouter } from "./hubRoutes";
 import { coffeeRouter } from "./coffeeRoutes";
 import { fleetDashboardRouter } from "./fleetDashboardRoutes";
+import { evRouter } from "./evRoutes";
 import { initializeHubs, initializeEvHubs } from "./hubSeeder";
 import type { Ride } from "@shared/schema";
 import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs } from "@shared/schema";
@@ -190,7 +193,28 @@ async function requireAdmin(req: any, res: any, next: any) {
   next();
 }
 
+// Guard for /api/debug/* operational endpoints. These can read driver data and
+// approve/assign drivers, so they must never be publicly callable. Requires the
+// ADMIN_DEBUG_TOKEN secret to be presented via the x-admin-token header.
+function requireDebugToken(req: any, res: any, next: any) {
+  const expected = process.env.ADMIN_DEBUG_TOKEN;
+  if (!expected || req.get("x-admin-token") !== expected) {
+    return res.status(403).json({ message: "Forbidden" });
+  }
+  next();
+}
+
 export async function registerRoutes(app: Express): Promise<Server> {
+  // System wiring health check — powers the internal /admin/health page.
+  app.get("/api/admin/health", requireAdmin, async (_req: any, res: any) => {
+    try {
+      const health = await getSystemHealth();
+      res.json(health);
+    } catch (error: any) {
+      res.status(500).json({ message: error?.message || "Health check failed" });
+    }
+  });
+
   app.post("/api/account/delete-request", async (req, res) => {
     try {
       const { email, phone, userType, reason } = req.body;
@@ -667,6 +691,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/rides", async (req, res) => {
     try {
       const { customerId, driverId } = req.query;
+      // Auto-close abandoned rides so a rider is never permanently shown as
+      // "on a ride" (which blocks new bookings) by leftover stale records.
+      await storage.expireStaleRides().catch(() => {});
       let rides: Ride[] = [];
       if (customerId) {
         rides = await storage.getRidesByCustomer(customerId as string);
@@ -883,6 +910,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...intentData,
       });
 
+      // Broadcast the new ride to EVERY approved, online driver across all
+      // channels (Telegram, SMS, WhatsApp, email) so it surfaces instantly
+      // instead of waiting for the T Driver app's 5s poll. Pending rides use a
+      // broadcast/claim model — any approved online driver can accept, first
+      // wins — matching the Telegram booking path and the pending-rides poll.
+      // Previously this only pinged a single pre-matched driver (or nobody when
+      // unmatched), so app-booked rides reached no drivers on any channel.
+      notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+
       // Log EV demand signal for fleet operator analytics
       if (evPreferred) {
         try {
@@ -951,7 +987,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Driver is either assigned to this ride OR accepting a pending ride
         const isAssignedDriver = driverRecord?.id === existingRide.driverId;
         const canAcceptPendingRide = existingRide.status === "pending" && 
-                                     !existingRide.driverId && 
                                      driverRecord?.status === "approved" &&
                                      req.body.status === "accepted";
         isDriver = isAssignedDriver || canAcceptPendingRide;
@@ -983,10 +1018,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           allowedUpdates.startedAt = new Date(allowedUpdates.startedAt);
         }
         
-        // If driver is accepting a pending ride, assign themselves to it
+        // If driver is accepting a pending ride, atomically claim it so two
+        // drivers can't accept the same request (broadcast model race guard).
         if (driverRecord && existingRide.status === "pending" && req.body.status === "accepted") {
+          const claimed = await storage.claimPendingRide(existingRide.id, driverRecord.id);
+          if (!claimed) {
+            return res.status(409).json({ message: "This ride was just accepted by another driver." });
+          }
           allowedUpdates.driverId = driverRecord.id;
-          allowedUpdates.acceptedAt = new Date();
+          allowedUpdates.acceptedAt = claimed.acceptedAt ?? new Date();
           
           guaranteeService.fulfillByRide(driverRecord.id, existingRide.id).catch(console.error);
         }
@@ -1051,7 +1091,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      if (req.body.status === "completed" && existingRide.status !== "completed") {
+      // Gate on the PERSISTED, authorized transition (allowedUpdates only carries
+      // status:"completed" for drivers/admins; customers are restricted to cancel).
+      // This prevents an unauthorized caller from triggering payouts/ledger/emails
+      // by simply POSTing status:"completed", and makes the side effects fire once.
+      if (
+        allowedUpdates.status === "completed" &&
+        ride.status === "completed" &&
+        existingRide.status !== "completed"
+      ) {
         const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
         const user = await storage.getUser(ride.customerId);
         
@@ -1164,45 +1212,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
                   blockchainTxHash: blockchainResult.transactionHash,
                 });
               }
-
-              sendRideReceiptEmail({
-                customerName: user.name,
-                customerEmail: user.email,
-                rideId: ride.id,
-                pickupAddress: ride.pickupAddress,
-                dropoffAddress: ride.dropoffAddress,
-                distance: ride.distance || "0",
-                duration: String(ride.duration || 0),
-                fare: fare.toFixed(2),
-                platformFee: platformFee.toFixed(2),
-                driverEarnings: driverShare.toFixed(2),
-                blockchainHash: ride.blockchainHash || blockchainResult.hash,
-                blockchainTxHash: blockchainResult.transactionHash,
-                completedAt: new Date().toISOString(),
-              }).catch(err => console.log("Email send error:", err.message));
-
-              const driver2 = await storage.getDriver(ride.driverId);
-              if (driver2) {
-                const driverUser = await storage.getUser(driver2.userId);
-                if (driverUser) {
-                  sendDriverEarningsEmail({
-                    driverName: driverUser.name,
-                    driverEmail: driverUser.email,
-                    rideId: ride.id,
-                    pickupAddress: ride.pickupAddress,
-                    dropoffAddress: ride.dropoffAddress,
-                    totalFare: fare.toFixed(2),
-                    platformFee: platformFee.toFixed(2),
-                    earnings: driverShare.toFixed(2),
-                    blockchainHash: ride.blockchainHash || blockchainResult.hash,
-                    blockchainTxHash: blockchainResult.transactionHash,
-                    completedAt: new Date().toISOString(),
-                  }).catch(err => console.log("Driver email send error:", err.message));
-                }
-              }
             } catch (blockchainError: any) {
               console.log("Blockchain recording (optional):", blockchainError.message);
             }
+
+            // Email a receipt to the rider and an earnings summary to the driver.
+            // Re-fetches the ride so the on-chain tx hash (if any) is included, and
+            // skips placeholder/synthetic addresses (e.g. Telegram-only riders).
+            sendRideCompletionEmails(ride.id).catch(console.error);
 
             try {
               await createRideInvoices(ride.id);
@@ -1220,6 +1237,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             status: paymentStatus,
           });
         }
+      }
+
+      if (req.body.status && req.body.status !== existingRide.status) {
+        import("./telegramRiderBot")
+          .then((m) => m.notifyRiderRideUpdate(ride.id))
+          .catch((err) => console.error("[Telegram] rider notify error:", err));
       }
 
       res.json(ride);
@@ -2182,11 +2205,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/drivers/me", requireAuth, async (req: any, res) => {
     try {
       const userId = req.userId;
-      const driver = await storage.getDriverByUserId(userId);
+      let driver = await storage.getDriverByUserId(userId);
+      // Phone-signup drivers get role "driver" before a driver record exists.
+      // Auto-create a pending record so the driver dashboard loads instead of 404ing.
+      if (!driver && req.userRole === "driver") {
+        driver = await storage.getOrCreateDriver(userId, { status: "pending", isOnline: false });
+      }
       if (!driver) {
         return res.status(404).json({ message: "Driver not found" });
       }
-      res.json(driver);
+      const vehicles = await storage.getDriverVehicles(driver.id);
+      const vehicle = vehicles.find((v) => v.isActive) || vehicles[0] || null;
+      res.json({ ...driver, vehicle, vehicles });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -2194,18 +2224,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/drivers/status", requireAuth, async (req: any, res) => {
     try {
-      const { isOnline, lat, lng } = req.body;
-      const driver = await storage.getDriverByUserId(req.userId);
+      const { isOnline, lat, lng, evReady } = req.body;
+      let driver = await storage.getDriverByUserId(req.userId);
+      // Phone-signup drivers get role "driver" before a driver record exists.
+      // Auto-create a pending record so they can come online instead of 404ing.
+      if (!driver && req.userRole === "driver") {
+        driver = await storage.getOrCreateDriver(req.userId, {
+          status: "pending",
+          isOnline: false,
+          currentLat: lat != null ? lat.toString() : null,
+          currentLng: lng != null ? lng.toString() : null,
+        });
+      }
       if (!driver) {
         return res.status(404).json({ message: "Driver not found" });
       }
 
       const wasOffline = !driver.isOnline;
-      const updatedDriver = await storage.updateDriver(driver.id, {
+      const updateData: any = {
         isOnline,
         currentLat: lat,
         currentLng: lng,
-      });
+      };
+      // EV-ready mode: set when going online as EV-ready, always cleared when going offline.
+      if (!isOnline) {
+        updateData.evReady = false;
+        updateData.evReadyAt = null;
+      } else if (typeof evReady === "boolean") {
+        updateData.evReady = evReady;
+        updateData.evReadyAt = evReady ? new Date() : null;
+      }
+      const updatedDriver = await storage.updateDriver(driver.id, updateData);
 
       let guarantee = null;
       if (isOnline && wasOffline) {
@@ -2224,7 +2273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Temporary debug endpoint to check and approve driver
-  app.get("/api/debug/driver-status/:phone", async (req, res) => {
+  app.get("/api/debug/driver-status/:phone", requireDebugToken, async (req, res) => {
     try {
       const { phone } = req.params;
       const user = await storage.getUserByPhone(phone);
@@ -2250,26 +2299,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Approve a driver by phone number (DEBUG ONLY)
-  app.post("/api/debug/approve-driver/:phone", async (req, res) => {
+  app.post("/api/debug/approve-driver/:phone", requireDebugToken, async (req, res) => {
     try {
       const { phone } = req.params;
       const user = await storage.getUserByPhone(phone);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
       }
-      const driver = await storage.getDriverByUserId(user.id);
-      if (!driver) {
-        return res.status(404).json({ error: "Driver not found" });
-      }
+      // Create the driver record if the user signed up as a driver but never
+      // got one (phone-signup accounts create the record lazily).
+      const existing = await storage.getDriverByUserId(user.id);
+      const created = !existing;
+      const driver = await storage.getOrCreateDriver(user.id, { status: "pending", isOnline: false });
       const updated = await storage.updateDriver(driver.id, { status: "approved", isOnline: true });
-      res.json({ success: true, driver: updated });
+      res.json({ success: true, created, driver: updated });
     } catch (error: any) {
       res.status(500).json({ error: error.message });
     }
   });
 
   // Assign pending rides to a driver (DEBUG ONLY)
-  app.post("/api/debug/assign-rides/:driverId", async (req, res) => {
+  app.post("/api/debug/assign-rides/:driverId", requireDebugToken, async (req, res) => {
     try {
       const { driverId } = req.params;
       const pendingRides = await storage.getPendingRides();
@@ -2286,7 +2336,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Temporary debug endpoint to test pending rides
-  app.get("/api/debug/pending-rides/:driverId", async (req, res) => {
+  app.get("/api/debug/pending-rides/:driverId", requireDebugToken, async (req, res) => {
     try {
       const { driverId } = req.params;
       const allRides = await storage.getPendingRides();
@@ -2313,14 +2363,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Only approved drivers can view pending rides" });
       }
 
+      // Clear out abandoned/stale rides first so drivers never see dead requests.
+      await storage.expireStaleRides();
+
       const allRides = await storage.getPendingRides();
       
       console.log(`[PENDING-RIDES] Driver ${driver.id} requesting rides. Total pending: ${allRides.length}`);
       console.log(`[PENDING-RIDES] Sample ride driverIds: ${allRides.slice(0,3).map(r => r.driverId).join(', ')}`);
       
-      // Filter to only show rides assigned to this driver
-      // When a ride is matched to a driver, the driver_id is set
-      const driverRides = allRides.filter(ride => ride.driverId === driver.id);
+      // Broadcast model: any approved driver can see open ride requests, not just
+      // the single driver a ride was auto-matched to. This ensures rides booked
+      // via the app OR Telegram always reach an available driver instead of being
+      // stranded on one (possibly offline) account. First driver to accept wins.
+      const driverRides = allRides;
       
       console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length}`);
       
@@ -3653,9 +3708,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const payload = req.body;
       console.log("NOWPayments IPN received:", JSON.stringify(payload));
 
+      // Webhook auth: the IPN now triggers ride dispatch + financial state, so when
+      // an IPN secret is configured we REQUIRE a valid signature (reject missing or
+      // bad ones). Without a secret (dev only) we accept but warn loudly.
       const signature = req.headers["x-nowpayments-sig"] as string;
-      if (signature && !nowPaymentsService.verifyIpnSignature(payload, signature)) {
-        return res.status(400).json({ message: "Invalid IPN signature" });
+      if (process.env.NOWPAYMENTS_IPN_SECRET) {
+        if (!signature || !nowPaymentsService.verifyIpnSignature(payload, signature)) {
+          console.warn("[IPN] Rejected: missing or invalid signature");
+          return res.status(401).json({ message: "Invalid IPN signature" });
+        }
+      } else {
+        console.warn("[IPN] NOWPAYMENTS_IPN_SECRET not set — accepting unsigned IPN (dev only)");
       }
 
       const status = payload.payment_status;
@@ -3677,56 +3740,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
         } else if (parts[0] === "ride" && parts[1]) {
           const rideId = parts[1];
           const ride = await storage.getRide(rideId);
-          if (ride && ride.driverId) {
-            const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-            const driverShare = fare * 0.90;
-            const platformFee = fare * 0.10;
-
+          if (ride && ride.paymentStatus === "awaiting_payment") {
+            // Up-front crypto booking (Telegram). Record the payment, then only
+            // dispatch if the ride is still pending. The driver is credited later
+            // at trip completion (shared PATCH handler) — never here — to avoid a
+            // double payout. The status check makes this idempotent (a repeat IPN
+            // finds paymentStatus already "paid" and does nothing).
+            await storage.updateRide(rideId, { paymentStatus: "paid" });
+            if (ride.status === "pending") {
+              await notifyOnlineDriversOfNewRide(rideId).catch((e) =>
+                console.error("[IPN] release broadcast error:", e),
+              );
+              import("./telegramRiderBot")
+                .then((m) => m.notifyRiderPaymentConfirmed(rideId))
+                .catch((e) => console.error("[IPN] rider confirm error:", e));
+              console.log(`USDT ride prepaid & released to drivers: rideId=${rideId}`);
+            } else {
+              // Payment landed after the ride had already expired/cancelled. Do NOT
+              // dispatch a dead ride; tell the rider so they can get a refund/rebook.
+              import("./telegramRiderBot")
+                .then((m) => m.notifyRiderPaymentExpired(rideId))
+                .catch((e) => console.error("[IPN] rider expired-notify error:", e));
+              console.warn(`USDT payment received for non-pending ride ${rideId} (status=${ride.status}) — not dispatching`);
+            }
+          } else if (ride && ride.driverId) {
+            // Legacy/app USDT settlement: the driver is credited at trip completion
+            // (PATCH /api/rides/:id). Here we only mark the payment record settled —
+            // we deliberately do NOT credit the driver again to avoid a double payout.
             const existingPayment = await storage.getPaymentByRideId(rideId);
             if (existingPayment && existingPayment.status !== "completed") {
               await storage.updatePayment(existingPayment.id, { status: "completed" });
-
-              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
-              await storage.createWalletTransaction({
-                id: uuidv4(),
-                driverId: ride.driverId,
-                rideId: ride.id,
-                type: "ride_payment",
-                amount: driverShare.toFixed(2),
-                status: "completed",
-                description: `Earnings from USDT ride payment`,
-                completedAt: new Date(),
-              });
-
-              await storage.createWalletTransaction({
-                id: uuidv4(),
-                rideId: ride.id,
-                type: "platform_fee",
-                amount: platformFee.toFixed(2),
-                status: "completed",
-                description: `Platform fee (10%) from USDT ride`,
-                completedAt: new Date(),
-              });
-
-              await walletService.recordPlatformLedger({
-                type: "platform_fee_income",
-                amount: platformFee,
-                rideId: ride.id,
-                driverId: ride.driverId,
-                description: `10% fee from USDT ride ${ride.id.substring(0, 8)}`,
-                currency: ride.currency || "AED",
-              });
-
-              const driver = await storage.getDriver(ride.driverId);
-              if (driver) {
-                const currentEarnings = parseFloat(driver.totalEarnings || "0");
-                await storage.updateDriver(ride.driverId, {
-                  totalEarnings: (currentEarnings + driverShare).toFixed(2),
-                  totalTrips: (driver.totalTrips || 0) + 1,
-                });
-              }
-
-              console.log(`USDT ride payment confirmed: rideId=${rideId}, driverShare=${driverShare}, platformFee=${platformFee}`);
+              console.log(`USDT ride payment marked settled (credit handled at completion): rideId=${rideId}`);
             }
           }
         }
@@ -4351,20 +4395,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Save the signed-in user's preferred chat language so the other party can
+  // have messages translated into the language this user actually speaks.
+  app.post("/api/me/language", requireAuth, async (req: any, res) => {
+    try {
+      const { language } = req.body;
+      const supported = getSupportedLanguages().map((l) => l.code);
+      if (!language || !supported.includes(language)) {
+        return res.status(400).json({ message: "Unsupported language" });
+      }
+      await storage.updateUser(req.userId, { preferredLanguage: language });
+      res.json({ ok: true, language });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Send a message in a ride
   app.post("/api/rides/:id/messages", requireAuth, async (req: any, res) => {
     try {
-      const { message, senderLanguage, recipientLanguage, isQuickReply } = req.body;
-      
+      const { message, isQuickReply } = req.body;
+
+      // Only the ride's customer, its assigned driver, or an admin may message on a ride.
+      const messageRide = await storage.getRide(req.params.id);
+      if (!messageRide) {
+        return res.status(404).json({ message: "Ride not found" });
+      }
+      let isParticipant = req.userRole === "admin" || messageRide.customerId === req.userId;
+      if (!isParticipant && messageRide.driverId) {
+        const msgDriver = await storage.getDriver(messageRide.driverId);
+        isParticipant = !!msgDriver && msgDriver.userId === req.userId;
+      }
+      if (!isParticipant) {
+        return res.status(403).json({ message: "You are not a participant in this ride" });
+      }
+
+      // Resolve each side's language from their stored profile (server-
+      // authoritative) so quick replies are shown to the recipient in the
+      // language they actually speak. Client-supplied language is ignored.
+      const senderUser = await storage.getUser(req.userId);
+      const senderLang = senderUser?.preferredLanguage || "en";
+
+      let recipientUser;
+      if (messageRide.customerId === req.userId) {
+        if (messageRide.driverId) {
+          const recipDriver = await storage.getDriver(messageRide.driverId);
+          if (recipDriver) recipientUser = await storage.getUser(recipDriver.userId);
+        }
+      } else {
+        recipientUser = await storage.getUser(messageRide.customerId);
+      }
+      const recipientLang = recipientUser?.preferredLanguage || "en";
+
       const result = await sendRideMessage(
         req.params.id,
         req.userId,
         req.userRole,
         message,
-        senderLanguage || "en",
-        recipientLanguage || "en",
+        senderLang,
+        recipientLang,
         isQuickReply || false
       );
+
+      if (req.userRole === "driver") {
+        import("./telegramRiderBot")
+          .then((m) => m.pushDriverMessageToRider(req.params.id, result.translatedMessage))
+          .catch((err) => console.error("[Telegram] rider message push error:", err));
+      }
 
       res.json(result);
     } catch (error: any) {
@@ -4375,6 +4472,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Get messages for a ride
   app.get("/api/rides/:id/messages", requireAuth, async (req: any, res) => {
     try {
+      // Only the ride's customer, its assigned driver, or an admin may read messages.
+      const messageRide = await storage.getRide(req.params.id);
+      if (!messageRide) {
+        return res.status(404).json({ message: "Ride not found" });
+      }
+      let isParticipant = req.userRole === "admin" || messageRide.customerId === req.userId;
+      if (!isParticipant && messageRide.driverId) {
+        const msgDriver = await storage.getDriver(messageRide.driverId);
+        isParticipant = !!msgDriver && msgDriver.userId === req.userId;
+      }
+      if (!isParticipant) {
+        return res.status(403).json({ message: "You are not a participant in this ride" });
+      }
+
       const messages = await getRideMessages(req.params.id);
       res.json(messages);
     } catch (error: any) {
@@ -6834,6 +6945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(openClawRouter);
   app.use(coffeeRouter);
   app.use(fleetDashboardRouter);
+  app.use(evRouter);
 
   const httpServer = createServer(app);
 
