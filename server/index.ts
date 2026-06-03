@@ -573,7 +573,11 @@ async function seedAdminUser(): Promise<void> {
   const existing = await db.select().from(users).where(eq(users.email, "admin@travony.com")).limit(1);
   
   if (existing.length === 0) {
-    const adminPassword = process.env.ADMIN_PASSWORD || "Travony2024!";
+    const adminPassword = process.env.ADMIN_PASSWORD;
+    if (!adminPassword) {
+      log("ADMIN_PASSWORD not set; skipping admin user seeding");
+      return;
+    }
     const salt = randomBytes(16).toString("hex");
     const hash = scryptSync(adminPassword, salt, 64).toString("hex");
     
