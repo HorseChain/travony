@@ -15,6 +15,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { DimensionValue } from "react-native";
 import { MapView, Marker, Polyline, AnimatedRegion, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
+import WebViewMap from "@/components/WebViewMap";
 
 const isWeb = Platform.OS === ("web" as typeof Platform.OS);
 const isAndroid = Platform.OS === "android";
@@ -374,7 +375,29 @@ export default function RideMap({
     ];
   }, [pickupLocation, dropoffLocation]);
 
-  if (isAndroid || isWeb || !mapsAvailable || !MapView || !isMapMounted) {
+  if (isAndroid) {
+    return (
+      <View style={[styles.container, { height }]}>
+        <WebViewMap
+          height={height}
+          isDark={isDark}
+          interactive={interactive}
+          pickupLocation={pickupLocation ? { lat: pickupLocation.lat, lng: pickupLocation.lng } : null}
+          dropoffLocation={dropoffLocation ? { lat: dropoffLocation.lat, lng: dropoffLocation.lng } : null}
+          driverLocation={driverLocation ? { lat: driverLocation.lat, lng: driverLocation.lng, heading: driverHeading || driverLocation.heading || 0 } : null}
+          currentLocation={currentLocation ? { lat: currentLocation.lat, lng: currentLocation.lng } : null}
+          routeCoordinates={showRoute ? (routeGradient || fallbackRoute || undefined) : undefined}
+          showDriverMarker={showDriverMarker}
+          onMapReady={onMapReady}
+          eta={eta}
+          distance={distance}
+          rideStatus={rideStatus}
+        />
+      </View>
+    );
+  }
+
+  if (isWeb || !mapsAvailable || !MapView || !isMapMounted) {
     return (
       <View style={[styles.container, { height, backgroundColor: theme.backgroundDefault }]}>
         <View style={styles.webFallback}>

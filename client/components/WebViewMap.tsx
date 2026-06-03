@@ -26,6 +26,8 @@ interface WebViewMapProps {
   eta?: number;
   distance?: number;
   rideStatus?: string;
+  onCenterChange?: (lat: number, lng: number) => void;
+  recenterTo?: MapLocation | null;
 }
 
 const TRAVONY_GREEN = Colors.travonyGreen;
@@ -67,6 +69,7 @@ function init(){
   try{
     map=L.map('map',{zoomControl:false,attributionControl:false}).setView([25.2048,55.2708],14);
     L.tileLayer('${tileUrl}',{maxZoom:19,subdomains:'abcd'}).addTo(map);
+    map.on('moveend',function(){var c=map.getCenter();sendMsg({type:'center',lat:c.lat,lng:c.lng});});
     mapReady=true;
     sendMsg({type:'ready'});
   }catch(e){
@@ -174,6 +177,8 @@ export default function WebViewMap({
   eta,
   distance,
   rideStatus,
+  onCenterChange,
+  recenterTo,
 }: WebViewMapProps) {
   const webViewRef = useRef<WebView>(null);
   const [isReady, setIsReady] = useState(false);
@@ -206,9 +211,11 @@ export default function WebViewMap({
         setIsReady(true);
         onMapReady?.();
         setTimeout(flushPending, 100);
+      } else if (data.type === "center" && typeof data.lat === "number" && typeof data.lng === "number") {
+        onCenterChange?.(data.lat, data.lng);
       }
     } catch (e) {}
-  }, [onMapReady, flushPending]);
+  }, [onMapReady, flushPending, onCenterChange]);
 
   useEffect(() => {
     if (!isReady) return;
@@ -270,6 +277,13 @@ export default function WebViewMap({
       sendToMap({ type: "setInteractive", value: interactive });
     }
   }, [isReady, interactive]);
+
+  useEffect(() => {
+    if (!isReady) return;
+    if (recenterTo) {
+      sendToMap({ type: "setCenter", lat: recenterTo.lat, lng: recenterTo.lng, zoom: 15 });
+    }
+  }, [isReady, recenterTo?.lat, recenterTo?.lng]);
 
   const htmlContent = React.useMemo(() => generateMapHTML(isDark), [isDark]);
 

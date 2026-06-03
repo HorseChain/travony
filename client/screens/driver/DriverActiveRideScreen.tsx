@@ -22,6 +22,7 @@ import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
 import { MapView, Marker, mapsAvailable } from "@/components/NativeMaps";
+import WebViewMap from "@/components/WebViewMap";
 
 type NavigationProp = NativeStackNavigationProp<DriverHomeStackParamList>;
 type RouteProps = RouteProp<DriverHomeStackParamList, "DriverActiveRide">;
@@ -145,7 +146,7 @@ const progressStyles = StyleSheet.create({
 
 export default function DriverActiveRideScreen() {
   const insets = useSafeAreaInsets();
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const queryClient = useQueryClient();
@@ -327,7 +328,18 @@ export default function DriverActiveRideScreen() {
   };
 
   const renderMap = () => {
-    if (Platform.OS === "android" || Platform.OS === "web" || !mapsAvailable || !MapView) {
+    if (Platform.OS === "android") {
+      return (
+        <View style={styles.map}>
+          <WebViewMap
+            isDark={isDark}
+            pickupLocation={ride ? { lat: Number(ride.pickupLat), lng: Number(ride.pickupLng) } : null}
+            dropoffLocation={ride ? { lat: Number(ride.dropoffLat), lng: Number(ride.dropoffLng) } : null}
+          />
+        </View>
+      );
+    }
+    if (Platform.OS === "web" || !mapsAvailable || !MapView) {
       return (
         <View style={[styles.mapPlaceholder, { backgroundColor: theme.backgroundElevated }]}>
           <Ionicons name="navigate-outline" size={48} color={theme.primary} />

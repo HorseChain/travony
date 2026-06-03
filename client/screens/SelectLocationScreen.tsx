@@ -18,6 +18,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { MapView, Marker, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
+import WebViewMap from "@/components/WebViewMap";
 
 type Region = {
   latitude: number;
@@ -156,6 +157,7 @@ export default function SelectLocationScreen() {
     latitudeDelta: 0.01,
     longitudeDelta: 0.01,
   });
+  const [recenterTarget, setRecenterTarget] = useState<{ lat: number; lng: number } | null>(null);
 
   useEffect(() => {
     if (locationPermission?.granted) {
@@ -185,6 +187,7 @@ export default function SelectLocationScreen() {
         latitudeDelta: 0.01,
         longitudeDelta: 0.01,
       });
+      setRecenterTarget({ lat: latitude, lng: longitude });
     } catch (error) {
       console.error("Error getting location:", error);
     }
@@ -235,6 +238,7 @@ export default function SelectLocationScreen() {
       longitudeDelta: 0.01,
     };
     setRegion(newRegion);
+    setRecenterTarget({ lat: location.lat, lng: location.lng });
     mapRef.current?.animateToRegion(newRegion, 500);
   };
 
@@ -276,6 +280,7 @@ export default function SelectLocationScreen() {
       
       mapRef.current?.animateToRegion(newRegion, 500);
       setRegion(newRegion);
+      setRecenterTarget({ lat: latitude, lng: longitude });
 
       const [address] = await Location.reverseGeocodeAsync({ latitude, longitude });
       if (address) {
@@ -337,7 +342,34 @@ export default function SelectLocationScreen() {
   );
 
   const renderMap = () => {
-    if (Platform.OS === "android" || Platform.OS === "web" || !mapsAvailable || !MapView) {
+    if (Platform.OS === "android") {
+      return (
+        <>
+          <View style={styles.map}>
+            <WebViewMap
+              isDark={isDark}
+              interactive
+              recenterTo={recenterTarget}
+              onCenterChange={(lat, lng) =>
+                handleRegionChange({
+                  latitude: lat,
+                  longitude: lng,
+                  latitudeDelta: 0.01,
+                  longitudeDelta: 0.01,
+                })
+              }
+            />
+          </View>
+          <View style={[styles.markerFixed]} pointerEvents="none">
+            <View style={[styles.markerPin, { backgroundColor: type === "pickup" ? theme.primary : theme.error }]}>
+              <Ionicons name="location-outline" size={20} color="#FFFFFF" />
+            </View>
+            <View style={[styles.markerShadow, { backgroundColor: "rgba(0,0,0,0.2)" }]} />
+          </View>
+        </>
+      );
+    }
+    if (Platform.OS === "web" || !mapsAvailable || !MapView) {
       return (
         <View style={[styles.map, styles.webMapFallback, { backgroundColor: theme.backgroundDefault }]}>
           <View style={styles.webMapContent}>
