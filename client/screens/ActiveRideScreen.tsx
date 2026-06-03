@@ -20,6 +20,9 @@ import { apiRequest } from "@/lib/query-client";
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import RideMap from "@/components/RideMap";
+import { RideChat } from "@/components/RideChat";
+import { useRideMessages } from "@/hooks/useRideMessages";
+import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
@@ -84,6 +87,7 @@ export default function ActiveRideScreen() {
   const route = useRoute<RouteProps>();
 
   const { rideId } = route.params;
+  const { user } = useAuth();
 
   const [prevStatus, setPrevStatus] = useState<string | null>(null);
   const [sharePromptShown, setSharePromptShown] = useState(false);
@@ -141,6 +145,15 @@ export default function ActiveRideScreen() {
   }, [ride?.status, prevStatus, sharePromptShown, coffeePromptShown]);
 
   const driverPhone = telemetry?.driver?.phone || ride?.driverPhone;
+  const [chatVisible, setChatVisible] = useState(false);
+  const driverDisplayName = telemetry?.driver?.name || "your driver";
+  const { unreadCount, markRead } = useRideMessages({
+    rideId,
+    myUserId: user?.id,
+    active: !!rideId && ride?.status !== "completed",
+    chatOpen: chatVisible,
+    senderLabel: driverDisplayName,
+  });
 
   const handleCallDriver = () => {
     if (driverPhone) {
@@ -151,11 +164,8 @@ export default function ActiveRideScreen() {
   };
 
   const handleMessageDriver = () => {
-    if (driverPhone) {
-      Linking.openURL(`sms:${driverPhone}`);
-    } else {
-      Alert.alert("Unable to message", "Driver phone number not available");
-    }
+    markRead();
+    setChatVisible(true);
   };
 
   const handlePanic = () => {
@@ -411,6 +421,13 @@ export default function ActiveRideScreen() {
               onPress={handleMessageDriver}
             >
               <Ionicons name="chatbubble-outline" size={20} color={theme.primary} />
+              {unreadCount > 0 ? (
+                <View style={styles.chatBadge}>
+                  <ThemedText style={styles.chatBadgeText}>
+                    {unreadCount > 9 ? "9+" : unreadCount}
+                  </ThemedText>
+                </View>
+              ) : null}
             </Pressable>
           </View>
         </View>
@@ -431,6 +448,16 @@ export default function ActiveRideScreen() {
           <Ionicons name="warning-outline" size={24} color="#FFFFFF" />
         </Pressable>
       </View>
+
+      {user?.id && rideId ? (
+        <RideChat
+          rideId={rideId}
+          visible={chatVisible}
+          onClose={() => setChatVisible(false)}
+          myUserId={user.id}
+          otherPartyName={driverDisplayName}
+        />
+      ) : null}
 
       <View
         style={[
@@ -720,6 +747,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginLeft: Spacing.sm,
+  },
+  chatBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: "#FF3B30",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chatBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
   },
   sideButtons: {
     position: "absolute",

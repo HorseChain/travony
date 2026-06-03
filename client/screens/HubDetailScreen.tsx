@@ -124,6 +124,7 @@ export default function HubDetailScreen() {
     id: string; name: string; isEvHub: boolean;
     totalChargingPorts: number; availablePorts: number;
     avgDemandScore: string; address: string; type: string;
+    lat: string; lng: string;
   }>({
     queryKey: hubDetailKey,
     enabled: !!hubId,
@@ -149,6 +150,22 @@ export default function HubDetailScreen() {
     queryKey: evStatusKey,
     enabled: activeTab === "ev" && !!hubId,
     refetchInterval: 30000,
+  });
+
+  const hubLat = hubDetail?.lat ? parseFloat(hubDetail.lat) : null;
+  const hubLng = hubDetail?.lng ? parseFloat(hubDetail.lng) : null;
+  const chargersEnabled = activeTab === "ev" && hubLat != null && hubLng != null;
+  const { data: hubChargers } = useQuery<{
+    chargers: Array<{
+      id: string; name: string; lat: number; lng: number;
+      operator?: string | null; connectorTypes: string[];
+      maxPowerKw?: number | null; isOperational: boolean; distanceKm: number;
+    }>;
+    source: "live" | "cache" | "simulated" | "unavailable";
+    keyed: boolean;
+  }>({
+    queryKey: [`/api/ev/chargers/nearby?lat=${hubLat}&lng=${hubLng}&radius=5&max=8`],
+    enabled: chargersEnabled,
   });
 
   const sendMessageMutation = useMutation({
@@ -677,7 +694,7 @@ export default function HubDetailScreen() {
           <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
             <ThemedText style={[styles.cardTitle, { color: theme.text }]}>Estimated Ready Times</ThemedText>
             <ThemedText style={[{ fontSize: 12, color: theme.textMuted, marginBottom: Spacing.md }]}>
-              Based on avg 45-min charge session
+              Based on each driver's real battery level and charging speed
             </ThemedText>
             {evStatus.nearestReadyMinutes !== null ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
@@ -701,6 +718,53 @@ export default function HubDetailScreen() {
             </View>
           </View>
         ) : null}
+
+        <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: Spacing.sm }}>
+            <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
+              <Ionicons name="battery-charging" size={18} color="#0EA5A4" />
+              <ThemedText style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>Nearby Public Chargers</ThemedText>
+            </View>
+            {hubChargers ? (
+              <ThemedText style={{ fontSize: 11, color: theme.textMuted, fontWeight: "600" }}>
+                {hubChargers.source === "simulated"
+                  ? "Demo list"
+                  : hubChargers.source === "unavailable"
+                  ? "Unavailable"
+                  : "Live"}
+              </ThemedText>
+            ) : null}
+          </View>
+          {hubChargers && hubChargers.chargers.length > 0 ? (
+            <View style={{ gap: Spacing.sm }}>
+              {hubChargers.chargers.slice(0, 5).map((c) => (
+                <View key={c.id} style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
+                  <View style={{
+                    width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center",
+                    backgroundColor: (c.isOperational ? "#0EA5A4" : "#9CA3AF") + "20",
+                  }}>
+                    <Ionicons name="battery-charging" size={15} color={c.isOperational ? "#0EA5A4" : "#9CA3AF"} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={{ fontSize: 13, color: theme.text, fontWeight: "600" }} numberOfLines={1}>
+                      {c.name}
+                    </ThemedText>
+                    <ThemedText style={{ fontSize: 11, color: theme.textMuted }} numberOfLines={1}>
+                      {c.distanceKm} km
+                      {c.maxPowerKw ? ` · ${c.maxPowerKw} kW` : ""}
+                      {c.connectorTypes?.length ? ` · ${c.connectorTypes[0]}` : ""}
+                      {!c.isOperational ? " · offline" : ""}
+                    </ThemedText>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>
+              {hubChargers ? "No public chargers found nearby." : "Loading nearby chargers..."}
+            </ThemedText>
+          )}
+        </View>
 
         {isDriver ? (
           <Pressable

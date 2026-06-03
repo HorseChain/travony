@@ -5,6 +5,7 @@ import { BlurView } from "expo-blur";
 
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
+import { useDriverRideNotifications } from "@/hooks/useDriverRideNotifications";
 
 import DriverHomeStackNavigator from "./DriverHomeStackNavigator";
 import DriverEarningsStackNavigator from "./DriverEarningsStackNavigator";
@@ -22,6 +23,8 @@ const Tab = createBottomTabNavigator<DriverTabParamList>();
 
 export default function DriverTabNavigator() {
   const { theme, isDark } = useTheme();
+
+  useDriverRideNotifications();
 
   return (
     <Tab.Navigator

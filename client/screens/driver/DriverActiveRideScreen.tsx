@@ -14,6 +14,9 @@ import Animated, {
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { RideChat } from "@/components/RideChat";
+import { useRideMessages } from "@/hooks/useRideMessages";
+import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
@@ -150,7 +153,9 @@ export default function DriverActiveRideScreen() {
 
   const { rideId } = route.params || {};
   const validRideId = typeof rideId === "string" ? rideId : "";
+  const { user } = useAuth();
 
+  const [chatVisible, setChatVisible] = useState(false);
   const [showEarningsFlash, setShowEarningsFlash] = useState(false);
   const [postRideFare, setPostRideFare] = useState("");
   const [todayTotal, setTodayTotal] = useState("");
@@ -162,6 +167,14 @@ export default function DriverActiveRideScreen() {
     queryKey: ["/api/rides", validRideId],
     refetchInterval: 5000,
     enabled: !!validRideId,
+  });
+
+  const { unreadCount, markRead } = useRideMessages({
+    rideId: validRideId,
+    myUserId: user?.id,
+    active: !!validRideId && ride?.status !== "completed",
+    chatOpen: chatVisible,
+    senderLabel: "your rider",
   });
 
   const updateStatusMutation = useMutation({
@@ -418,7 +431,7 @@ export default function DriverActiveRideScreen() {
               <Ionicons name="person-outline" size={20} color={theme.textMuted} />
             </View>
             <View style={styles.customerDetails}>
-              <ThemedText style={styles.customerName}>{ride.customer?.name || "Customer"}</ThemedText>
+              <ThemedText style={styles.customerName} numberOfLines={1}>{ride.customer?.name || "Customer"}</ThemedText>
               <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
                 <ThemedText style={[styles.fareAmount, { color: Colors.travonyGreen }]}>
                   AED {ride.estimatedFare || "0.00"}
@@ -446,6 +459,23 @@ export default function DriverActiveRideScreen() {
                 onPress={handleCallCustomer}
               >
                 <Ionicons name="call-outline" size={18} color={Colors.travonyGreen} />
+              </Pressable>
+              <Pressable
+                style={[styles.chatButton, { backgroundColor: Colors.travonyGreen }]}
+                onPress={() => {
+                  markRead();
+                  setChatVisible(true);
+                }}
+              >
+                <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                <ThemedText style={styles.chatButtonLabel}>Chat</ThemedText>
+                {unreadCount > 0 ? (
+                  <View style={styles.chatBadge}>
+                    <ThemedText style={styles.chatBadgeText}>
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </ThemedText>
+                  </View>
+                ) : null}
               </Pressable>
             </View>
           </View>
@@ -484,6 +514,16 @@ export default function DriverActiveRideScreen() {
           ) : null}
         </View>
       </ScrollView>
+
+      {user?.id && validRideId ? (
+        <RideChat
+          rideId={validRideId}
+          visible={chatVisible}
+          onClose={() => setChatVisible(false)}
+          myUserId={user.id}
+          otherPartyName={ride?.customer?.name || "your rider"}
+        />
+      ) : null}
 
       {showEarningsFlash ? (
         <Animated.View style={[styles.earningsFlash, earningsFlashStyle]}>
@@ -624,6 +664,37 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     justifyContent: "center",
     alignItems: "center",
+  },
+  chatButton: {
+    height: 44,
+    borderRadius: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+  },
+  chatButtonLabel: {
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  chatBadge: {
+    position: "absolute",
+    top: -2,
+    right: -2,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    backgroundColor: "#FF3B30",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  chatBadgeText: {
+    color: "#FFFFFF",
+    fontSize: 11,
+    fontWeight: "700",
   },
   buttonSection: {
     gap: Spacing.sm,

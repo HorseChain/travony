@@ -6,6 +6,7 @@ import DriverActiveRideScreen from "@/screens/driver/DriverActiveRideScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
 import DriverCoffeeOrdersScreen from "@/screens/driver/DriverCoffeeOrdersScreen";
+import EvDriverScreen from "@/screens/driver/EvDriverScreen";
 
 export type DriverHomeStackParamList = {
   DriverHome: undefined;
@@ -13,6 +14,7 @@ export type DriverHomeStackParamList = {
   OpenClaw: { variant: "driver" };
   HubDetail: { hubId: string; hubName: string };
   DriverCoffeeOrders: undefined;
+  EvDriver: undefined;
 };
 
 const Stack = createNativeStackNavigator<DriverHomeStackParamList>();
@@ -46,6 +48,11 @@ export default function DriverHomeStackNavigator() {
         name="DriverCoffeeOrders"
         component={DriverCoffeeOrdersScreen}
         options={{ headerTitle: "Coffee Orders" }}
+      />
+      <Stack.Screen
+        name="EvDriver"
+        component={EvDriverScreen}
+        options={{ headerTitle: "My EV" }}
       />
     </Stack.Navigator>
   );

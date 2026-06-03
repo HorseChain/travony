@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { View, StyleSheet, Pressable, Alert, Platform } from "react-native";
+import { View, StyleSheet, Pressable, Alert, Platform, Modal } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -210,6 +210,120 @@ function AnimatedToggle({
   );
 }
 
+const EV_HOLD_MS = 1100;
+
+function EvHoldControl({
+  isOnline,
+  busy,
+  onActivate,
+  onDeactivate,
+}: {
+  isOnline: boolean;
+  busy: boolean;
+  onActivate: () => void;
+  onDeactivate: () => void;
+}) {
+  const { theme } = useTheme();
+  const progress = useSharedValue(0);
+  const [holding, setHolding] = useState(false);
+  const livePulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (isOnline) {
+      livePulse.value = withRepeat(
+        withSequence(withTiming(0.4, { duration: 850 }), withTiming(1, { duration: 850 })),
+        -1,
+        false
+      );
+    } else {
+      livePulse.value = withTiming(1);
+    }
+  }, [isOnline]);
+
+  const fillStyle = useAnimatedStyle(() => ({
+    width: `${progress.value * 100}%`,
+  }));
+
+  const dotStyle = useAnimatedStyle(() => ({ opacity: livePulse.value }));
+
+  const beginHold = useCallback(() => {
+    setHolding(true);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  }, []);
+
+  const cancelHold = useCallback(() => {
+    setHolding(false);
+  }, []);
+
+  const completeHold = useCallback(() => {
+    setHolding(false);
+    onActivate();
+  }, [onActivate]);
+
+  const holdGesture = Gesture.LongPress()
+    .minDuration(EV_HOLD_MS)
+    .maxDistance(80)
+    .onBegin(() => {
+      progress.value = withTiming(1, { duration: EV_HOLD_MS });
+      runOnJS(beginHold)();
+    })
+    .onStart(() => {
+      progress.value = withTiming(0, { duration: 250 });
+      runOnJS(completeHold)();
+    })
+    .onFinalize((_e, success) => {
+      if (!success) {
+        progress.value = withTiming(0, { duration: 220 });
+        runOnJS(cancelHold)();
+      }
+    });
+
+  if (isOnline) {
+    return (
+      <Pressable
+        onPress={() => {
+          if (!busy) onDeactivate();
+        }}
+        disabled={busy}
+        accessibilityRole="button"
+        accessibilityLabel="You are live as an EV driver. Tap to go offline."
+        style={({ pressed }) => [
+          styles.evHoldBar,
+          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.9 : 1 },
+        ]}
+      >
+        <Animated.View style={[styles.evLiveDot, dotStyle]} />
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.evHoldTitle}>Live as EV · Ready</ThemedText>
+          <ThemedText style={styles.evHoldSub}>Tap to go offline</ThemedText>
+        </View>
+        <Ionicons name="flash" size={20} color="#fff" />
+      </Pressable>
+    );
+  }
+
+  return (
+    <GestureDetector gesture={holdGesture}>
+      <View
+        accessibilityRole="button"
+        accessibilityLabel="Hold to go live as an EV driver"
+        style={[styles.evHoldBar, { backgroundColor: theme.backgroundElevated, borderColor: theme.border, borderWidth: 1 }]}
+      >
+        <Animated.View style={[styles.evHoldFill, fillStyle]} />
+        <Ionicons name="flash" size={20} color={Colors.travonyGreen} />
+        <View style={{ flex: 1 }}>
+          <ThemedText style={[styles.evHoldTitle, { color: theme.textPrimary }]}>
+            {holding ? "Keep holding…" : "Hold to go live as EV"}
+          </ThemedText>
+          <ThemedText style={[styles.evHoldSub, { color: theme.textMuted }]}>
+            {holding ? "Activating EV-ready mode" : "Online + EV-ready in one hold"}
+          </ThemedText>
+        </View>
+      </View>
+    </GestureDetector>
+  );
+}
+
 export default function DriverHomeScreen() {
   const insets = useSafeAreaInsets();
   const tabBarHeight = useBottomTabBarHeight();
@@ -227,6 +341,12 @@ export default function DriverHomeScreen() {
   const [onlineSessionMinutes, setOnlineSessionMinutes] = useState(0);
   const [hubCooldowns, setHubCooldowns] = useState<Record<string, number>>({});
   const [proactiveHub, setProactiveHub] = useState<(Hub & { distanceKm: number }) | null>(null);
+  const [lowBatteryWarning, setLowBatteryWarning] = useState<{
+    message: string;
+    batteryPercent: number | null;
+    rangeKm: number | null;
+  } | null>(null);
+  const [checkingRange, setCheckingRange] = useState(false);
   const [countdownSeconds, setCountdownSeconds] = useState(COUNTDOWN_SECONDS);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const checkedInHubsThisSession = useRef<Set<string>>(new Set());
@@ -244,16 +364,32 @@ export default function DriverHomeScreen() {
     return () => clearTimeout(timer);
   }, []);
 
-  const { data: driverData } = useQuery<{ id: string; is_online: boolean }>({
+  const { data: driverData } = useQuery<{
+    id: string;
+    is_online: boolean;
+    isOnline?: boolean;
+    status?: string;
+    evReady?: boolean;
+    vehicle?: { isElectric?: boolean } | null;
+  }>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
   });
+
+  const isEvDriver = driverData?.vehicle?.isElectric === true;
+  const [evReady, setEvReady] = useState(false);
 
   useEffect(() => {
     if (driverData?.is_online !== undefined && driverData.is_online !== isOnline) {
       setIsOnline(driverData.is_online);
     }
   }, [driverData?.is_online]);
+
+  useEffect(() => {
+    if (typeof driverData?.evReady === "boolean") {
+      setEvReady(driverData.evReady);
+    }
+  }, [driverData?.evReady]);
 
   const { data: pendingRides } = useQuery<RideRequest[]>({
     queryKey: ["/api/drivers/pending-rides"],
@@ -280,10 +416,16 @@ export default function DriverHomeScreen() {
   });
 
   const toggleOnlineMutation = useMutation({
-    mutationFn: async (online: boolean) => {
+    mutationFn: async ({ online, evReady: ready }: { online: boolean; evReady?: boolean }) => {
+      const body: { isOnline: boolean; evReady?: boolean; lat?: number; lng?: number } = { isOnline: online };
+      if (typeof ready === "boolean") body.evReady = ready;
+      if (currentLocation) {
+        body.lat = currentLocation.lat;
+        body.lng = currentLocation.lng;
+      }
       return apiRequest("/api/drivers/status", {
         method: "PATCH",
-        body: JSON.stringify({ isOnline: online }),
+        body: JSON.stringify(body),
         headers: { "Content-Type": "application/json" },
       });
     },
@@ -507,7 +649,7 @@ export default function DriverHomeScreen() {
 
   const handleToggleOnline = (value: boolean) => {
     setIsOnline(value);
-    toggleOnlineMutation.mutate(value);
+    toggleOnlineMutation.mutate({ online: value });
     if (value) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setShowActivationMoment(true);
@@ -519,15 +661,94 @@ export default function DriverHomeScreen() {
     }
   };
 
-  const handleAcceptRide = async () => {
-    if (!incomingRequest) return;
+  const showBlockerMessage = (title: string, message: string) => {
+    if (Platform.OS === "web") {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  const ensureLocationReady = async (): Promise<boolean> => {
     try {
-      await apiRequest(`/api/rides/${incomingRequest.id}`, {
+      let perm = await Location.getForegroundPermissionsAsync();
+      if (!perm.granted && perm.canAskAgain) {
+        perm = await Location.requestForegroundPermissionsAsync();
+      }
+      if (!perm.granted) {
+        showBlockerMessage(
+          "Location needed",
+          "Travony needs your location to take you live and match you with nearby rides. Enable location access in Settings to start earning."
+        );
+        return false;
+      }
+      if (!currentLocation) {
+        await getCurrentLocation();
+      }
+      return true;
+    } catch {
+      showBlockerMessage(
+        "Couldn't get location",
+        "We couldn't access your location. Please try again."
+      );
+      return false;
+    }
+  };
+
+  const activateEvMode = async () => {
+    if (toggleOnlineMutation.isPending) return;
+
+    if (driverData?.status && driverData.status !== "approved") {
+      showBlockerMessage(
+        "Account not ready",
+        "Your driver account is still pending approval. Finish your setup to go live as an EV driver."
+      );
+      return;
+    }
+
+    const locationOk = await ensureLocationReady();
+    if (!locationOk) return;
+
+    setIsOnline(true);
+    setEvReady(true);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setShowActivationMoment(true);
+    setOnlineSessionStartTime(new Date());
+    setTimeout(() => setShowActivationMoment(false), 1400);
+
+    toggleOnlineMutation.mutate(
+      { online: true, evReady: true },
+      {
+        onError: () => {
+          setIsOnline(false);
+          setEvReady(false);
+          setShowActivationMoment(false);
+          showBlockerMessage(
+            "Couldn't go live",
+            "Something went wrong taking you live. Please check your connection and try again."
+          );
+        },
+      }
+    );
+  };
+
+  const deactivateEvMode = () => {
+    if (toggleOnlineMutation.isPending) return;
+    setIsOnline(false);
+    setEvReady(false);
+    setIncomingRequest(null);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    toggleOnlineMutation.mutate({ online: false, evReady: false });
+  };
+
+  const acceptRideNow = async (rideId: string) => {
+    try {
+      await apiRequest(`/api/rides/${rideId}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "accepted" }),
         headers: { "Content-Type": "application/json" },
       });
-      navigation.navigate("DriverActiveRide", { rideId: incomingRequest.id });
+      navigation.navigate("DriverActiveRide", { rideId });
       setIncomingRequest(null);
     } catch (error: any) {
       console.error("Error accepting ride:", error);
@@ -537,6 +758,44 @@ export default function DriverHomeScreen() {
         Alert.alert("Error", error.message || "Failed to accept route");
       }
     }
+  };
+
+  const handleAcceptRide = async () => {
+    if (!incomingRequest) return;
+    const req = incomingRequest;
+
+    // Soft low-battery awareness for EV drivers. Never blocks the accept.
+    if (req.pickupLat && req.pickupLng && req.dropoffLat && req.dropoffLng) {
+      try {
+        setCheckingRange(true);
+        const result: any = await apiRequest("/api/ev/range-check", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pickupLat: Number(req.pickupLat),
+            pickupLng: Number(req.pickupLng),
+            dropoffLat: Number(req.dropoffLat),
+            dropoffLng: Number(req.dropoffLng),
+            driverLat: currentLocation?.lat,
+            driverLng: currentLocation?.lng,
+          }),
+        });
+        if (result?.warn) {
+          setLowBatteryWarning({
+            message: result.message || "Your battery may be low for this trip.",
+            batteryPercent: result.batteryPercent ?? null,
+            rangeKm: result.rangeKm ?? null,
+          });
+          return;
+        }
+      } catch (e) {
+        // Range check is best-effort; never block accepting on its failure.
+      } finally {
+        setCheckingRange(false);
+      }
+    }
+
+    await acceptRideNow(req.id);
   };
 
   const handleDeclineRide = () => {
@@ -581,11 +840,21 @@ export default function DriverHomeScreen() {
                 </ThemedText>
               </View>
               <ThemedText style={[styles.statusLabel, { color: theme.textPrimary }]}>
-                {isOnline ? "Online" : "Offline"}
+                {isOnline ? (isEvDriver && evReady ? "Online · EV Ready" : "Online") : "Offline"}
               </ThemedText>
             </View>
-            <AnimatedToggle value={isOnline} onValueChange={handleToggleOnline} />
+            {isEvDriver ? null : (
+              <AnimatedToggle value={isOnline} onValueChange={handleToggleOnline} />
+            )}
           </View>
+          {isEvDriver ? (
+            <EvHoldControl
+              isOnline={isOnline}
+              busy={toggleOnlineMutation.isPending}
+              onActivate={activateEvMode}
+              onDeactivate={deactivateEvMode}
+            />
+          ) : null}
         </View>
 
         {showActivationMoment ? (
@@ -648,6 +917,20 @@ export default function DriverHomeScreen() {
                 </ThemedText>
               </View>
               <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </Pressable>
+
+            <Pressable
+              style={({ pressed }) => [
+                styles.coffeeButton,
+                {
+                  backgroundColor: theme.backgroundElevated,
+                  borderColor: theme.border,
+                  opacity: pressed ? 0.85 : 1,
+                },
+              ]}
+              onPress={() => navigation.navigate("EvDriver")}
+            >
+              <Ionicons name="battery-charging" size={22} color={Colors.travonyGreen} />
             </Pressable>
 
             <Pressable
@@ -806,8 +1089,9 @@ export default function DriverHomeScreen() {
 
           <View style={styles.requestActions}>
             <Pressable
-              style={[styles.acceptButtonWrapped, { backgroundColor: Colors.travonyGreen }]}
+              style={[styles.acceptButtonWrapped, { backgroundColor: Colors.travonyGreen, opacity: checkingRange ? 0.7 : 1 }]}
               onPress={handleAcceptRide}
+              disabled={checkingRange}
             >
               <View style={styles.acceptButtonRingWrap}>
                 <CountdownRing seconds={countdownSeconds} total={COUNTDOWN_SECONDS} onGreenBg />
@@ -817,7 +1101,9 @@ export default function DriverHomeScreen() {
                   </ThemedText>
                 </View>
               </View>
-              <ThemedText style={styles.acceptButtonText}>Accept Route</ThemedText>
+              <ThemedText style={styles.acceptButtonText}>
+                {checkingRange ? "Checking..." : "Accept Route"}
+              </ThemedText>
             </Pressable>
             <Pressable
               style={[styles.declineButton, { borderColor: theme.border }]}
@@ -879,6 +1165,54 @@ export default function DriverHomeScreen() {
           )}
         </View>
       ) : null}
+
+      <Modal
+        visible={!!lowBatteryWarning}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLowBatteryWarning(null)}
+      >
+        <View style={styles.warnOverlay}>
+          <View style={[styles.warnCard, { backgroundColor: theme.backgroundRoot }]}>
+            <View style={[styles.warnIcon, { backgroundColor: "#F59E0B20" }]}>
+              <Ionicons name="battery-half" size={26} color="#F59E0B" />
+            </View>
+            <ThemedText style={styles.warnTitle}>Low battery for this trip</ThemedText>
+            <ThemedText style={[styles.warnMessage, { color: theme.textSecondary }]}>
+              {lowBatteryWarning?.message}
+            </ThemedText>
+            {lowBatteryWarning?.batteryPercent != null || lowBatteryWarning?.rangeKm != null ? (
+              <View style={styles.warnStats}>
+                {lowBatteryWarning?.batteryPercent != null ? (
+                  <ThemedText style={[styles.warnStat, { color: theme.textMuted }]}>
+                    Battery {lowBatteryWarning.batteryPercent}%
+                  </ThemedText>
+                ) : null}
+                {lowBatteryWarning?.rangeKm != null ? (
+                  <ThemedText style={[styles.warnStat, { color: theme.textMuted }]}>
+                    ~{Math.round(lowBatteryWarning.rangeKm)} km range
+                  </ThemedText>
+                ) : null}
+              </View>
+            ) : null}
+            <Pressable
+              style={[styles.warnPrimaryBtn, { backgroundColor: Colors.travonyGreen }]}
+              onPress={() => {
+                const id = incomingRequest?.id;
+                setLowBatteryWarning(null);
+                if (id) acceptRideNow(id);
+              }}
+            >
+              <ThemedText style={styles.warnPrimaryText}>Accept anyway</ThemedText>
+            </Pressable>
+            <Pressable style={styles.warnSecondaryBtn} onPress={() => setLowBatteryWarning(null)}>
+              <ThemedText style={[styles.warnSecondaryText, { color: theme.textSecondary }]}>
+                Not now
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </ThemedView>
   );
 }
@@ -887,6 +1221,56 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  warnOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.45)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: Spacing.xl,
+  },
+  warnCard: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: BorderRadius.xl,
+    padding: Spacing.xl,
+    alignItems: "center",
+  },
+  warnIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.md,
+  },
+  warnTitle: { fontSize: 18, fontWeight: "700", textAlign: "center" },
+  warnMessage: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: "center",
+    marginTop: Spacing.sm,
+  },
+  warnStats: {
+    flexDirection: "row",
+    gap: Spacing.lg,
+    marginTop: Spacing.md,
+  },
+  warnStat: { fontSize: 13, fontWeight: "600" },
+  warnPrimaryBtn: {
+    alignSelf: "stretch",
+    paddingVertical: 14,
+    borderRadius: BorderRadius.md,
+    alignItems: "center",
+    marginTop: Spacing.lg,
+  },
+  warnPrimaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
+  warnSecondaryBtn: {
+    alignSelf: "stretch",
+    paddingVertical: 12,
+    alignItems: "center",
+    marginTop: Spacing.xs,
+  },
+  warnSecondaryText: { fontSize: 14, fontWeight: "600" },
   statusBar: {
     position: "absolute",
     left: Spacing.lg,
@@ -964,6 +1348,39 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: Colors.travonyGreen,
+  },
+  evHoldBar: {
+    marginTop: Spacing.md,
+    minHeight: 56,
+    borderRadius: BorderRadius.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    overflow: "hidden",
+  },
+  evHoldFill: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: "rgba(16, 185, 129, 0.18)",
+  },
+  evHoldTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  evHoldSub: {
+    ...Typography.caption,
+    color: "rgba(255,255,255,0.85)",
+  },
+  evLiveDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: "#fff",
   },
   networkEfficiency: {
     ...Typography.caption,
