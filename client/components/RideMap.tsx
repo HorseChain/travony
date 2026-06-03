@@ -36,6 +36,15 @@ interface EvHubMarker {
   totalChargingPorts: number;
 }
 
+interface ChargerMarker {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  maxPowerKw?: number | null;
+  isOperational?: boolean;
+}
+
 interface RideMapProps {
   pickupLocation?: Location | null;
   dropoffLocation?: Location | null;
@@ -56,6 +65,7 @@ interface RideMapProps {
   driverHeading?: number;
   vehicleType?: "car" | "motorcycle" | "auto" | "suv";
   evHubMarkers?: EvHubMarker[];
+  chargerMarkers?: ChargerMarker[];
 }
 
 const TRAVONY_GREEN = Colors.travonyGreen;
@@ -139,6 +149,18 @@ function EvHubMapMarker({ name, availablePorts, totalChargingPorts }: { name: st
   );
 }
 
+function ChargerMapMarker({ isOperational = true }: { isOperational?: boolean }) {
+  const tint = isOperational ? "#0EA5A4" : "#9CA3AF";
+  return (
+    <View style={styles.chargerMarkerContainer}>
+      <View style={[styles.chargerMarkerBubble, { backgroundColor: tint }]}>
+        <Ionicons name={"battery-charging" as keyof typeof Ionicons.glyphMap} size={13} color="#FFFFFF" />
+      </View>
+      <View style={[styles.chargerMarkerPin, { backgroundColor: tint }]} />
+    </View>
+  );
+}
+
 function DriverMarker({ heading = 0, vehicleType = "car" }: { heading?: number; vehicleType?: string }) {
   const rotation = useRef(new RNAnimated.Value(heading)).current;
   const pulseAnim = useRef(new RNAnimated.Value(0)).current;
@@ -205,6 +227,7 @@ export default function RideMap({
   driverHeading = 0,
   vehicleType = "car",
   evHubMarkers,
+  chargerMarkers,
 }: RideMapProps) {
   const { theme, isDark } = useTheme();
   const mapRef = useRef<any>(null);
@@ -519,6 +542,21 @@ export default function RideMap({
             ))
           : null}
 
+        {chargerMarkers && Marker
+          ? chargerMarkers.map((c) => (
+              <Marker
+                key={`charger-${c.id}`}
+                coordinate={{ latitude: c.lat, longitude: c.lng }}
+                anchor={{ x: 0.5, y: 1 }}
+                tracksViewChanges={false}
+                title={c.name}
+                description={`${c.isOperational === false ? "Currently offline" : "Public charger"}${c.maxPowerKw ? ` · ${c.maxPowerKw} kW` : ""}`}
+              >
+                <ChargerMapMarker isOperational={c.isOperational !== false} />
+              </Marker>
+            ))
+          : null}
+
         {showDriverMarker && driverLocation ? (
           isNative && driverAnimatedCoord && Marker?.Animated ? (
             <Marker.Animated
@@ -721,6 +759,34 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 1.5,
     backgroundColor: "#555",
+    marginTop: -1,
+  },
+  chargerMarkerContainer: {
+    alignItems: "center",
+  },
+  chargerMarkerBubble: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: "#FFFFFF",
+    ...Platform.select({
+      ios: {
+        shadowColor: "#000",
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3,
+      },
+      android: { elevation: 4 },
+      default: {},
+    }),
+  },
+  chargerMarkerPin: {
+    width: 3,
+    height: 7,
+    borderRadius: 1.5,
     marginTop: -1,
   },
   driverMarkerContainer: {
