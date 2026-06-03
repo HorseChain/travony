@@ -8,7 +8,7 @@ import {
   type InsertUser, type Session, type DriverCryptoSettings, type RideInvoice
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, lt, inArray, isNull } from "drizzle-orm";
 
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
@@ -118,6 +118,23 @@ export class DatabaseStorage implements IStorage {
   async createDriver(data: Partial<Driver>): Promise<Driver> {
     const [driver] = await db.insert(drivers).values(data as any).returning();
     return driver;
+  }
+
+  // Idempotent: returns the existing driver for a user, or creates one.
+  // Race-safe when the unique userId constraint exists (a concurrent duplicate
+  // insert throws and we re-read), and still functional if the constraint has
+  // not yet been applied (e.g. prod migration lag) — it just falls back to a
+  // plain create.
+  async getOrCreateDriver(userId: string, defaults: Partial<Driver> = {}): Promise<Driver> {
+    const existing = await this.getDriverByUserId(userId);
+    if (existing) return existing;
+    try {
+      return await this.createDriver({ userId, ...defaults });
+    } catch (err) {
+      const driver = await this.getDriverByUserId(userId);
+      if (driver) return driver;
+      throw err;
+    }
   }
 
   async updateDriver(id: string, data: Partial<Driver>): Promise<Driver | undefined> {
@@ -287,7 +304,92 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getPendingRides(): Promise<Ride[]> {
-    return db.select().from(rides).where(eq(rides.status, "pending")).orderBy(desc(rides.createdAt));
+    // Crypto rides awaiting up-front payment are held out of the driver pool
+    // until the NOWPayments IPN flips paymentStatus to "paid" and releases them.
+    return db
+      .select()
+      .from(rides)
+      .where(
+        and(
+          eq(rides.status, "pending"),
+          sql`${rides.paymentStatus} is distinct from 'awaiting_payment'`,
+        ),
+      )
+      .orderBy(desc(rides.createdAt));
+  }
+
+  // Auto-close abandoned rides so riders are never permanently blocked from
+  // re-booking and drivers don't see stale requests.
+  // - "pending" rides with no driver acceptance after 20 min are cancelled
+  //   (scheduled rides are left alone).
+  // - "engaged" rides (accepted/arriving/started/in_progress) that have sat for
+  //   over 12 hours are treated as abandoned and closed out.
+  async expireStaleRides(): Promise<number> {
+    const pendingCutoff = new Date(Date.now() - 20 * 60 * 1000);
+    const engagedCutoff = new Date(Date.now() - 12 * 60 * 60 * 1000);
+
+    const expiredPending = await db
+      .update(rides)
+      .set({
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancellationReason: "Auto-expired: no driver accepted in time",
+      })
+      .where(
+        and(
+          eq(rides.status, "pending"),
+          lt(rides.createdAt, pendingCutoff),
+          isNull(rides.scheduledAt),
+        ),
+      )
+      .returning({ id: rides.id });
+
+    const expiredEngaged = await db
+      .update(rides)
+      .set({
+        status: "cancelled",
+        cancelledAt: new Date(),
+        cancellationReason: "Auto-closed: ride inactive too long",
+      })
+      .where(
+        and(
+          inArray(rides.status, ["accepted", "arriving", "started", "in_progress"]),
+          // Use the most recent activity timestamp (started > accepted > created)
+          // so a long-scheduled ride that was just engaged isn't wrongly closed.
+          lt(
+            sql`COALESCE(${rides.startedAt}, ${rides.acceptedAt}, ${rides.createdAt})`,
+            engagedCutoff,
+          ),
+        ),
+      )
+      .returning({ id: rides.id });
+
+    const total = expiredPending.length + expiredEngaged.length;
+    if (total > 0) {
+      console.log(
+        `[STALE-RIDES] Auto-closed ${expiredPending.length} stale pending + ${expiredEngaged.length} abandoned engaged rides`,
+      );
+    }
+    return total;
+  }
+
+  // Atomically claim a pending ride for a driver. Returns the updated ride, or
+  // undefined if another driver already took it (status no longer "pending").
+  async claimPendingRide(rideId: string, driverId: string): Promise<Ride | undefined> {
+    const [row] = await db
+      .update(rides)
+      .set({ status: "accepted", driverId, acceptedAt: new Date() })
+      .where(
+        and(
+          eq(rides.id, rideId),
+          eq(rides.status, "pending"),
+          // Crypto rides awaiting up-front payment must not be claimable until the
+          // NOWPayments IPN flips paymentStatus to "paid" and releases them.
+          sql`${rides.paymentStatus} is distinct from 'awaiting_payment'`,
+        ),
+      )
+      .returning();
+    return row;
   }
 
   async getDriverEarnings(driverId: string, period: string): Promise<any> {
