@@ -4,9 +4,10 @@ import { db } from "./db";
 import {
   hubs, hubMessages, hubReactions, hubCheckIns, evDemandSignals,
   communityPrestige, userFeedback, carpoolSuggestions,
-  drivers, users, hotspots, rides, cities,
+  drivers, users, hotspots, rides, cities, evCarConnections, vehicles,
 } from "@shared/schema";
-import { eq, and, gte, desc, sql, count, lt, isNull } from "drizzle-orm";
+import { eq, and, gte, desc, sql, count, lt, isNull, inArray } from "drizzle-orm";
+import { computeTimeToReadyMinutes } from "./evCarDataService";
 import {
   getHubsNearLocation,
   updateHubDemand,
@@ -1460,7 +1461,7 @@ router.get("/api/openclaw/hubs/:hubId/ev-status", async (req, res) => {
       );
 
     const now = Date.now();
-    const AVG_CHARGE_MINUTES = 45; // estimated average charge duration
+    const AVG_CHARGE_MINUTES = 45; // fallback estimate when no live battery data
 
     const chargingDrivers = activeEvCheckIns.filter((c) => c.evStagingStatus === "charging");
     const readyDrivers = activeEvCheckIns.filter((c) => c.evStagingStatus === "ready");
@@ -1472,14 +1473,70 @@ router.get("/api/openclaw/hubs/:hubId/ev-status", async (req, res) => {
       departing: departingDrivers.length,
     };
 
-    // Estimated ready times: for each charging driver, compute remaining minutes
+    // Pull live/simulated battery snapshots for the charging drivers so we can
+    // compute a real time-to-ready instead of a fixed 45-minute guess.
+    const chargingUserIds = chargingDrivers.map((c) => c.userId);
+    const connByUserId = new Map<
+      string,
+      { batteryPercent: number | null; target: number; capacity: number | null; simulated: boolean }
+    >();
+    if (chargingUserIds.length > 0) {
+      const connRows = await db
+        .select({
+          userId: drivers.userId,
+          batteryPercent: evCarConnections.batteryPercent,
+          target: evCarConnections.targetChargePercent,
+          isSimulated: evCarConnections.isSimulated,
+          status: evCarConnections.status,
+          capacity: vehicles.evBatteryCapacityKwh,
+        })
+        .from(evCarConnections)
+        .innerJoin(drivers, eq(evCarConnections.driverId, drivers.id))
+        .leftJoin(vehicles, eq(evCarConnections.vehicleId, vehicles.id))
+        .where(inArray(drivers.userId, chargingUserIds));
+      for (const r of connRows) {
+        if (r.status === "connected") {
+          connByUserId.set(r.userId, {
+            batteryPercent: r.batteryPercent,
+            target: r.target ?? 80,
+            capacity: r.capacity != null ? Number(r.capacity) : null,
+            simulated: Boolean(r.isSimulated),
+          });
+        }
+      }
+    }
+
+    // Estimated ready times: prefer real battery data, fall back to elapsed-time estimate.
+    let liveCount = 0;
     const estimatedReadyTimes = chargingDrivers.map((c) => {
+      const conn = connByUserId.get(c.userId);
+      if (conn && conn.batteryPercent != null) {
+        liveCount++;
+        const minutesRemaining = computeTimeToReadyMinutes(
+          conn.batteryPercent,
+          conn.target,
+          conn.capacity,
+          true,
+        );
+        return {
+          userId: c.userId,
+          minutesRemaining,
+          batteryPercent: conn.batteryPercent,
+          source: conn.simulated ? "simulated" : "live",
+        };
+      }
       const minutesCharging = c.checkedInAt
         ? Math.floor((now - new Date(c.checkedInAt).getTime()) / 60000)
         : 0;
       const minutesRemaining = Math.max(0, AVG_CHARGE_MINUTES - minutesCharging);
-      return { userId: c.userId, minutesRemaining };
+      return { userId: c.userId, minutesRemaining, batteryPercent: null, source: "estimate" };
     });
+    const timeToReadySource =
+      liveCount === 0
+        ? "estimate"
+        : liveCount === chargingDrivers.length
+          ? "live"
+          : "mixed";
 
     // Nearest estimated ready time (minutes) across all charging drivers
     const nearestReadyMinutes = estimatedReadyTimes.length > 0
@@ -1499,6 +1556,7 @@ router.get("/api/openclaw/hubs/:hubId/ev-status", async (req, res) => {
       evStagingBreakdown,
       estimatedReadyTimes,
       nearestReadyMinutes,
+      timeToReadySource,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to fetch EV status" });
