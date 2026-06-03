@@ -63,7 +63,7 @@ export const users = pgTable("users", {
 
 export const drivers = pgTable("drivers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: varchar("user_id").references(() => users.id).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
   licenseNumber: text("license_number"),
   licensePhoto: text("license_photo"),
   insurancePhoto: text("insurance_photo"),
@@ -1435,6 +1435,22 @@ export const apiUsageCounters = pgTable("api_usage_counters", {
 
 export type ApiUsageCounter = typeof apiUsageCounters.$inferSelect;
 export type InsertApiUsageCounter = typeof apiUsageCounters.$inferInsert;
+
+// Shared (Postgres-backed) fixed-window rate limiter state. One row per key per
+// 60s window bucket. Replaces the old in-memory sliding window so the per-minute
+// limit survives restarts/deploys and stays consistent across load-balanced
+// instances. windowStart is the UTC minute boundary the hits belong to.
+export const apiRateLimits = pgTable("api_rate_limits", {
+  keyId: varchar("key_id").references(() => apiKeys.id).notNull(),
+  windowStart: timestamp("window_start").notNull(),
+  hitCount: integer("hit_count").notNull().default(0),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.keyId, t.windowStart] }),
+}));
+
+export type ApiRateLimit = typeof apiRateLimits.$inferSelect;
+export type InsertApiRateLimit = typeof apiRateLimits.$inferInsert;
 
 // Persists each Telegram rider chat's in-progress booking wizard state so that
 // riders mid-booking are not lost when the backend restarts. Keyed by chat id;
