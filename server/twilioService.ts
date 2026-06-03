@@ -227,6 +227,39 @@ export async function sendOtpSms(to: string, otp: string): Promise<{ success: bo
   }
 }
 
+// Generic transactional SMS (non-OTP). Used for driver/rider notifications.
+export async function sendSmsMessage(to: string, body: string): Promise<{ success: boolean; error?: string }> {
+  const twilioClient = getClient();
+  const messagingServiceSid = getMessagingServiceSid();
+  const fromNumber = getFromNumber();
+  const hasMessagingService = !!messagingServiceSid;
+  const hasFromNumber = !!fromNumber;
+
+  if (!twilioClient || (!hasMessagingService && !hasFromNumber)) {
+    console.log('Twilio SMS not configured - skipping SMS notification');
+    return { success: false, error: 'SMS service not configured' };
+  }
+
+  try {
+    let cleanTo = to.trim().replace(/\s+/g, '');
+    if (!cleanTo.startsWith('+')) cleanTo = '+' + cleanTo;
+
+    const messageOptions: any = { body, to: cleanTo };
+    if (hasMessagingService) {
+      messageOptions.messagingServiceSid = messagingServiceSid;
+    } else {
+      messageOptions.from = fromNumber;
+    }
+
+    await twilioClient.messages.create(messageOptions);
+    console.log(`SMS notification sent to ${cleanTo}`);
+    return { success: true };
+  } catch (error: any) {
+    console.error('Twilio SMS notification error:', error.message, 'Code:', error.code);
+    return { success: false, error: error.message };
+  }
+}
+
 export async function sendOtp(to: string, otp: string, preferWhatsApp: boolean = true): Promise<{ success: boolean; error?: string; channel?: string }> {
   const isIndia = isIndianNumber(to);
   const whatsappNumber = getWhatsappNumber();
