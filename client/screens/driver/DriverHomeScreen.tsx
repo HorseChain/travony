@@ -409,10 +409,11 @@ export default function DriverHomeScreen() {
     refetchInterval: 60000,
   });
 
-  const { data: evHubsData } = useQuery<Hub[]>({
+  const { data: evHubsData } = useQuery<{ hubs: Hub[] }, Error, Hub[]>({
     queryKey: ["/api/openclaw/hubs/ev-hubs"],
     enabled: isOnline && !!currentLocation,
     refetchInterval: 60000,
+    select: (d) => (Array.isArray(d?.hubs) ? d.hubs : []),
   });
 
   const toggleOnlineMutation = useMutation({
