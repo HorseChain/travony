@@ -9,6 +9,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, lt, inArray, isNull } from "drizzle-orm";
+import type { VehicleMilestone } from "./carAgent";
 
 // Stable, human-readable public identity for a vehicle (e.g. "TRV-7Q2K9X").
 // Used as the car's handle in the operator-facing Vehicle Wallet view.
@@ -155,7 +156,41 @@ export class DatabaseStorage implements IStorage {
 
   async getVehicle(id: string): Promise<Vehicle | undefined> {
     const [vehicle] = await db.select().from(vehicles).where(eq(vehicles.id, id));
-    return vehicle || undefined;
+    if (!vehicle) return undefined;
+    // Lazily backfill the stable public identity for vehicles that predate the
+    // public_handle column (e.g. rows that existed before the economic layer was
+    // added to a given environment). Idempotent: only writes when missing.
+    if (!vehicle.publicHandle) {
+      return (await this.ensureVehicleHandle(vehicle)) ?? vehicle;
+    }
+    return vehicle;
+  }
+
+  // Assign and persist a stable TRV-XXXXXX handle to a vehicle that lacks one,
+  // retrying on the (astronomically unlikely) unique collision. Returns the
+  // updated vehicle, or undefined to let the caller fall back to the original.
+  private async ensureVehicleHandle(vehicle: Vehicle): Promise<Vehicle | undefined> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const [updated] = await db
+          .update(vehicles)
+          .set({ publicHandle: generateVehicleHandle() })
+          .where(and(eq(vehicles.id, vehicle.id), isNull(vehicles.publicHandle)))
+          .returning();
+        // If no row came back, another request already assigned a handle; re-read it.
+        if (!updated) {
+          const [current] = await db.select().from(vehicles).where(eq(vehicles.id, vehicle.id));
+          return current || undefined;
+        }
+        return updated;
+      } catch (err: any) {
+        // Unique violation on public_handle: regenerate and retry.
+        if (err?.code === "23505") continue;
+        console.error("[storage] failed to backfill vehicle public_handle:", err);
+        return undefined;
+      }
+    }
+    return undefined;
   }
 
   async getVehiclesByDriver(driverId: string): Promise<Vehicle[]> {
@@ -217,6 +252,256 @@ export class DatabaseStorage implements IStorage {
       .from(walletTransactions)
       .where(eq(walletTransactions.vehicleId, vehicleId))
       .orderBy(desc(walletTransactions.createdAt));
+  }
+
+  // Recent completed rides for a vehicle — used by the AI car agent only for
+  // place labels (pickup/drop areas) and the car's latest location/region.
+  // Money/trip totals come from getVehicleEarningsStats (full SQL window), not
+  // from this limited sample. Real data only.
+  async getRecentVehicleRides(vehicleId: string, limit: number = 15): Promise<Ride[]> {
+    return db
+      .select()
+      .from(rides)
+      .where(and(eq(rides.vehicleId, vehicleId), eq(rides.status, "completed")))
+      .orderBy(desc(rides.completedAt))
+      .limit(limit);
+  }
+
+  // Accurate today/this-week earnings + trip counts for a car, aggregated in
+  // SQL over the full window (NOT sampled from recent rides). The week window
+  // is the trailing 7 days.
+  async getVehicleEarningsStats(vehicleId: string): Promise<{
+    todayEarnings: number;
+    todayTrips: number;
+    weekEarnings: number;
+    weekTrips: number;
+  }> {
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+    const [row] = await db
+      .select({
+        todayEarnings: sql<string>`COALESCE(SUM(${rides.driverEarnings}) FILTER (WHERE ${rides.completedAt} >= ${startOfToday}), 0)`,
+        todayTrips: sql<string>`COUNT(*) FILTER (WHERE ${rides.completedAt} >= ${startOfToday})`,
+        weekEarnings: sql<string>`COALESCE(SUM(${rides.driverEarnings}), 0)`,
+        weekTrips: sql<string>`COUNT(*)`,
+      })
+      .from(rides)
+      .where(
+        and(
+          eq(rides.vehicleId, vehicleId),
+          eq(rides.status, "completed"),
+          sql`${rides.completedAt} >= ${weekAgo}`
+        )
+      );
+
+    return {
+      todayEarnings: Math.round(parseFloat(row?.todayEarnings || "0") * 100) / 100,
+      todayTrips: parseInt(row?.todayTrips || "0", 10),
+      weekEarnings: Math.round(parseFloat(row?.weekEarnings || "0") * 100) / 100,
+      weekTrips: parseInt(row?.weekTrips || "0", 10),
+    };
+  }
+
+  // Rank a vehicle against other cars IN THE SAME REGION by earnings over the
+  // last 7 days. Returns the car's position, the field size, and a percentile
+  // band (e.g. percentile 12 => "top 12%"). Null when the car had no earning
+  // trips this week in that region (nothing honest to rank). Real data only.
+  async getVehicleWeeklyRank(
+    vehicleId: string,
+    regionCode: string
+  ): Promise<{
+    rank: number;
+    total: number;
+    percentile: number;
+    weeklyEarnings: number;
+  } | null> {
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const rows = await db
+      .select({
+        vehicleId: rides.vehicleId,
+        earned: sql<string>`COALESCE(SUM(${rides.driverEarnings}), 0)`,
+      })
+      .from(rides)
+      .where(
+        and(
+          eq(rides.status, "completed"),
+          eq(rides.regionCode, regionCode),
+          sql`${rides.completedAt} >= ${weekAgo}`,
+          sql`${rides.vehicleId} IS NOT NULL`
+        )
+      )
+      .groupBy(rides.vehicleId);
+
+    const ranked = rows
+      .map((r) => ({ vehicleId: r.vehicleId as string, earned: parseFloat(r.earned || "0") }))
+      .filter((r) => r.earned > 0)
+      .sort((a, b) => b.earned - a.earned);
+
+    const total = ranked.length;
+    const idx = ranked.findIndex((r) => r.vehicleId === vehicleId);
+    if (idx === -1 || total === 0) return null;
+
+    const rank = idx + 1;
+    const percentile = Math.max(1, Math.round((rank / total) * 100));
+    return { rank, total, percentile, weeklyEarnings: ranked[idx].earned };
+  }
+
+  // The car's "living profile" timeline: a chronological list of real milestones
+  // computed entirely from completed-ride and ratings data. NOTHING is fabricated
+  // — every entry is anchored to an actual event date and real figures. Returned
+  // newest-first so the most recent milestone is index 0 (the AI agent references
+  // it). Returns [] for a car with no completed trips yet.
+  async getVehicleMilestones(vehicleId: string): Promise<VehicleMilestone[]> {
+    const completed = await db
+      .select({
+        completedAt: rides.completedAt,
+        driverEarnings: rides.driverEarnings,
+        dropoffAddress: rides.dropoffAddress,
+        pickupAddress: rides.pickupAddress,
+        currency: rides.currency,
+      })
+      .from(rides)
+      .where(and(eq(rides.vehicleId, vehicleId), eq(rides.status, "completed")))
+      .orderBy(rides.completedAt);
+
+    if (completed.length === 0) return [];
+
+    // Currency label: take the most recent ride's currency, default AED.
+    let currency = "AED";
+    for (const r of completed) if (r.currency) currency = r.currency;
+
+    const shortArea = (addr: string | null | undefined): string => {
+      if (!addr) return "";
+      return (addr.split(",")[0]?.trim() || addr.trim());
+    };
+    const dayKey = (d: Date): string =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+    const milestones: VehicleMilestone[] = [];
+
+    // 1) First trip together.
+    const first = completed[0];
+    if (first.completedAt) {
+      const area = shortArea(first.dropoffAddress) || shortArea(first.pickupAddress);
+      milestones.push({
+        key: "first_trip",
+        type: "first_trip",
+        title: "First trip together",
+        description: area
+          ? `Our journey began with a trip to ${area}.`
+          : `Our journey began with our very first trip.`,
+        date: first.completedAt.toISOString(),
+        icon: "flag-outline",
+      });
+    }
+
+    // 2) Trip-count milestones — date of the Nth completed trip.
+    const TRIP_THRESHOLDS = [10, 25, 50, 100, 250, 500, 1000, 2500, 5000];
+    for (const n of TRIP_THRESHOLDS) {
+      if (completed.length >= n) {
+        const ride = completed[n - 1];
+        if (ride?.completedAt) {
+          milestones.push({
+            key: `trips_${n}`,
+            type: "trip_count",
+            title: `${n.toLocaleString()}th trip`,
+            description: `We reached ${n.toLocaleString()} trips together.`,
+            date: ride.completedAt.toISOString(),
+            icon: "ribbon-outline",
+            value: `${n.toLocaleString()} trips`,
+          });
+        }
+      }
+    }
+
+    // 3) Best earning day — the calendar day with the highest total earnings.
+    const dayTotals = new Map<string, { total: number; date: Date }>();
+    for (const r of completed) {
+      if (!r.completedAt) continue;
+      const earn = parseFloat(r.driverEarnings || "0");
+      if (!(earn > 0)) continue;
+      const key = dayKey(r.completedAt);
+      const prev = dayTotals.get(key);
+      if (prev) prev.total += earn;
+      else dayTotals.set(key, { total: earn, date: r.completedAt });
+    }
+    let bestDay: { total: number; date: Date } | null = null;
+    for (const v of dayTotals.values()) {
+      if (!bestDay || v.total > bestDay.total) bestDay = v;
+    }
+    if (bestDay && bestDay.total > 0) {
+      const amount = `${currency} ${Math.round(bestDay.total)}`;
+      milestones.push({
+        key: "best_day",
+        type: "best_day",
+        title: "Best earning day",
+        description: `Our best day yet — we earned ${amount} in a single day.`,
+        date: bestDay.date.toISOString(),
+        icon: "trophy-outline",
+        value: amount,
+      });
+    }
+
+    // 4) Area we know best — the most frequent drop-off area (needs real volume).
+    const areaCounts = new Map<string, { count: number; last: Date }>();
+    for (const r of completed) {
+      const area = shortArea(r.dropoffAddress);
+      if (!area || !r.completedAt) continue;
+      const prev = areaCounts.get(area);
+      if (prev) {
+        prev.count += 1;
+        if (r.completedAt > prev.last) prev.last = r.completedAt;
+      } else {
+        areaCounts.set(area, { count: 1, last: r.completedAt });
+      }
+    }
+    let topArea: { name: string; count: number; last: Date } | null = null;
+    for (const [name, v] of areaCounts.entries()) {
+      if (!topArea || v.count > topArea.count) topArea = { name, count: v.count, last: v.last };
+    }
+    if (topArea && topArea.count >= 5) {
+      milestones.push({
+        key: "top_area",
+        type: "top_area",
+        title: `${topArea.name} is our turf`,
+        description: `We know ${topArea.name} best — ${topArea.count} trips there and counting.`,
+        date: topArea.last.toISOString(),
+        icon: "map-outline",
+        value: `${topArea.count} trips`,
+      });
+    }
+
+    // 5) Reputation milestone — a strong star rating earned across real ratings.
+    const ratingRows = await db
+      .select({ rating: ratings.rating, createdAt: ratings.createdAt })
+      .from(ratings)
+      .innerJoin(rides, eq(ratings.rideId, rides.id))
+      .where(eq(rides.vehicleId, vehicleId))
+      .orderBy(ratings.createdAt);
+    if (ratingRows.length >= 5) {
+      const avg = ratingRows.reduce((s, r) => s + r.rating, 0) / ratingRows.length;
+      if (avg >= 4.5) {
+        const last = ratingRows[ratingRows.length - 1].createdAt;
+        milestones.push({
+          key: "reputation",
+          type: "reputation",
+          title: "Trusted on the network",
+          description: `We've earned a ${avg.toFixed(2)} star reputation across ${ratingRows.length} ratings.`,
+          date: last ? last.toISOString() : null,
+          icon: "star-outline",
+          value: `${avg.toFixed(2)} stars`,
+        });
+      }
+    }
+
+    // Newest-first so milestones[0] is the most recent. Undated entries last.
+    return milestones.sort((a, b) => {
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return new Date(b.date).getTime() - new Date(a.date).getTime();
+    });
   }
 
   // The operator's withdrawable balance is derived from the vehicle wallets

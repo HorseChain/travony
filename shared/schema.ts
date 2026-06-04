@@ -103,6 +103,7 @@ export const vehicles = pgTable("vehicles", {
   photoSide: text("photo_side"),
   photoInterior: text("photo_interior"),
   publicHandle: text("public_handle").unique(),
+  nickname: text("nickname"),
   walletBalance: decimal("wallet_balance", { precision: 12, scale: 2 }).default("0.00"),
   totalEarnings: decimal("total_earnings", { precision: 12, scale: 2 }).default("0.00"),
   totalTrips: integer("total_trips").default(0),

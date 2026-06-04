@@ -776,8 +776,9 @@ async function setupApiKeyRoutes(app: express.Application) {
 
   await seedAdminUser();
   try {
-    const { seedReviewDriver } = await import("./reviewAccount");
+    const { seedReviewDriver, seedReviewDemoRides } = await import("./reviewAccount");
     await seedReviewDriver();
+    await seedReviewDemoRides();
     log("Review demo driver ensured");
   } catch (e: any) {
     log(`Review driver seeding skipped: ${e?.message || e}`);

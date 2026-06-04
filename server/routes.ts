@@ -77,6 +77,8 @@ import * as accountabilityService from "./accountabilityService";
 import * as rematchService from "./rematchService";
 import * as incentivePolicy from "./incentivePolicy";
 import * as walletService from "./walletService";
+import { generateCarAgentSummary } from "./carAgent";
+import { getHubsNearLocation } from "./openClawService";
 import * as intentEngine from "./intentEngine";
 import * as cityBrain from "./cityBrain";
 import * as antiGamingService from "./antiGamingService";
@@ -3008,6 +3010,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         identity: {
           id: vehicle.id,
           publicHandle: vehicle.publicHandle,
+          nickname: vehicle.nickname,
           make: vehicle.make,
           model: vehicle.model,
           year: vehicle.year,
@@ -3025,6 +3028,112 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       res.status(500).json({ code: "VEHICLE_WALLET_ERROR", message: error.message });
+    }
+  });
+
+  // AI car agent: the car speaks to its owner as a warm, first-person partner,
+  // narrating real earnings, where it did well, what to do next, and its rank.
+  // Owner (operator who controls the vehicle's driver) or admin only.
+  app.get("/api/vehicles/:vehicleId/agent", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.vehicleId);
+      if (!vehicle) {
+        return res.status(404).json({ code: "VEHICLE_NOT_FOUND", message: "Vehicle not found" });
+      }
+      const driver = vehicle.driverId ? await storage.getDriver(vehicle.driverId) : undefined;
+      if ((!driver || driver.userId !== req.userId) && req.userRole !== "admin") {
+        return res.status(403).json({ code: "ACCESS_DENIED", message: "Access denied" });
+      }
+
+      const recentRides = await storage.getRecentVehicleRides(req.params.vehicleId, 15);
+      const latest = recentRides[0];
+      const regionCode = latest?.regionCode || "AE";
+
+      const [earnings, rank, milestones] = await Promise.all([
+        storage.getVehicleEarningsStats(req.params.vehicleId),
+        storage.getVehicleWeeklyRank(req.params.vehicleId, regionCode),
+        storage.getVehicleMilestones(req.params.vehicleId),
+      ]);
+
+      // Real nearby hub demand signals around the car's latest known location.
+      let hubDemand: Array<{ name: string; distanceKm: number; recentRideCount: number; demandLevel: "high" | "medium" | "quiet" }> = [];
+      if (latest?.dropoffLat && latest?.dropoffLng) {
+        try {
+          const lat = parseFloat(latest.dropoffLat);
+          const lng = parseFloat(latest.dropoffLng);
+          if (!isNaN(lat) && !isNaN(lng)) {
+            const nearby = await getHubsNearLocation(lat, lng, 15);
+            hubDemand = nearby.slice(0, 3).map((h) => {
+              const score = parseFloat((h as any).avgDemandScore || "0");
+              const demandLevel: "high" | "medium" | "quiet" =
+                h.recentRideCount >= 3 || score >= 70 ? "high" : h.recentRideCount >= 1 || score >= 40 ? "medium" : "quiet";
+              return {
+                name: h.name,
+                distanceKm: Math.round(h.distance * 10) / 10,
+                recentRideCount: h.recentRideCount,
+                demandLevel,
+              };
+            });
+          }
+        } catch (err) {
+          console.error("[carAgent] hub demand lookup failed:", err);
+        }
+      }
+
+      const summary = await generateCarAgentSummary({ vehicle, earnings, recentRides, rank, regionCode, hubDemand, milestones });
+      res.json({
+        name: (vehicle.nickname && vehicle.nickname.trim()) || `${vehicle.make} ${vehicle.model}`,
+        nickname: vehicle.nickname,
+        publicHandle: vehicle.publicHandle,
+        latestMilestone: milestones[0] ?? null,
+        ...summary,
+      });
+    } catch (error: any) {
+      res.status(500).json({ code: "CAR_AGENT_ERROR", message: error.message });
+    }
+  });
+
+  // The car's living-profile timeline: real milestones derived from completed
+  // rides and ratings (first trip, trip-count badges, best earning day, the area
+  // it knows best, reputation). Owner (operator) or admin only.
+  app.get("/api/vehicles/:vehicleId/milestones", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.vehicleId);
+      if (!vehicle) {
+        return res.status(404).json({ code: "VEHICLE_NOT_FOUND", message: "Vehicle not found" });
+      }
+      const driver = vehicle.driverId ? await storage.getDriver(vehicle.driverId) : undefined;
+      if ((!driver || driver.userId !== req.userId) && req.userRole !== "admin") {
+        return res.status(403).json({ code: "ACCESS_DENIED", message: "Access denied" });
+      }
+      const milestones = await storage.getVehicleMilestones(req.params.vehicleId);
+      res.json({ milestones });
+    } catch (error: any) {
+      res.status(500).json({ code: "VEHICLE_MILESTONES_ERROR", message: error.message });
+    }
+  });
+
+  // Let an operator name their car so the agent speaks as that named car.
+  app.patch("/api/vehicles/:vehicleId/nickname", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.vehicleId);
+      if (!vehicle) {
+        return res.status(404).json({ code: "VEHICLE_NOT_FOUND", message: "Vehicle not found" });
+      }
+      const driver = vehicle.driverId ? await storage.getDriver(vehicle.driverId) : undefined;
+      if ((!driver || driver.userId !== req.userId) && req.userRole !== "admin") {
+        return res.status(403).json({ code: "ACCESS_DENIED", message: "Access denied" });
+      }
+
+      const raw = typeof req.body?.nickname === "string" ? req.body.nickname.trim() : "";
+      if (raw.length > 40) {
+        return res.status(400).json({ code: "VALIDATION_ERROR", message: "Nickname must be 40 characters or fewer" });
+      }
+      const nickname = raw.length > 0 ? raw : null;
+      const updated = await storage.updateVehicle(req.params.vehicleId, { nickname });
+      res.json({ nickname: updated?.nickname ?? null });
+    } catch (error: any) {
+      res.status(500).json({ code: "VEHICLE_NICKNAME_ERROR", message: error.message });
     }
   });
 
