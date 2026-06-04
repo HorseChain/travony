@@ -2,6 +2,7 @@ import { db } from "./db";
 import { walletTransactions, users, drivers, platformLedger } from "@shared/schema";
 import { eq, sql, desc, and, gte } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
+import { storage } from "./storage";
 
 type TransactionType = 
   | "ride_payment"
@@ -305,17 +306,12 @@ export async function processDriverWithdrawal(driverId: string, amount: number, 
     return { success: false };
   }
 
-  const currentBalance = parseFloat(driver[0].walletBalance || "0");
-  
-  if (currentBalance < amount) {
-    return { success: false, insufficientFunds: true, newBalance: currentBalance };
+  // The vehicle wallet is the source of truth: withdraw from the operator's
+  // aggregate (vehicle wallets first, then any legacy driver balance).
+  const result = await storage.debitOperatorWallet(driverId, amount);
+  if (!result.success) {
+    return { success: false, insufficientFunds: result.insufficientFunds, newBalance: result.newBalance };
   }
-
-  const newBalance = currentBalance - amount;
-
-  await db.update(drivers)
-    .set({ walletBalance: newBalance.toFixed(2) })
-    .where(eq(drivers.id, driverId));
 
   await db.insert(walletTransactions).values({
     id: uuidv4(),
@@ -328,7 +324,7 @@ export async function processDriverWithdrawal(driverId: string, amount: number, 
     completedAt: new Date(),
   });
 
-  return { success: true, newBalance };
+  return { success: true, newBalance: result.newBalance };
 }
 
 export async function getWalletSummary(userId?: string, driverId?: string): Promise<{
@@ -356,9 +352,9 @@ export async function getWalletSummary(userId?: string, driverId?: string): Prom
       .orderBy(desc(walletTransactions.createdAt))
       .limit(20);
   } else if (driverId) {
-    const driver = await db.select().from(drivers).where(eq(drivers.id, driverId)).limit(1);
-    balance = parseFloat(driver[0]?.walletBalance || "0");
-    
+    // Withdrawable balance is derived from the vehicle wallets (source of truth).
+    balance = await storage.getOperatorWalletBalance(driverId);
+
     transactions = await db.select()
       .from(walletTransactions)
       .where(eq(walletTransactions.driverId, driverId))
