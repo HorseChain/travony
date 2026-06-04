@@ -1183,10 +1183,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 completedAt: new Date(),
               });
               
-              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+              // Earnings credit the VEHICLE wallet (the economic actor). Legacy
+              // rides with no vehicle fall back to the driver wallet.
+              if (ride.vehicleId) {
+                await storage.updateVehicleWalletBalance(ride.vehicleId, driverShare);
+              } else {
+                await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+              }
               await storage.createWalletTransaction({
                 id: uuidv4(),
                 driverId: ride.driverId,
+                vehicleId: ride.vehicleId || undefined,
                 rideId: ride.id,
                 type: "ride_payment",
                 amount: driverShare.toFixed(2),
@@ -1198,10 +1205,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
               paymentStatus = "pending";
             }
           } else if (paymentMethod === "usdt") {
-            await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+            if (ride.vehicleId) {
+              await storage.updateVehicleWalletBalance(ride.vehicleId, driverShare);
+            } else {
+              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+            }
             await storage.createWalletTransaction({
               id: uuidv4(),
               driverId: ride.driverId,
+              vehicleId: ride.vehicleId || undefined,
               rideId: ride.id,
               type: "ride_payment",
               amount: driverShare.toFixed(2),
@@ -1210,10 +1222,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
               completedAt: new Date(),
             });
           } else {
-            await storage.updateDriverWalletBalance(ride.driverId, -platformFee);
+            // Cash: driver collected the full fare, so the platform fee is
+            // debited from the vehicle wallet (fallback to driver wallet).
+            if (ride.vehicleId) {
+              await storage.updateVehicleWalletBalance(ride.vehicleId, -platformFee);
+            } else {
+              await storage.updateDriverWalletBalance(ride.driverId, -platformFee);
+            }
             await storage.createWalletTransaction({
               id: uuidv4(),
               driverId: ride.driverId,
+              vehicleId: ride.vehicleId || undefined,
               rideId: ride.id,
               type: "platform_fee",
               amount: (-platformFee).toFixed(2),
@@ -1250,6 +1269,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
                 totalEarnings: (currentEarnings + driverShare).toFixed(2),
                 totalTrips: (driver.totalTrips || 0) + 1,
               });
+            }
+
+            // The vehicle is the economic actor: track its lifetime yield/trips.
+            if (ride.vehicleId) {
+              await storage.creditVehicleEarnings(ride.vehicleId, driverShare);
             }
 
             try {
@@ -2911,6 +2935,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const transactions = await storage.getDriverTransactions(req.params.driverId);
       const payouts = await storage.getDriverPayouts(req.params.driverId);
+      // Withdrawable balance is sourced from the vehicle wallet(s).
+      const operatorBalance = await storage.getOperatorWalletBalance(req.params.driverId);
       
       // Calculate earnings breakdown
       const rideEarnings = transactions
@@ -2934,7 +2960,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
       
       res.json({
-        balance: driver.walletBalance || "0.00",
+        balance: operatorBalance.toFixed(2),
         totalEarnings: driver.totalEarnings || "0.00",
         totalTrips: driver.totalTrips || 0,
         cryptoWalletAddress: driver.cryptoWalletAddress || null,
@@ -2965,6 +2991,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // The vehicle is a programmable economic asset: its own wallet, identity and
+  // reputation. Owner (operator who controls the vehicle's driver) or admin only.
+  app.get("/api/vehicles/:vehicleId/wallet", requireAuth, async (req: any, res) => {
+    try {
+      const vehicle = await storage.getVehicle(req.params.vehicleId);
+      if (!vehicle) {
+        return res.status(404).json({ code: "VEHICLE_NOT_FOUND", message: "Vehicle not found" });
+      }
+      const driver = vehicle.driverId ? await storage.getDriver(vehicle.driverId) : undefined;
+      if ((!driver || driver.userId !== req.userId) && req.userRole !== "admin") {
+        return res.status(403).json({ code: "ACCESS_DENIED", message: "Access denied" });
+      }
+      const transactions = await storage.getVehicleTransactions(req.params.vehicleId);
+      res.json({
+        identity: {
+          id: vehicle.id,
+          publicHandle: vehicle.publicHandle,
+          make: vehicle.make,
+          model: vehicle.model,
+          year: vehicle.year,
+          color: vehicle.color,
+          plateNumber: vehicle.plateNumber,
+          type: vehicle.type,
+          isElectric: vehicle.isElectric,
+        },
+        balance: vehicle.walletBalance || "0.00",
+        totalEarnings: vehicle.totalEarnings || "0.00",
+        totalTrips: vehicle.totalTrips || 0,
+        reputationScore: vehicle.reputationScore || "5.00",
+        ratingCount: vehicle.ratingCount || 0,
+        transactions: transactions.slice(0, 50),
+      });
+    } catch (error: any) {
+      res.status(500).json({ code: "VEHICLE_WALLET_ERROR", message: error.message });
+    }
+  });
+
   app.post("/api/drivers/:driverId/payout", requireAuth, async (req: any, res) => {
     try {
       const { amount, method = "bank" } = req.body;
@@ -2985,7 +3048,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const balance = parseFloat(driver.walletBalance || "0");
+      const balance = await storage.getOperatorWalletBalance(req.params.driverId);
       const requestedAmount = parseFloat(amount);
 
       // Validation with comprehensive error codes
@@ -3022,8 +3085,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         payoutStatus = "pending";
       }
 
-      // Deduct from driver's wallet
-      await storage.updateDriverWalletBalance(req.params.driverId, -requestedAmount);
+      // Deduct from the vehicle wallet(s) — the operator's source of truth.
+      await storage.debitOperatorWallet(req.params.driverId, requestedAmount);
 
       const payout = await storage.createDriverPayout({
         id: uuidv4(),
@@ -3085,7 +3148,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      const balance = parseFloat(driver.walletBalance || "0");
+      const balance = await storage.getOperatorWalletBalance(req.params.driverId);
       const requestedAmount = parseFloat(amount);
 
       const MIN_CRYPTO_PAYOUT = 10;
@@ -3131,7 +3194,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      await storage.updateDriverWalletBalance(req.params.driverId, -requestedAmount);
+      await storage.debitOperatorWallet(req.params.driverId, requestedAmount);
 
       const payout = await storage.createDriverPayout({
         id: uuidv4(),
@@ -3167,7 +3230,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           message: `Successfully sent ${requestedAmount} USDT`,
         });
       } else {
-        await storage.updateDriverWalletBalance(req.params.driverId, requestedAmount);
+        await storage.creditOperatorWallet(req.params.driverId, requestedAmount);
         await storage.updateDriverPayout(payout.id, {
           status: 'failed',
           failureReason: result.message,
