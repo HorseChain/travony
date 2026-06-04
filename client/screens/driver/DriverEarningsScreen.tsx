@@ -4,6 +4,10 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { useNavigation } from "@react-navigation/native";
+import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+
+import type { DriverEarningsStackParamList } from "@/navigation/driver/DriverEarningsStackNavigator";
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
@@ -64,6 +68,8 @@ export default function DriverEarningsScreen() {
   const { theme } = useTheme();
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const navigation =
+    useNavigation<NativeStackNavigationProp<DriverEarningsStackParamList>>();
 
   const [withdrawModalVisible, setWithdrawModalVisible] = useState(false);
   const [withdrawAmount, setWithdrawAmount] = useState("");
@@ -380,6 +386,23 @@ export default function DriverEarningsScreen() {
               </View>
             </View>
 
+            {/* Vehicle Wallet entry point */}
+            <Pressable
+              style={[styles.vehicleWalletCard, { backgroundColor: theme.backgroundElevated }]}
+              onPress={() => navigation.navigate("VehicleWallet")}
+            >
+              <View style={[styles.vehicleWalletIcon, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                <Ionicons name="car-sport-outline" size={22} color={Colors.travonyGreen} />
+              </View>
+              <View style={styles.vehicleWalletInfo}>
+                <ThemedText style={styles.vehicleWalletTitle}>Vehicle Wallet</ThemedText>
+                <ThemedText style={[styles.vehicleWalletSubtitle, { color: theme.textSecondary }]}>
+                  Asset identity, yield & reputation
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color={theme.textMuted} />
+            </Pressable>
+
             <ThemedText style={styles.sectionTitle}>Transaction History</ThemedText>
             
             {transactions.length === 0 ? (
@@ -646,6 +669,24 @@ const styles = StyleSheet.create({
     ...Typography.h3,
     marginBottom: Spacing.lg,
   },
+  vehicleWalletCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.xl,
+    marginBottom: Spacing.lg,
+    gap: Spacing.md,
+  },
+  vehicleWalletIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  vehicleWalletInfo: { flex: 1 },
+  vehicleWalletTitle: { fontSize: 16, fontWeight: "700" },
+  vehicleWalletSubtitle: { fontSize: 13, marginTop: 2 },
   emptyState: {
     padding: Spacing["2xl"],
     borderRadius: BorderRadius.xl,
