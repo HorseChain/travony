@@ -10,6 +10,17 @@ import {
 import { db } from "./db";
 import { eq, and, desc, sql, lt, inArray, isNull } from "drizzle-orm";
 
+// Stable, human-readable public identity for a vehicle (e.g. "TRV-7Q2K9X").
+// Used as the car's handle in the operator-facing Vehicle Wallet view.
+export function generateVehicleHandle(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no ambiguous 0/O/1/I
+  let suffix = "";
+  for (let i = 0; i < 6; i++) {
+    suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
+  return `TRV-${suffix}`;
+}
+
 export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -152,8 +163,119 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createVehicle(data: Partial<Vehicle>): Promise<Vehicle> {
-    const [vehicle] = await db.insert(vehicles).values(data as any).returning();
+    const values: any = { ...data };
+    if (!values.publicHandle) {
+      values.publicHandle = generateVehicleHandle();
+    }
+    const [vehicle] = await db.insert(vehicles).values(values).returning();
     return vehicle;
+  }
+
+  // --- Vehicle wallet & identity (vehicle is the economic actor) ---
+
+  // Adjust a vehicle's liquid wallet balance by `amount` (can be negative).
+  async updateVehicleWalletBalance(vehicleId: string, amount: number): Promise<Vehicle | undefined> {
+    const vehicle = await this.getVehicle(vehicleId);
+    if (!vehicle) return undefined;
+    const current = parseFloat(vehicle.walletBalance || "0");
+    const newBalance = (current + amount).toFixed(2);
+    return this.updateVehicle(vehicleId, { walletBalance: newBalance });
+  }
+
+  // Increment a vehicle's lifetime earnings and trip count on ride completion.
+  async creditVehicleEarnings(vehicleId: string, earnings: number): Promise<Vehicle | undefined> {
+    const vehicle = await this.getVehicle(vehicleId);
+    if (!vehicle) return undefined;
+    const currentEarnings = parseFloat(vehicle.totalEarnings || "0");
+    return this.updateVehicle(vehicleId, {
+      totalEarnings: (currentEarnings + earnings).toFixed(2),
+      totalTrips: (vehicle.totalTrips || 0) + 1,
+    });
+  }
+
+  // Recompute a vehicle's reputation from the ratings on its own rides.
+  // Reputation reflects the car, not the person: average of all star ratings
+  // given on rides that used this vehicle. Falls back to 5.00 with no ratings.
+  async recomputeVehicleReputation(vehicleId: string): Promise<{ score: number; count: number }> {
+    const rows = await db
+      .select({ rating: ratings.rating })
+      .from(ratings)
+      .innerJoin(rides, eq(ratings.rideId, rides.id))
+      .where(eq(rides.vehicleId, vehicleId));
+    const count = rows.length;
+    const score = count > 0 ? rows.reduce((s, r) => s + r.rating, 0) / count : 5;
+    await this.updateVehicle(vehicleId, {
+      reputationScore: score.toFixed(2),
+      ratingCount: count,
+    });
+    return { score, count };
+  }
+
+  async getVehicleTransactions(vehicleId: string): Promise<WalletTransaction[]> {
+    return db
+      .select()
+      .from(walletTransactions)
+      .where(eq(walletTransactions.vehicleId, vehicleId))
+      .orderBy(desc(walletTransactions.createdAt));
+  }
+
+  // The operator's withdrawable balance is derived from the vehicle wallets
+  // (single source of truth). Any residual driver.walletBalance is included so
+  // legacy rides without an associated vehicle are never stranded.
+  async getOperatorWalletBalance(driverId: string): Promise<number> {
+    const driver = await this.getDriver(driverId);
+    if (!driver) return 0;
+    const vehs = await this.getDriverVehicles(driverId);
+    const vehicleTotal = vehs.reduce((sum, v) => sum + parseFloat(v.walletBalance || "0"), 0);
+    const legacy = parseFloat(driver.walletBalance || "0");
+    return vehicleTotal + legacy;
+  }
+
+  // Debit a withdrawal from the operator's wallets. Pulls from the vehicle
+  // wallets first (active vehicle, then highest balance), then from any legacy
+  // driver balance, so funds are never double-counted.
+  async debitOperatorWallet(
+    driverId: string,
+    amount: number,
+  ): Promise<{ success: boolean; newBalance: number; insufficientFunds?: boolean }> {
+    const aggregate = await this.getOperatorWalletBalance(driverId);
+    if (aggregate < amount) {
+      return { success: false, newBalance: aggregate, insufficientFunds: true };
+    }
+    const vehs = await this.getDriverVehicles(driverId);
+    const ordered = [...vehs].sort((a, b) => {
+      const aActive = a.isActive ? 1 : 0;
+      const bActive = b.isActive ? 1 : 0;
+      if (aActive !== bActive) return bActive - aActive;
+      return parseFloat(b.walletBalance || "0") - parseFloat(a.walletBalance || "0");
+    });
+    let remaining = amount;
+    for (const v of ordered) {
+      if (remaining <= 0) break;
+      const avail = parseFloat(v.walletBalance || "0");
+      if (avail <= 0) continue;
+      const take = Math.min(avail, remaining);
+      await this.updateVehicleWalletBalance(v.id, -take);
+      remaining -= take;
+    }
+    if (remaining > 0) {
+      await this.updateDriverWalletBalance(driverId, -remaining);
+      remaining = 0;
+    }
+    return { success: true, newBalance: aggregate - amount };
+  }
+
+  // Credit funds back to the operator (e.g. a failed crypto payout). Returns to
+  // the active/primary vehicle wallet to keep the vehicle as source of truth.
+  async creditOperatorWallet(driverId: string, amount: number): Promise<number> {
+    const vehs = await this.getDriverVehicles(driverId);
+    const primary = vehs.find((v) => v.isActive) || vehs[0];
+    if (primary) {
+      await this.updateVehicleWalletBalance(primary.id, amount);
+    } else {
+      await this.updateDriverWalletBalance(driverId, amount);
+    }
+    return this.getOperatorWalletBalance(driverId);
   }
 
   async getDriverVehicles(driverId: string): Promise<Vehicle[]> {
@@ -295,6 +417,13 @@ export class DatabaseStorage implements IStorage {
       const driverRatings = await this.getDriverRatings(data.toDriverId);
       const avgRating = driverRatings.reduce((sum, r) => sum + r.rating, 0) / driverRatings.length;
       await this.updateDriver(data.toDriverId, { rating: avgRating.toFixed(2) });
+    }
+    // Reputation belongs to the car: recompute the rated ride's vehicle score.
+    if (data.rideId) {
+      const ride = await this.getRide(data.rideId);
+      if (ride?.vehicleId) {
+        await this.recomputeVehicleReputation(ride.vehicleId);
+      }
     }
     return rating;
   }
