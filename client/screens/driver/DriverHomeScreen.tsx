@@ -27,7 +27,6 @@ import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
-import { GoingHomeButton } from "@/components/driver/GoingHomeButton";
 import { DriverHomeSkeleton } from "@/components/SkeletonLoader";
 import * as Haptics from "expo-haptics";
 
@@ -337,8 +336,6 @@ export default function DriverHomeScreen() {
   const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [showActivationMoment, setShowActivationMoment] = useState(false);
-  const [onlineSessionStartTime, setOnlineSessionStartTime] = useState<Date | null>(null);
-  const [onlineSessionMinutes, setOnlineSessionMinutes] = useState(0);
   const [hubCooldowns, setHubCooldowns] = useState<Record<string, number>>({});
   const [proactiveHub, setProactiveHub] = useState<(Hub & { distanceKm: number }) | null>(null);
   const [lowBatteryWarning, setLowBatteryWarning] = useState<{
@@ -527,24 +524,6 @@ export default function DriverHomeScreen() {
   }, [incomingRequest?.id]);
 
   useEffect(() => {
-    if (!isOnline) {
-      setOnlineSessionStartTime(null);
-      setOnlineSessionMinutes(0);
-      return;
-    }
-    if (!onlineSessionStartTime) {
-      setOnlineSessionStartTime(new Date());
-    }
-    const timer = setInterval(() => {
-      if (onlineSessionStartTime) {
-        const mins = Math.floor((Date.now() - onlineSessionStartTime.getTime()) / 60000);
-        setOnlineSessionMinutes(mins);
-      }
-    }, 60000);
-    return () => clearInterval(timer);
-  }, [isOnline, onlineSessionStartTime]);
-
-  useEffect(() => {
     if (!isOnline || !currentLocation || !hubsData) return;
     const now = Date.now();
     const allHubs: Hub[] = [
@@ -654,7 +633,6 @@ export default function DriverHomeScreen() {
     if (value) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setShowActivationMoment(true);
-      setOnlineSessionStartTime(new Date());
       setTimeout(() => setShowActivationMoment(false), 1000);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -714,7 +692,6 @@ export default function DriverHomeScreen() {
     setEvReady(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowActivationMoment(true);
-    setOnlineSessionStartTime(new Date());
     setTimeout(() => setShowActivationMoment(false), 1400);
 
     toggleOnlineMutation.mutate(
@@ -809,7 +786,6 @@ export default function DriverHomeScreen() {
 
   const todayEarnings = earningsData?.totalEarnings ?? "0.00";
   const todayTrips = earningsData?.totalTrips ?? 0;
-  const showPmgthPrompt = isOnline && onlineSessionMinutes >= 120;
 
   if (!isReady) {
     return <DriverHomeSkeleton />;
@@ -953,13 +929,6 @@ export default function DriverHomeScreen() {
 
       {isOnline && !incomingRequest ? (
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
-          {showPmgthPrompt ? (
-            <GoingHomeButton isOnline={isOnline} currentLocation={currentLocation} cardMode />
-          ) : (
-            <View style={styles.goingHomeContainer}>
-              <GoingHomeButton isOnline={isOnline} currentLocation={currentLocation} />
-            </View>
-          )}
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
             <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
@@ -1464,9 +1433,6 @@ const styles = StyleSheet.create({
     left: Spacing.lg,
     right: Spacing.lg,
     gap: Spacing.md,
-  },
-  goingHomeContainer: {
-    alignItems: "center",
   },
   searchingCard: {
     flexDirection: "row",
