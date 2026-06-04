@@ -112,18 +112,6 @@ export default function DriverProfileScreen() {
     ],
     [
       {
-        icon: "analytics-outline",
-        label: "Network Analytics",
-        subtitle: "View network insights",
-        onPress: () => navigation.navigate("NetworkAnalytics" as any),
-      },
-      {
-        icon: "trophy-outline",
-        label: "Community Prestige",
-        subtitle: "Your community standing",
-        onPress: () => navigation.navigate("CommunityPrestige" as any),
-      },
-      {
         icon: "chatbox-outline",
         label: "Share Feedback",
         subtitle: "Help us improve",
@@ -132,24 +120,10 @@ export default function DriverProfileScreen() {
     ],
     [
       {
-        icon: "globe-outline",
-        label: "About the Network",
-        subtitle: "Distributed mobility infrastructure",
-        onPress: () => navigation.navigate("AboutNetwork" as any),
-      },
-    ],
-    [
-      {
         icon: "chatbubbles-outline",
         label: "Messages",
         subtitle: "Chat with your rider",
         onPress: () => navigation.navigate("DriverMessages" as any),
-      },
-      {
-        icon: "radio-outline",
-        label: "Ghost Mode",
-        subtitle: "Offline ride via Bluetooth",
-        onPress: () => navigation.navigate("DriverGhostMode" as any),
       },
     ],
     [
