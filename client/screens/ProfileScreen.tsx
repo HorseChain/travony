@@ -141,27 +141,9 @@ export default function ProfileScreen() {
           title="Messages"
           onPress={() => navigation.navigate("Messages")}
         />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-        <MenuItem
-          icon="radio-outline"
-          title="Ghost Mode"
-          onPress={() => navigation.navigate("GhostMode")}
-        />
       </Card>
 
       <Card style={styles.menuCard}>
-        <MenuItem
-          icon="analytics-outline"
-          title="Network Analytics"
-          onPress={() => navigation.navigate("NetworkAnalytics" as any)}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-        <MenuItem
-          icon="trophy-outline"
-          title="Community Prestige"
-          onPress={() => navigation.navigate("CommunityPrestige" as any)}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
         <MenuItem
           icon="chatbox-outline"
           title="Share Feedback"
@@ -170,12 +152,6 @@ export default function ProfileScreen() {
       </Card>
 
       <Card style={styles.menuCard}>
-        <MenuItem
-          icon="globe-outline"
-          title="About the Network"
-          onPress={() => navigation.navigate("AboutNetwork" as any)}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
         <MenuItem
           icon="document-text-outline"
           title="Terms of Service"
