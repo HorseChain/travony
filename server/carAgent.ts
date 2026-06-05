@@ -46,6 +46,19 @@ export interface HubDemand {
   distanceKm: number;
   recentRideCount: number;
   demandLevel: "high" | "medium" | "quiet";
+  // The hub's configured busy windows, e.g. "07:00-09:00,17:00-19:00".
+  peakHours?: string | null;
+}
+
+// The car's own earning rhythm, aggregated from its real completed-ride history.
+// Used to build an honest, forward-looking "plan for our next shift".
+export interface EarningPatterns {
+  // Hours of day (0-23, in the car's local time) ranked by earnings, best first.
+  bestHours: Array<{ hour: number; trips: number; earnings: number }>;
+  // Drop-off/pickup areas the car has earned in most, busiest first.
+  topAreas: Array<{ area: string; trips: number }>;
+  // How many completed trips the window analyzed (sample size / confidence).
+  totalTrips: number;
 }
 
 // A single milestone in the car's "living profile" timeline. Every milestone is
@@ -75,6 +88,8 @@ export interface CarAgentInput {
   hubDemand: HubDemand[];
   // Most recent milestones (newest first); the car may reference the latest one.
   milestones?: VehicleMilestone[];
+  // The car's own earning rhythm, used to plan the next shift honestly.
+  earningPatterns?: EarningPatterns;
 }
 
 export interface CarAgentSummary {
@@ -82,6 +97,9 @@ export interface CarAgentSummary {
   message: string;
   // One short, forward-looking "where to earn next" line.
   suggestion: string;
+  // A 1-2 sentence "plan for our next shift": the best hours + area to drive,
+  // grounded in the car's own history or, failing that, nearby hub busy hours.
+  plan: string;
   // Short rank/standing line, or null when there's nothing honest to show.
   rankLine: string | null;
   // The currency code used in the figures (derived from the car's rides).
@@ -159,12 +177,115 @@ function buildSuggestion(stats: DerivedStats, hubDemand: HubDemand[]): string {
   return `Go online and I'll start learning where we earn best.`;
 }
 
+// Below this many analyzed trips we don't trust the car's own hour pattern yet
+// and fall back to nearby hub busy hours instead of guessing.
+const MIN_TRIPS_FOR_PATTERN = 5;
+
+// 24h hour -> 12h parts, e.g. 0 -> {12,"am"}, 17 -> {5,"pm"}, 24 -> {12,"am"}.
+function formatHour12(hour: number): { num: number; suffix: "am" | "pm" } {
+  const h = ((hour % 24) + 24) % 24;
+  const suffix: "am" | "pm" = h < 12 ? "am" : "pm";
+  let num = h % 12;
+  if (num === 0) num = 12;
+  return { num, suffix };
+}
+
+// Merge a set of hours (0-23) into contiguous windows and format them like
+// "7-9am", "5-8pm", or "11am-2pm". A window for hour H covers H:00 to (H+1):00,
+// so the displayed end is the hour after the last one in the run.
+function formatHourWindows(hours: number[], maxWindows = 2): string {
+  const uniq = [...new Set(hours.filter((h) => Number.isInteger(h)))].sort((a, b) => a - b);
+  if (uniq.length === 0) return "";
+
+  const ranges: Array<[number, number]> = [];
+  let start = uniq[0];
+  let prev = uniq[0];
+  for (let i = 1; i < uniq.length; i++) {
+    if (uniq[i] === prev + 1) {
+      prev = uniq[i];
+    } else {
+      ranges.push([start, prev]);
+      start = uniq[i];
+      prev = uniq[i];
+    }
+  }
+  ranges.push([start, prev]);
+
+  const labels = ranges.slice(0, maxWindows).map(([s, e]) => {
+    const a = formatHour12(s);
+    const b = formatHour12(e + 1); // window end is exclusive
+    return a.suffix === b.suffix ? `${a.num}-${b.num}${b.suffix}` : `${a.num}${a.suffix}-${b.num}${b.suffix}`;
+  });
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
+// Turn a hub's "07:00-09:00,17:00-19:00" peak string into "7-9am and 5-7pm".
+function formatPeakHours(peakHours: string | null | undefined, maxWindows = 2): string {
+  if (!peakHours) return "";
+  const labels: string[] = [];
+  for (const part of peakHours.split(",")) {
+    const [fromRaw, toRaw] = part.split("-");
+    const from = parseInt((fromRaw || "").trim().split(":")[0], 10);
+    let to = parseInt((toRaw || "").trim().split(":")[0], 10);
+    if (isNaN(from) || isNaN(to)) continue;
+    if (to === 0) to = 24; // "00:00" end means midnight
+    const a = formatHour12(from);
+    const b = formatHour12(to);
+    labels.push(a.suffix === b.suffix && from < to ? `${a.num}-${b.num}${b.suffix}` : `${a.num}${a.suffix}-${b.num}${b.suffix}`);
+    if (labels.length >= maxWindows) break;
+  }
+  if (labels.length === 0) return "";
+  if (labels.length === 1) return labels[0];
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]}`;
+}
+
+// Join names into readable prose: "A", "A and B", "A, B and C".
+function formatList(items: string[]): string {
+  const xs = items.filter(Boolean);
+  if (xs.length === 0) return "";
+  if (xs.length === 1) return xs[0];
+  return `${xs.slice(0, -1).join(", ")} and ${xs[xs.length - 1]}`;
+}
+
+// Build an honest, forward-looking plan for the next shift, composed entirely
+// from real signals (no AI free text). Prefers the car's own earning rhythm —
+// its best hours plus its top 2-3 earning areas; otherwise leans on nearby hubs'
+// known busy hours. Never invents demand or promises money.
+function buildPlan(
+  stats: DerivedStats,
+  patterns: EarningPatterns | undefined,
+  hubDemand: HubDemand[],
+): string {
+  if (patterns && patterns.totalTrips >= MIN_TRIPS_FOR_PATTERN && patterns.bestHours.length) {
+    const windows = formatHourWindows(patterns.bestHours.slice(0, 3).map((h) => h.hour));
+    const areas = (patterns.topAreas.length ? patterns.topAreas.map((a) => a.area) : stats.topAreas).slice(0, 3);
+    if (windows && areas.length) {
+      return `Our strongest hours are usually ${windows} — let's aim for those, focusing on ${formatList(areas)} where we've earned well.`;
+    }
+    if (windows) {
+      return `Our strongest hours are usually ${windows} — a good window for us to be out together.`;
+    }
+  }
+
+  const hubsWithPeak = hubDemand.filter((h) => formatPeakHours(h.peakHours)).slice(0, 2);
+  if (hubsWithPeak.length) {
+    const parts = hubsWithPeak.map((h) => `${h.name} (${formatPeakHours(h.peakHours)})`);
+    return `Still learning our rhythm. Near here, ${formatList(parts)} tend to get busy — good places to start.`;
+  }
+  if (hubDemand.length) {
+    return `Still learning our rhythm. ${formatList(hubDemand.slice(0, 3).map((h) => h.name))} are among the busier spots near us — good places to start.`;
+  }
+  return `Give me a few more trips and I'll map out the hours and areas where we earn the most.`;
+}
+
 // Plain, honest fallback used when the AI is unavailable — never blocks the screen.
 function fallbackSummary(
   stats: DerivedStats,
   rank: WeeklyRank,
   hubDemand: HubDemand[],
   latestMilestone: VehicleMilestone | null = null,
+  patterns: EarningPatterns | undefined = undefined,
 ): CarAgentSummary {
   const c = stats.currency;
   let message: string;
@@ -186,6 +307,7 @@ function fallbackSummary(
   return {
     message,
     suggestion: buildSuggestion(stats, hubDemand),
+    plan: buildPlan(stats, patterns, hubDemand),
     rankLine: buildRankLine(rank),
     currency: c,
     aiGenerated: false,
@@ -225,6 +347,23 @@ function aiTextIsHonest(
     const n = parseInt(raw.replace(/,/g, ""), 10);
     if (!allowed.has(n)) return false;
   }
+
+  // Catch fabricated money stated with the currency code (e.g. "AED 80") that
+  // isn't one of our real earnings figures — even small or decimal amounts the
+  // 3+ digit check above would miss.
+  const c = stats.currency;
+  if (c) {
+    const moneyRe = new RegExp(`${c}\\s*([\\d,]+(?:\\.\\d+)?)|([\\d,]+(?:\\.\\d+)?)\\s*${c}`, "gi");
+    const allowedMoney = new Set<number>([
+      Math.round(stats.todayEarnings),
+      Math.round(stats.weekEarnings),
+    ]);
+    let m: RegExpExecArray | null;
+    while ((m = moneyRe.exec(text)) !== null) {
+      const n = Math.round(parseFloat((m[1] || m[2] || "0").replace(/,/g, "")));
+      if (!allowedMoney.has(n)) return false;
+    }
+  }
   return true;
 }
 
@@ -235,9 +374,11 @@ export async function generateCarAgentSummary(input: CarAgentInput): Promise<Car
   const name = carName(input.vehicle);
   const rankLine = buildRankLine(input.rank);
   const latestMilestone = input.milestones?.[0] ?? null;
+  const patterns = input.earningPatterns;
+  const deterministicPlan = buildPlan(stats, patterns, input.hubDemand);
 
   const client = getOpenAI();
-  if (!client) return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone);
+  if (!client) return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
 
   const facts = {
     carName: name,
@@ -289,20 +430,22 @@ Respond ONLY as JSON: {"message": string, "suggestion": string}.`;
     const suggestion = typeof parsed.suggestion === "string" && parsed.suggestion.trim() ? parsed.suggestion.trim() : null;
 
     // Guard against hallucinated figures — if the model strayed from the facts,
-    // serve the deterministic, honest summary instead.
+    // serve the deterministic, honest summary instead. The plan is composed
+    // deterministically from real signals, so it is grounded by construction.
     if (!message || !aiTextIsHonest(`${message} ${suggestion || ""}`, stats, input.hubDemand, latestMilestone)) {
-      return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone);
+      return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
     }
 
     return {
       message,
       suggestion: suggestion || buildSuggestion(stats, input.hubDemand),
+      plan: deterministicPlan,
       rankLine,
       currency: stats.currency,
       aiGenerated: true,
     };
   } catch (err) {
     console.error("[carAgent] AI summary failed, using fallback:", err);
-    return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone);
+    return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
   }
 }

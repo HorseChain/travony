@@ -9,7 +9,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, desc, sql, lt, inArray, isNull } from "drizzle-orm";
-import type { VehicleMilestone } from "./carAgent";
+import type { VehicleMilestone, EarningPatterns } from "./carAgent";
 
 // Stable, human-readable public identity for a vehicle (e.g. "TRV-7Q2K9X").
 // Used as the car's handle in the operator-facing Vehicle Wallet view.
@@ -302,6 +302,65 @@ export class DatabaseStorage implements IStorage {
       weekEarnings: Math.round(parseFloat(row?.weekEarnings || "0") * 100) / 100,
       weekTrips: parseInt(row?.weekTrips || "0", 10),
     };
+  }
+
+  // The car's own earning rhythm: which hours of day and which areas it has
+  // actually earned most in, aggregated from completed rides over the trailing
+  // ~60 days. Hours are bucketed in the car's LOCAL time (utcOffsetMinutes is
+  // applied in JS since completedAt is stored in UTC). Powers the honest,
+  // forward-looking "plan for our next shift". Real data only — never fabricated.
+  async getVehicleEarningPatterns(
+    vehicleId: string,
+    utcOffsetMinutes: number = 0
+  ): Promise<EarningPatterns & { currency: string }> {
+    const since = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const rows = await db
+      .select({
+        completedAt: rides.completedAt,
+        earnings: rides.driverEarnings,
+        dropoffAddress: rides.dropoffAddress,
+        pickupAddress: rides.pickupAddress,
+        currency: rides.currency,
+      })
+      .from(rides)
+      .where(
+        and(
+          eq(rides.vehicleId, vehicleId),
+          eq(rides.status, "completed"),
+          sql`${rides.completedAt} >= ${since}`
+        )
+      );
+
+    const hourMap = new Map<number, { trips: number; earnings: number }>();
+    const areaMap = new Map<string, number>();
+    let currency = "AED";
+
+    for (const r of rows) {
+      if (!r.completedAt) continue;
+      if (r.currency) currency = r.currency;
+
+      const local = new Date(new Date(r.completedAt).getTime() + utcOffsetMinutes * 60000);
+      const hour = local.getUTCHours();
+      const e = parseFloat(r.earnings || "0");
+      const cur = hourMap.get(hour) || { trips: 0, earnings: 0 };
+      cur.trips += 1;
+      cur.earnings += e;
+      hourMap.set(hour, cur);
+
+      const area = (r.dropoffAddress || r.pickupAddress || "").split(",")[0]?.trim();
+      if (area) areaMap.set(area, (areaMap.get(area) || 0) + 1);
+    }
+
+    const bestHours = Array.from(hourMap.entries())
+      .map(([hour, v]) => ({ hour, trips: v.trips, earnings: Math.round(v.earnings * 100) / 100 }))
+      .sort((a, b) => b.earnings - a.earnings);
+
+    const topAreas = Array.from(areaMap.entries())
+      .map(([area, trips]) => ({ area, trips }))
+      .sort((a, b) => b.trips - a.trips)
+      .slice(0, 3);
+
+    return { bestHours, topAreas, totalTrips: rows.length, currency };
   }
 
   // Rank a vehicle against other cars IN THE SAME REGION by earnings over the

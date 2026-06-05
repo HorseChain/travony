@@ -26,11 +26,31 @@ export interface VehicleVerificationResult {
   model?: string;
   color?: string;
   year?: number;
+  plateNumber?: string;
   passengerCapacity: number;
   licensePlateVisible: boolean;
   conditionScore: number;
   issues: string[];
   details: string;
+}
+
+const CATEGORY_TO_VEHICLE_TYPE: Record<VehicleCategory, string> = {
+  motorcycle: "motorcycle",
+  auto_rickshaw: "auto_rickshaw",
+  cng: "cng",
+  tuktuk: "tuktuk",
+  economy_car: "economy",
+  comfort_car: "comfort",
+  premium_car: "premium",
+  suv: "suv",
+  minivan: "minivan",
+  minibus: "minibus",
+  unknown: "economy",
+};
+
+export function mapCategoryToVehicleType(category?: VehicleCategory): string {
+  if (!category) return "economy";
+  return CATEGORY_TO_VEHICLE_TYPE[category] || "economy";
 }
 
 const VEHICLE_CATEGORIES = {
@@ -103,12 +123,14 @@ Analyze the image and provide:
 2. Make and model if identifiable
 3. Approximate year
 4. Color
-5. Estimated passenger capacity
-6. Whether the license plate is visible and legible
-7. Vehicle condition score (1-10)
-8. Any issues that would make it unsuitable for passenger transport
+5. The license plate text exactly as written on the plate (read every visible character). Put it in "licensePlateText". If no plate is visible or it is not legible, set "licensePlateText" to an empty string and do NOT guess.
+6. Estimated passenger capacity
+7. Whether the license plate is visible and legible
+8. Vehicle condition score (1-10)
+9. Any issues that would make it unsuitable for passenger transport
 
-Be strict about safety - flag any visible damage, missing parts, or unsafe conditions.`;
+Be strict about safety - flag any visible damage, missing parts, or unsafe conditions.
+Never invent a license plate, make, model, or year you cannot actually see - leave the field empty instead.`;
 
   const response = await openai.chat.completions.create({
     model: "gpt-4o",
@@ -139,6 +161,7 @@ Be strict about safety - flag any visible damage, missing parts, or unsafe condi
       model: analysis.model,
       color: analysis.color,
       year: analysis.year,
+      plateNumber: normalizePlate(analysis.licensePlateText ?? analysis.plateNumber ?? analysis.licensePlate),
       passengerCapacity: analysis.passengerCapacity || VEHICLE_CATEGORIES[analysis.category as keyof typeof VEHICLE_CATEGORIES]?.capacity || 4,
       licensePlateVisible: analysis.licensePlateVisible ?? false,
       conditionScore: analysis.conditionScore || 5,
@@ -157,6 +180,23 @@ Be strict about safety - flag any visible damage, missing parts, or unsafe condi
       details: analysisText
     };
   }
+}
+
+function normalizePlate(raw: unknown): string | undefined {
+  if (typeof raw !== "string") return undefined;
+  const cleaned = raw.trim().replace(/\s+/g, " ");
+  if (!cleaned) return undefined;
+  const lowered = cleaned.toLowerCase();
+  if (
+    lowered === "n/a" ||
+    lowered === "none" ||
+    lowered === "unknown" ||
+    lowered === "not visible" ||
+    lowered === "not legible"
+  ) {
+    return undefined;
+  }
+  return cleaned.toUpperCase();
 }
 
 function normalizeCategory(input: string): VehicleCategory {
@@ -262,6 +302,7 @@ export async function verifyMultipleVehicleImages(
   const avgCondition = matchingResults.reduce((sum, r) => sum + r.conditionScore, 0) / matchingResults.length;
   const allIssues = [...new Set(matchingResults.flatMap(r => r.issues))];
   const hasPlate = matchingResults.some(r => r.licensePlateVisible);
+  const detectedPlate = matchingResults.find(r => r.plateNumber)?.plateNumber;
 
   return {
     isValid: avgCondition >= 6 && allIssues.length === 0,
@@ -271,6 +312,7 @@ export async function verifyMultipleVehicleImages(
     model: matchingResults[0].model,
     color: matchingResults[0].color,
     year: matchingResults[0].year,
+    plateNumber: detectedPlate,
     passengerCapacity: matchingResults[0].passengerCapacity,
     licensePlateVisible: hasPlate,
     conditionScore: Math.round(avgCondition),

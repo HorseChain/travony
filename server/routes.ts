@@ -97,7 +97,7 @@ import { initializeHubs, initializeEvHubs } from "./hubSeeder";
 import type { Ride } from "@shared/schema";
 import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, gte, desc, count } from "drizzle-orm";
+import { eq, and, gte, desc, count, like } from "drizzle-orm";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -3049,38 +3049,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const latest = recentRides[0];
       const regionCode = latest?.regionCode || "AE";
 
-      const [earnings, rank, milestones] = await Promise.all([
+      // The car buckets its own hours in local time. UAE/Oman are UTC+4; the
+      // other Gulf markets (KSA, Kuwait, Bahrain, Qatar) are UTC+3.
+      const region = regionCode.toUpperCase();
+      const utcOffsetMinutes = region.startsWith("AE") || region.startsWith("OM") ? 240 : 180;
+
+      const [earnings, rank, milestones, earningPatterns] = await Promise.all([
         storage.getVehicleEarningsStats(req.params.vehicleId),
         storage.getVehicleWeeklyRank(req.params.vehicleId, regionCode),
         storage.getVehicleMilestones(req.params.vehicleId),
+        storage.getVehicleEarningPatterns(req.params.vehicleId, utcOffsetMinutes),
       ]);
 
-      // Real nearby hub demand signals around the car's latest known location.
-      let hubDemand: Array<{ name: string; distanceKm: number; recentRideCount: number; demandLevel: "high" | "medium" | "quiet" }> = [];
+      // Real nearby hub demand signals. Prefer the car's latest known dropoff; for a
+      // car with little/no ride history, fall back to the driver's current location,
+      // then to the busiest hubs in its region — so even a brand-new car gets
+      // nearby-hub guidance (busy hubs + their peak hours) for its first shift.
+      let hubLat: number | null = null;
+      let hubLng: number | null = null;
       if (latest?.dropoffLat && latest?.dropoffLng) {
-        try {
-          const lat = parseFloat(latest.dropoffLat);
-          const lng = parseFloat(latest.dropoffLng);
-          if (!isNaN(lat) && !isNaN(lng)) {
-            const nearby = await getHubsNearLocation(lat, lng, 15);
-            hubDemand = nearby.slice(0, 3).map((h) => {
-              const score = parseFloat((h as any).avgDemandScore || "0");
-              const demandLevel: "high" | "medium" | "quiet" =
-                h.recentRideCount >= 3 || score >= 70 ? "high" : h.recentRideCount >= 1 || score >= 40 ? "medium" : "quiet";
-              return {
-                name: h.name,
-                distanceKm: Math.round(h.distance * 10) / 10,
-                recentRideCount: h.recentRideCount,
-                demandLevel,
-              };
-            });
-          }
-        } catch (err) {
-          console.error("[carAgent] hub demand lookup failed:", err);
-        }
+        const la = parseFloat(latest.dropoffLat);
+        const ln = parseFloat(latest.dropoffLng);
+        if (!isNaN(la) && !isNaN(ln)) { hubLat = la; hubLng = ln; }
+      }
+      if ((hubLat === null || hubLng === null) && driver?.currentLat && driver?.currentLng) {
+        const la = parseFloat(driver.currentLat);
+        const ln = parseFloat(driver.currentLng);
+        if (!isNaN(la) && !isNaN(ln)) { hubLat = la; hubLng = ln; }
       }
 
-      const summary = await generateCarAgentSummary({ vehicle, earnings, recentRides, rank, regionCode, hubDemand, milestones });
+      let hubDemand: Array<{ name: string; distanceKm: number; recentRideCount: number; demandLevel: "high" | "medium" | "quiet"; peakHours?: string | null }> = [];
+      try {
+        if (hubLat !== null && hubLng !== null) {
+          const nearby = await getHubsNearLocation(hubLat, hubLng, 15);
+          hubDemand = nearby.slice(0, 3).map((h) => {
+            const score = parseFloat((h as any).avgDemandScore || "0");
+            const demandLevel: "high" | "medium" | "quiet" =
+              h.recentRideCount >= 3 || score >= 70 ? "high" : h.recentRideCount >= 1 || score >= 40 ? "medium" : "quiet";
+            return {
+              name: h.name,
+              distanceKm: Math.round(h.distance * 10) / 10,
+              recentRideCount: h.recentRideCount,
+              demandLevel,
+              peakHours: (h as any).peakHours ?? null,
+            };
+          });
+        }
+        // No usable coordinates yet (brand-new car, driver hasn't shared location):
+        // surface the busiest known hubs in the car's country as a starting point.
+        // Hub region codes are emirate/city level ("AE-DU", "SA-RY"), so we match on
+        // the country prefix taken from the car's region ("AE-DU" or "AE" -> "AE").
+        if (hubDemand.length === 0) {
+          const countryPrefix = region.split("-")[0];
+          const regionHubs = await db
+            .select()
+            .from(hubs)
+            .where(and(like(hubs.regionCode, `${countryPrefix}%`), eq(hubs.status, "active")))
+            .orderBy(desc(hubs.avgDemandScore))
+            .limit(3);
+          hubDemand = regionHubs.map((h) => {
+            const score = parseFloat(h.avgDemandScore || "0");
+            const demandLevel: "high" | "medium" | "quiet" =
+              score >= 70 ? "high" : score >= 40 ? "medium" : "quiet";
+            return {
+              name: h.name,
+              distanceKm: 0,
+              recentRideCount: 0,
+              demandLevel,
+              peakHours: h.peakHours ?? null,
+            };
+          });
+        }
+      } catch (err) {
+        console.error("[carAgent] hub demand lookup failed:", err);
+      }
+
+      const summary = await generateCarAgentSummary({ vehicle, earnings, recentRides, rank, regionCode, hubDemand, milestones, earningPatterns });
       res.json({
         name: (vehicle.nickname && vehicle.nickname.trim()) || `${vehicle.make} ${vehicle.model}`,
         nickname: vehicle.nickname,
@@ -3392,30 +3436,100 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(driver.userId);
       const regionCode = user?.regionCode || "BD";
 
-      let aiResult = null;
-      let verificationStatus: "pending" | "ai_verified" | "admin_verified" | "rejected" = vehicle?.verificationStatus as any || "pending";
+      const { verifyMultipleVehicleImages, mapCategoryToVehicleType } = await import("./vehicleVerification");
 
+      let aiResult = null;
       if (autoVerify && photoFront) {
         const imagesToVerify = [photoFront, photoSide].filter(Boolean) as string[];
         if (imagesToVerify.length > 0) {
-          const { verifyMultipleVehicleImages } = await import("./vehicleVerification");
           aiResult = await verifyMultipleVehicleImages(imagesToVerify, regionCode);
-          verificationStatus = aiResult.isValid ? "ai_verified" : "pending";
+        }
+      }
+      const ranAi = !!aiResult;
+
+      // When a fresh scan ran, the AI-detected values win for identity fields - a
+      // driver cannot override what the photo actually shows. The driver may only
+      // fill in fields the AI left blank (e.g. a plate the camera couldn't read).
+      const resolvedMake = aiResult?.make || make;
+      const resolvedModel = aiResult?.model || model;
+      const resolvedYear = aiResult?.year || year;
+      const resolvedColor = aiResult?.color || color;
+      const resolvedPlate = aiResult?.plateNumber || plateNumber;
+      const resolvedType = (aiResult ? mapCategoryToVehicleType(aiResult.category) : undefined) || type;
+
+      // A brand-new vehicle needs the required fields. If the photo didn't give us
+      // enough, tell the app what's missing (with whatever we did detect) so the
+      // driver can fill the gaps instead of seeing a generic failure.
+      if (!vehicle) {
+        const missing: string[] = [];
+        if (!resolvedMake) missing.push("make");
+        if (!resolvedModel) missing.push("model");
+        if (!resolvedPlate) missing.push("plateNumber");
+        if (!resolvedType) missing.push("type");
+        if (missing.length > 0) {
+          return res.status(422).json({
+            message: "We found your car but couldn't read every detail from the photo. Please add the missing details and try again.",
+            code: "VEHICLE_DETAILS_INCOMPLETE",
+            details: {
+              missingFields: missing,
+              detected: aiResult ? {
+                make: aiResult.make,
+                model: aiResult.model,
+                year: aiResult.year,
+                color: aiResult.color,
+                plateNumber: aiResult.plateNumber,
+                type: mapCategoryToVehicleType(aiResult.category),
+              } : null,
+            },
+          });
         }
       }
 
+      // Verification-status integrity: "ai_verified" can ONLY be granted by a fresh,
+      // successful AI scan. A manual edit that changes any identity field drops a
+      // previously verified vehicle back to pending review so it can't be spoofed.
+      let verificationStatus: "pending" | "ai_verified" | "admin_verified" | "rejected" =
+        (vehicle?.verificationStatus as any) || "pending";
+      let downgraded = false;
+      if (ranAi) {
+        verificationStatus = aiResult!.isValid ? "ai_verified" : "pending";
+      } else if (vehicle) {
+        const identityChanged =
+          (!!resolvedMake && resolvedMake !== vehicle.make) ||
+          (!!resolvedModel && resolvedModel !== vehicle.model) ||
+          (!!resolvedPlate && resolvedPlate !== vehicle.plateNumber) ||
+          (!!resolvedType && resolvedType !== vehicle.type);
+        if (identityChanged && (verificationStatus === "ai_verified" || verificationStatus === "admin_verified")) {
+          verificationStatus = "pending";
+          downgraded = true;
+        }
+      }
+
+      // Only set the verified timestamp on a fresh pass; clear it on a downgrade.
+      // Leave it untouched (undefined) when nothing about verification changed.
+      let aiVerifiedAt: Date | null | undefined = undefined;
+      if (ranAi) {
+        aiVerifiedAt = verificationStatus === "ai_verified" ? new Date() : null;
+      } else if (downgraded) {
+        aiVerifiedAt = null;
+      }
+
       const vehicleData: any = {
-        make: aiResult?.make || make,
-        model: aiResult?.model || model,
-        year: aiResult?.year || year,
-        color: aiResult?.color || color,
-        plateNumber,
-        type,
+        make: resolvedMake,
+        model: resolvedModel,
+        year: resolvedYear,
+        color: resolvedColor,
+        plateNumber: resolvedPlate,
+        type: resolvedType,
         photoFront,
         photoSide,
         verificationStatus,
-        aiConfidenceScore: aiResult?.confidence,
-        aiVerificationNotes: aiResult?.issues?.join("; "),
+        aiCategory: aiResult?.category,
+        aiConfidence: aiResult ? String(aiResult.confidence) : undefined,
+        aiConditionScore: aiResult?.conditionScore,
+        aiPassengerCapacity: aiResult?.passengerCapacity,
+        aiIssues: aiResult?.issues?.length ? aiResult.issues.join("; ") : undefined,
+        aiVerifiedAt,
         isElectric: typeof isElectric === "boolean" ? isElectric : undefined,
       };
 
@@ -3436,6 +3550,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         aiResult: aiResult ? {
           isValid: aiResult.isValid,
           confidence: aiResult.confidence,
+          detected: {
+            make: aiResult.make,
+            model: aiResult.model,
+            year: aiResult.year,
+            color: aiResult.color,
+            plateNumber: aiResult.plateNumber,
+            type: mapCategoryToVehicleType(aiResult.category),
+          },
           notes: aiResult.issues,
         } : null,
       });

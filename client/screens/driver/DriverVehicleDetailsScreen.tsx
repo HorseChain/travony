@@ -13,7 +13,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
-import { apiRequest, getApiUrl } from "@/lib/query-client";
+import { apiRequest } from "@/lib/query-client";
 
 interface VehicleData {
   id: string;
@@ -48,6 +48,14 @@ const VEHICLE_TYPES = [
   { value: "minivan", label: "Minivan", regions: ["BD", "IN", "PK", "AE", "SA"] },
 ];
 
+function notify(title: string, message: string) {
+  if (Platform.OS === "web") {
+    alert(message);
+  } else {
+    Alert.alert(title, message);
+  }
+}
+
 export default function DriverVehicleDetailsScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
@@ -63,9 +71,15 @@ export default function DriverVehicleDetailsScreen() {
   const [vehicleType, setVehicleType] = useState("economy");
   const [photoFront, setPhotoFront] = useState<string | null>(null);
   const [photoSide, setPhotoSide] = useState<string | null>(null);
-  const [isVerifying, setIsVerifying] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [isElectric, setIsElectric] = useState(false);
+
+  // UI flow state
+  const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+  const [missingFields, setMissingFields] = useState<string[]>([]);
+  const [actionLabel, setActionLabel] = useState<string>("");
+  const [rescan, setRescan] = useState(false);
 
   const userRegion = (user as any)?.regionCode || "BD";
 
@@ -74,57 +88,76 @@ export default function DriverVehicleDetailsScreen() {
     enabled: !!user,
   });
 
+  const existingVehicle = driverData?.vehicle;
+  const hasVehicle = !!existingVehicle;
+
   useEffect(() => {
-    if (driverData?.vehicle) {
-      setMake(driverData.vehicle.make || "");
-      setModel(driverData.vehicle.model || "");
-      setYear(driverData.vehicle.year?.toString() || "");
-      setColor(driverData.vehicle.color || "");
-      setPlateNumber(driverData.vehicle.plateNumber || "");
-      setVehicleType(driverData.vehicle.type || "economy");
-      setPhotoFront(driverData.vehicle.photoFront || null);
-      setPhotoSide(driverData.vehicle.photoSide || null);
-      setVerificationStatus(driverData.vehicle.verificationStatus || null);
-      setIsElectric(driverData.vehicle.isElectric || false);
+    if (existingVehicle) {
+      setMake(existingVehicle.make || "");
+      setModel(existingVehicle.model || "");
+      setYear(existingVehicle.year?.toString() || "");
+      setColor(existingVehicle.color || "");
+      setPlateNumber(existingVehicle.plateNumber || "");
+      setVehicleType(existingVehicle.type || "economy");
+      setPhotoFront(existingVehicle.photoFront || null);
+      setPhotoSide(existingVehicle.photoSide || null);
+      setVerificationStatus(existingVehicle.verificationStatus || null);
+      setIsElectric(existingVehicle.isElectric || false);
     }
-  }, [driverData]);
+  }, [existingVehicle]);
 
   const filteredVehicleTypes = VEHICLE_TYPES.filter(
     (vt) => vt.regions.includes(userRegion) || vt.regions.length === 0
   );
 
-  const pickImage = async (type: "front" | "side") => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [4, 3],
-      quality: 0.8,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets[0]) {
+  const applyPhoto = (result: ImagePicker.ImagePickerResult) => {
+    if (!result.canceled && result.assets[0]?.base64) {
       const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-      if (type === "front") {
-        setPhotoFront(base64Image);
-      } else {
-        setPhotoSide(base64Image);
-      }
+      setPendingPhoto(base64Image);
+      setShowManual(false);
+      setMissingFields([]);
     }
   };
 
-  const updateMutation = useMutation({
-    mutationFn: async (data: {
-      make: string;
-      model: string;
-      year: number;
-      color: string;
-      plateNumber: string;
-      type: string;
-      photoFront?: string;
-      photoSide?: string;
-      autoVerify?: boolean;
-      isElectric?: boolean;
-    }) => {
+  const takePhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        notify(
+          "Camera access needed",
+          "Please allow camera access to photograph your car, or upload a photo from your gallery instead."
+        );
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.6,
+        base64: true,
+      });
+      applyPhoto(result);
+    } catch (e) {
+      notify("Camera unavailable", "Couldn't open the camera here. Please upload a photo from your gallery instead.");
+    }
+  };
+
+  const uploadPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.6,
+        base64: true,
+      });
+      applyPhoto(result);
+    } catch (e) {
+      notify("Couldn't open gallery", "Please try again.");
+    }
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async (data: Record<string, any>) => {
       return apiRequest("/api/drivers/vehicle", {
         method: "PATCH",
         body: JSON.stringify(data),
@@ -133,81 +166,127 @@ export default function DriverVehicleDetailsScreen() {
     },
     onSuccess: (data: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/me"] });
-      setIsVerifying(false);
-      
+      setPendingPhoto(null);
+      setShowManual(false);
+      setMissingFields([]);
+      setRescan(false);
+
       if (data?.verificationStatus) {
         setVerificationStatus(data.verificationStatus);
       }
-      
-      const message = data?.verificationStatus === "ai_verified"
-        ? "Vehicle verified successfully by AI!"
-        : data?.verificationStatus === "pending"
-        ? "Vehicle saved. Pending admin review."
-        : "Vehicle details updated successfully!";
-      
-      if (Platform.OS === "web") {
-        alert(message);
-      } else {
-        Alert.alert("Success", message);
-      }
+
+      const message =
+        data?.verificationStatus === "ai_verified"
+          ? "Your car was found and verified. You're all set."
+          : data?.verificationStatus === "pending"
+          ? "Your car was saved. We'll finish checking it shortly."
+          : "Your car details were saved.";
+      notify("Done", message);
     },
-    onError: () => {
-      setIsVerifying(false);
-      if (Platform.OS === "web") {
-        alert("Failed to update vehicle details. Please try again.");
-      } else {
-        Alert.alert("Error", "Failed to update vehicle details. Please try again.");
+    onError: (error: any) => {
+      const status = error?.statusCode;
+      const details = error?.details;
+      if (status === 422 && details) {
+        // AI found the car but couldn't read every required detail.
+        const detected = details.detected || {};
+        if (detected.make) setMake(detected.make);
+        if (detected.model) setModel(detected.model);
+        if (detected.year) setYear(String(detected.year));
+        if (detected.color) setColor(detected.color);
+        if (detected.plateNumber) setPlateNumber(detected.plateNumber);
+        if (detected.type) setVehicleType(detected.type);
+        setMissingFields(Array.isArray(details.missingFields) ? details.missingFields : []);
+        setShowManual(true);
+        notify(
+          "Almost there",
+          error?.message || "We found your car but need a couple of details. Please fill them in and save."
+        );
+        return;
       }
+      notify("Couldn't add your car", error?.message || "Please try again.");
     },
   });
 
-  const handleSave = (withVerification: boolean = false) => {
-    if (!make || !model || !year || !color || !plateNumber) {
-      if (Platform.OS === "web") {
-        alert("Please fill in all fields");
-      } else {
-        Alert.alert("Missing Information", "Please fill in all fields");
-      }
+  const isBusy = saveMutation.isPending;
+
+  const handleFindMyCar = () => {
+    if (!pendingPhoto) return;
+    setActionLabel("Finding your car...");
+    saveMutation.mutate({ photoFront: pendingPhoto, autoVerify: true });
+  };
+
+  const handleSaveManual = () => {
+    if (!make || !model || !plateNumber) {
+      notify("Missing information", "Please fill in the make, model, and plate number.");
       return;
     }
-
-    if (withVerification && !photoFront) {
-      if (Platform.OS === "web") {
-        alert("Please upload at least a front photo for AI verification");
-      } else {
-        Alert.alert("Photo Required", "Please upload at least a front photo for AI verification");
-      }
-      return;
-    }
-
-    setIsVerifying(withVerification);
-    updateMutation.mutate({
+    setActionLabel("Saving your car...");
+    saveMutation.mutate({
       make,
       model,
-      year: parseInt(year, 10),
+      year: year ? parseInt(year, 10) : undefined,
+      color,
+      plateNumber,
+      type: vehicleType,
+      photoFront: pendingPhoto || photoFront || undefined,
+      autoVerify: !!(pendingPhoto || photoFront),
+      isElectric,
+    });
+  };
+
+  const handleSaveEdits = () => {
+    if (!make || !model || !plateNumber) {
+      notify("Missing information", "Please fill in the make, model, and plate number.");
+      return;
+    }
+    setActionLabel("Saving changes...");
+    saveMutation.mutate({
+      make,
+      model,
+      year: year ? parseInt(year, 10) : undefined,
       color,
       plateNumber,
       type: vehicleType,
       photoFront: photoFront || undefined,
       photoSide: photoSide || undefined,
-      autoVerify: withVerification,
+      autoVerify: false,
       isElectric,
     });
   };
 
+  // Clears the chosen photo but stays in the capture step ("use a different photo").
+  const clearPendingPhoto = () => {
+    setPendingPhoto(null);
+    setShowManual(false);
+    setMissingFields([]);
+  };
+
+  // Existing-vehicle owners scanning a brand new photo to re-verify.
+  const startReScan = () => {
+    setRescan(true);
+    setPendingPhoto(null);
+    setShowManual(false);
+    setMissingFields([]);
+  };
+
+  const cancelReScan = () => {
+    setRescan(false);
+    setPendingPhoto(null);
+  };
+
   const getVerificationBadge = () => {
     if (!verificationStatus) return null;
-    
+
     const badgeConfig: Record<string, { color: string; icon: keyof typeof Feather.glyphMap; text: string }> = {
       ai_verified: { color: Colors.travonyGreen, icon: "check-circle", text: "AI Verified" },
       admin_verified: { color: Colors.travonyGreen, icon: "shield", text: "Admin Verified" },
       pending: { color: "#F59E0B", icon: "clock", text: "Pending Review" },
       rejected: { color: "#EF4444", icon: "x-circle", text: "Rejected" },
     };
-    
+
     const config = badgeConfig[verificationStatus];
     if (!config) return null;
-    
+
     return (
       <View style={[styles.verificationBadge, { backgroundColor: config.color + "20" }]}>
         <Feather name={config.icon} size={16} color={config.color} />
@@ -216,46 +295,31 @@ export default function DriverVehicleDetailsScreen() {
     );
   };
 
-  return (
-    <ThemedView style={styles.container}>
-      <KeyboardAwareScrollViewCompat
-        contentContainerStyle={[
-          styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
-        ]}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
-          <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
-            Upload vehicle photos for AI verification to get approved faster
-          </ThemedText>
-        </View>
+  const typeLabel = VEHICLE_TYPES.find((t) => t.value === (existingVehicle?.type || vehicleType))?.label;
+  const carName = [existingVehicle?.year, existingVehicle?.color, existingVehicle?.make, existingVehicle?.model]
+    .filter(Boolean)
+    .join(" ");
 
-        {getVerificationBadge()}
-
+  const renderManualForm = (missingOnly = false) => {
+    const isMissing = (f: string) => missingFields.includes(f);
+    return (
+      <>
         <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Vehicle Type
-          </ThemedText>
+          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>Vehicle Type</ThemedText>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.typeScroll}>
             {filteredVehicleTypes.map((vt) => (
               <TouchableOpacity
                 key={vt.value}
                 style={[
                   styles.typeChip,
-                  { 
+                  {
                     backgroundColor: vehicleType === vt.value ? Colors.travonyGreen : theme.backgroundRoot,
                     borderColor: vehicleType === vt.value ? Colors.travonyGreen : theme.border,
                   },
                 ]}
                 onPress={() => setVehicleType(vt.value)}
               >
-                <ThemedText
-                  style={[
-                    styles.typeChipText,
-                    { color: vehicleType === vt.value ? "#FFFFFF" : theme.text },
-                  ]}
-                >
+                <ThemedText style={[styles.typeChipText, { color: vehicleType === vt.value ? "#FFFFFF" : theme.text }]}>
                   {vt.label}
                 </ThemedText>
               </TouchableOpacity>
@@ -263,12 +327,52 @@ export default function DriverVehicleDetailsScreen() {
           </ScrollView>
         </View>
 
+        <FieldInput
+          label="Make"
+          value={make}
+          onChangeText={setMake}
+          placeholder="e.g., Toyota, Honda, Bajaj"
+          theme={theme}
+          highlight={isMissing("make")}
+        />
+        <FieldInput
+          label="Model"
+          value={model}
+          onChangeText={setModel}
+          placeholder="e.g., Camry, Civic, RE"
+          theme={theme}
+          highlight={isMissing("model")}
+        />
+        <FieldInput
+          label="Year"
+          value={year}
+          onChangeText={setYear}
+          placeholder="e.g., 2022"
+          keyboardType="numeric"
+          maxLength={4}
+          theme={theme}
+        />
+        <FieldInput
+          label="Color"
+          value={color}
+          onChangeText={setColor}
+          placeholder="e.g., White, Black, Silver"
+          theme={theme}
+        />
+        <FieldInput
+          label="Plate Number"
+          value={plateNumber}
+          onChangeText={setPlateNumber}
+          placeholder="e.g., DHAKA METRO-GA 12-3456"
+          autoCapitalize="characters"
+          theme={theme}
+          highlight={isMissing("plateNumber")}
+        />
+
         <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
           <View style={styles.evToggleRow}>
             <View style={styles.evToggleInfo}>
-              <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-                Electric Vehicle (EV)
-              </ThemedText>
+              <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>Electric Vehicle (EV)</ThemedText>
               <ThemedText style={[styles.hint, { color: theme.textMuted, marginTop: 2 }]}>
                 Mark this vehicle as fully electric
               </ThemedText>
@@ -280,190 +384,238 @@ export default function DriverVehicleDetailsScreen() {
               thumbColor={isElectric ? Colors.travonyGreen : theme.textMuted}
             />
           </View>
-          {isElectric ? (
-            <View style={[styles.evBadgeInline, { backgroundColor: Colors.travonyGreen + "15" }]}>
-              <Feather name="zap" size={14} color={Colors.travonyGreen} />
-              <ThemedText style={[styles.hint, { color: Colors.travonyGreen, marginTop: 0, marginLeft: 6 }]}>
-                EV badge will appear on your rides
+        </View>
+      </>
+    );
+  };
+
+  // ---- Loading ----
+  if (isLoading) {
+    return (
+      <ThemedView style={[styles.container, styles.centered]}>
+        <ActivityIndicator size="large" color={Colors.travonyGreen} />
+      </ThemedView>
+    );
+  }
+
+  return (
+    <ThemedView style={styles.container}>
+      <KeyboardAwareScrollViewCompat
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
+        {/* ============ MANAGE EXISTING VEHICLE ============ */}
+        {hasVehicle && !showManual && !rescan ? (
+          <>
+            {getVerificationBadge()}
+
+            <View style={[styles.foundCard, { backgroundColor: theme.backgroundElevated }]}>
+              {existingVehicle?.photoFront ? (
+                <Image source={{ uri: existingVehicle.photoFront }} style={styles.foundImage} />
+              ) : null}
+              <View style={styles.foundBody}>
+                <ThemedText style={styles.foundTitle}>{carName || "Your Vehicle"}</ThemedText>
+                {typeLabel ? (
+                  <ThemedText style={[styles.foundMeta, { color: theme.textSecondary }]}>{typeLabel}</ThemedText>
+                ) : null}
+                {existingVehicle?.plateNumber ? (
+                  <View style={[styles.plateChip, { borderColor: theme.border }]}>
+                    <ThemedText style={[styles.plateText, { color: theme.text }]}>
+                      {existingVehicle.plateNumber}
+                    </ThemedText>
+                  </View>
+                ) : null}
+                {isElectric ? (
+                  <View style={[styles.evBadgeInline, { backgroundColor: Colors.travonyGreen + "15" }]}>
+                    <Feather name="zap" size={14} color={Colors.travonyGreen} />
+                    <ThemedText style={[styles.hint, { color: Colors.travonyGreen, marginTop: 0, marginLeft: 6 }]}>
+                      Electric vehicle
+                    </ThemedText>
+                  </View>
+                ) : null}
+              </View>
+            </View>
+
+            <Button onPress={() => setShowManual(true)} style={styles.saveButton}>
+              Edit details
+            </Button>
+            <TouchableOpacity onPress={startReScan} style={styles.skipButton} disabled={isBusy}>
+              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>
+                Scan a new photo to re-verify
+              </ThemedText>
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        {/* ============ ADD FLOW: STEP 1 — PHOTO ============ */}
+        {(!hasVehicle || rescan) && !pendingPhoto && !showManual ? (
+          <>
+            <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
+              <ThemedText style={[styles.infoTitle, { color: Colors.travonyGreen }]}>Add your car in two steps</ThemedText>
+              <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
+                Step 1: Take one clear photo of your car (show the number plate). Step 2: We find the make, model and
+                details automatically. You just confirm.
               </ThemedText>
             </View>
-          ) : null}
-        </View>
 
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Vehicle Photos
-          </ThemedText>
-          <View style={styles.photoRow}>
             <TouchableOpacity
-              style={[styles.photoBox, { backgroundColor: theme.backgroundRoot, borderColor: theme.border }]}
-              onPress={() => pickImage("front")}
+              style={[styles.captureBox, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
+              onPress={takePhoto}
+              disabled={isBusy}
             >
-              {photoFront ? (
-                <Image source={{ uri: photoFront }} style={styles.photoImage} />
-              ) : (
-                <View style={styles.photoPlaceholder}>
-                  <Feather name="camera" size={32} color={theme.textMuted} />
-                  <ThemedText style={[styles.photoLabel, { color: theme.textMuted }]}>Front</ThemedText>
-                </View>
-              )}
+              <Feather name="camera" size={40} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.captureTitle, { color: theme.text }]}>Take a photo of your car</ThemedText>
+              <ThemedText style={[styles.hint, { color: theme.textMuted, textAlign: "center" }]}>
+                Stand in front, make sure the number plate is visible
+              </ThemedText>
             </TouchableOpacity>
+
+            <Button onPress={uploadPhoto} style={styles.saveButton} disabled={isBusy}>
+              Upload from gallery
+            </Button>
+
+            {rescan ? (
+              <TouchableOpacity onPress={cancelReScan} style={styles.skipButton} disabled={isBusy}>
+                <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Cancel</ThemedText>
+              </TouchableOpacity>
+            ) : (
+              <TouchableOpacity onPress={() => setShowManual(true)} style={styles.skipButton} disabled={isBusy}>
+                <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Enter details manually instead</ThemedText>
+              </TouchableOpacity>
+            )}
+          </>
+        ) : null}
+
+        {/* ============ ADD FLOW: STEP 2 — FIND MY CAR ============ */}
+        {(!hasVehicle || rescan) && pendingPhoto && !showManual ? (
+          <>
+            <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
+              <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
+                Step 2: Tap "Find my car" and we'll detect the make, model, color and plate from your photo.
+              </ThemedText>
+            </View>
+
+            <Image source={{ uri: pendingPhoto }} style={styles.previewImage} />
+
+            <Button onPress={handleFindMyCar} disabled={isBusy} style={styles.saveButton}>
+              {isBusy ? "Finding your car..." : "Find my car"}
+            </Button>
+            <TouchableOpacity onPress={clearPendingPhoto} style={styles.skipButton} disabled={isBusy}>
+              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Use a different photo</ThemedText>
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        {/* ============ MANUAL FORM (fallback / edit / missing fields) ============ */}
+        {showManual ? (
+          <>
+            {missingFields.length > 0 ? (
+              <View style={[styles.infoCard, { backgroundColor: "#F59E0B20" }]}>
+                <ThemedText style={[styles.infoTitle, { color: "#B45309" }]}>Just a couple more details</ThemedText>
+                <ThemedText style={[styles.infoText, { color: "#B45309" }]}>
+                  We found your car but couldn't read everything from the photo. Please complete the highlighted fields.
+                </ThemedText>
+              </View>
+            ) : (
+              <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
+                <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
+                  {hasVehicle ? "Update your vehicle details below." : "Enter your vehicle details below."}
+                </ThemedText>
+              </View>
+            )}
+
+            {pendingPhoto ? <Image source={{ uri: pendingPhoto }} style={styles.previewImage} /> : null}
+
+            {renderManualForm()}
+
+            <Button
+              onPress={hasVehicle ? handleSaveEdits : handleSaveManual}
+              disabled={isBusy}
+              style={styles.saveButton}
+            >
+              {isBusy ? "Saving..." : hasVehicle ? "Save changes" : "Save car"}
+            </Button>
             <TouchableOpacity
-              style={[styles.photoBox, { backgroundColor: theme.backgroundRoot, borderColor: theme.border }]}
-              onPress={() => pickImage("side")}
+              onPress={() => {
+                setShowManual(false);
+                setMissingFields([]);
+              }}
+              style={styles.skipButton}
+              disabled={isBusy}
             >
-              {photoSide ? (
-                <Image source={{ uri: photoSide }} style={styles.photoImage} />
-              ) : (
-                <View style={styles.photoPlaceholder}>
-                  <Feather name="camera" size={32} color={theme.textMuted} />
-                  <ThemedText style={[styles.photoLabel, { color: theme.textMuted }]}>Side</ThemedText>
-                </View>
-              )}
+              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Cancel</ThemedText>
             </TouchableOpacity>
-          </View>
-          <ThemedText style={[styles.hint, { color: theme.textMuted }]}>
-            Clear photos help with faster AI verification
-          </ThemedText>
-        </View>
+          </>
+        ) : null}
 
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Make
-          </ThemedText>
-          <TextInput
-            style={[
-              styles.input,
-              { 
-                backgroundColor: theme.backgroundRoot,
-                color: theme.text,
-                borderColor: theme.border,
-              },
-            ]}
-            value={make}
-            onChangeText={setMake}
-            placeholder="e.g., Toyota, Honda, Bajaj"
-            placeholderTextColor={theme.textMuted}
-          />
-        </View>
-
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Model
-          </ThemedText>
-          <TextInput
-            style={[
-              styles.input,
-              { 
-                backgroundColor: theme.backgroundRoot,
-                color: theme.text,
-                borderColor: theme.border,
-              },
-            ]}
-            value={model}
-            onChangeText={setModel}
-            placeholder="e.g., Camry, Civic, RE"
-            placeholderTextColor={theme.textMuted}
-          />
-        </View>
-
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Year
-          </ThemedText>
-          <TextInput
-            style={[
-              styles.input,
-              { 
-                backgroundColor: theme.backgroundRoot,
-                color: theme.text,
-                borderColor: theme.border,
-              },
-            ]}
-            value={year}
-            onChangeText={setYear}
-            placeholder="e.g., 2022"
-            placeholderTextColor={theme.textMuted}
-            keyboardType="numeric"
-            maxLength={4}
-          />
-        </View>
-
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Color
-          </ThemedText>
-          <TextInput
-            style={[
-              styles.input,
-              { 
-                backgroundColor: theme.backgroundRoot,
-                color: theme.text,
-                borderColor: theme.border,
-              },
-            ]}
-            value={color}
-            onChangeText={setColor}
-            placeholder="e.g., White, Black, Silver"
-            placeholderTextColor={theme.textMuted}
-          />
-        </View>
-
-        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
-            Plate Number
-          </ThemedText>
-          <TextInput
-            style={[
-              styles.input,
-              { 
-                backgroundColor: theme.backgroundRoot,
-                color: theme.text,
-                borderColor: theme.border,
-              },
-            ]}
-            value={plateNumber}
-            onChangeText={setPlateNumber}
-            placeholder="e.g., DHAKA METRO-GA 12-3456"
-            placeholderTextColor={theme.textMuted}
-            autoCapitalize="characters"
-          />
-        </View>
-
-        {(isVerifying || updateMutation.isPending) && (
+        {isBusy ? (
           <View style={styles.loadingOverlay}>
             <ActivityIndicator size="large" color={Colors.travonyGreen} />
-            <ThemedText style={{ marginTop: Spacing.md }}>
-              {isVerifying ? "AI is verifying your vehicle..." : "Saving..."}
-            </ThemedText>
+            <ThemedText style={{ marginTop: Spacing.md }}>{actionLabel || "Working..."}</ThemedText>
           </View>
-        )}
-
-        <Button
-          onPress={() => handleSave(true)}
-          disabled={updateMutation.isPending || !photoFront}
-          style={[styles.saveButton, { opacity: !photoFront ? 0.5 : 1 }]}
-        >
-          {updateMutation.isPending && isVerifying ? "Verifying..." : "Save & Verify with AI"}
-        </Button>
-
-        <TouchableOpacity
-          onPress={() => handleSave(false)}
-          disabled={updateMutation.isPending}
-          style={styles.skipButton}
-        >
-          <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>
-            Save without AI verification
-          </ThemedText>
-        </TouchableOpacity>
+        ) : null}
       </KeyboardAwareScrollViewCompat>
     </ThemedView>
+  );
+}
+
+function FieldInput({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  theme,
+  highlight,
+  keyboardType,
+  maxLength,
+  autoCapitalize,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (t: string) => void;
+  placeholder: string;
+  theme: any;
+  highlight?: boolean;
+  keyboardType?: "numeric" | "default";
+  maxLength?: number;
+  autoCapitalize?: "characters" | "none" | "sentences" | "words";
+}) {
+  return (
+    <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
+      <ThemedText style={[styles.sectionTitle, { color: highlight ? "#B45309" : theme.textSecondary }]}>
+        {label}
+      </ThemedText>
+      <TextInput
+        style={[
+          styles.input,
+          {
+            backgroundColor: theme.backgroundRoot,
+            color: theme.text,
+            borderColor: highlight ? "#F59E0B" : theme.border,
+          },
+        ]}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={theme.textMuted}
+        keyboardType={keyboardType}
+        maxLength={maxLength}
+        autoCapitalize={autoCapitalize}
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  centered: {
+    justifyContent: "center",
+    alignItems: "center",
   },
   scrollContent: {
     paddingHorizontal: Spacing.lg,
@@ -473,8 +625,14 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
     marginBottom: Spacing.lg,
   },
-  infoText: {
+  infoTitle: {
     ...Typography.body,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: Spacing.xs,
+  },
+  infoText: {
+    ...Typography.small,
     textAlign: "center",
   },
   verificationBadge: {
@@ -489,6 +647,63 @@ const styles = StyleSheet.create({
   badgeText: {
     ...Typography.small,
     fontWeight: "600",
+  },
+  foundCard: {
+    borderRadius: BorderRadius.xl,
+    overflow: "hidden",
+    marginBottom: Spacing.lg,
+  },
+  foundImage: {
+    width: "100%",
+    height: 180,
+    resizeMode: "cover",
+  },
+  foundBody: {
+    padding: Spacing.lg,
+  },
+  foundTitle: {
+    ...Typography.h3,
+    fontWeight: "700",
+  },
+  foundMeta: {
+    ...Typography.small,
+    marginTop: Spacing.xs,
+  },
+  plateChip: {
+    alignSelf: "flex-start",
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    marginTop: Spacing.md,
+  },
+  plateText: {
+    ...Typography.body,
+    fontWeight: "700",
+    letterSpacing: 1,
+  },
+  captureBox: {
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    borderStyle: "dashed",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: Spacing.xl * 1.5,
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.sm,
+    marginBottom: Spacing.lg,
+  },
+  captureTitle: {
+    ...Typography.body,
+    fontWeight: "600",
+    marginTop: Spacing.sm,
+  },
+  previewImage: {
+    width: "100%",
+    aspectRatio: 4 / 3,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
+    resizeMode: "cover",
   },
   section: {
     padding: Spacing.lg,
@@ -515,32 +730,6 @@ const styles = StyleSheet.create({
     ...Typography.small,
     fontWeight: "500",
   },
-  photoRow: {
-    flexDirection: "row",
-    gap: Spacing.md,
-  },
-  photoBox: {
-    flex: 1,
-    aspectRatio: 4 / 3,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    overflow: "hidden",
-  },
-  photoPlaceholder: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  photoLabel: {
-    ...Typography.caption,
-    marginTop: Spacing.xs,
-  },
-  photoImage: {
-    width: "100%",
-    height: "100%",
-    resizeMode: "cover",
-  },
   input: {
     ...Typography.body,
     padding: Spacing.md,
@@ -556,7 +745,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.xl,
   },
   saveButton: {
-    marginTop: Spacing.lg,
+    marginTop: Spacing.sm,
   },
   skipButton: {
     alignItems: "center",
@@ -581,5 +770,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.md,
+    alignSelf: "flex-start",
   },
 });

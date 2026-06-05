@@ -59,6 +59,7 @@ interface CarAgentData {
   publicHandle: string | null;
   message: string;
   suggestion: string;
+  plan: string;
   rankLine: string | null;
   currency: string;
   aiGenerated: boolean;
@@ -294,6 +295,18 @@ export default function VehicleWalletScreen() {
                     </View>
                   ) : null}
 
+                  {agent?.plan ? (
+                    <View style={styles.agentPlan}>
+                      <View style={styles.agentPlanHeader}>
+                        <Ionicons name="calendar-outline" size={15} color="#fff" />
+                        <ThemedText style={styles.agentPlanLabel}>
+                          Plan for our next shift
+                        </ThemedText>
+                      </View>
+                      <ThemedText style={styles.agentPlanText}>{agent.plan}</ThemedText>
+                    </View>
+                  ) : null}
+
                   {agent?.rankLine ? (
                     <View style={styles.rankBadge}>
                       <Ionicons name="trophy-outline" size={14} color={Colors.travonyGreen} />
@@ -516,6 +529,21 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
   },
   agentSuggestionText: { color: "#fff", fontSize: 13, flex: 1, lineHeight: 18 },
+  agentPlan: {
+    marginTop: Spacing.md,
+    backgroundColor: "rgba(255,255,255,0.15)",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+  },
+  agentPlanHeader: { flexDirection: "row", alignItems: "center", gap: 6, marginBottom: 6 },
+  agentPlanLabel: {
+    color: "rgba(255,255,255,0.95)",
+    fontSize: 12,
+    fontWeight: "800",
+    letterSpacing: 0.3,
+  },
+  agentPlanText: { color: "#fff", fontSize: 14, lineHeight: 20, fontWeight: "600" },
   rankBadge: {
     flexDirection: "row",
     alignItems: "center",
