@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 
 import { useAuth } from "@/hooks/useAuth";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import {
   ensureNotificationsSetup,
   presentLocalNotification,
@@ -26,6 +27,7 @@ interface PendingRide {
  */
 export function useDriverRideNotifications() {
   const { user } = useAuth();
+  const { liteMode } = useLiteMode();
 
   const { data: driverData } = useQuery<{ is_online?: boolean }>({
     queryKey: ["/api/drivers/me"],
@@ -36,7 +38,7 @@ export function useDriverRideNotifications() {
   const { data: pendingRides, dataUpdatedAt } = useQuery<PendingRide[]>({
     queryKey: ["/api/drivers/pending-rides"],
     enabled: isOnline,
-    refetchInterval: isOnline ? 5000 : false,
+    refetchInterval: isOnline ? litePollMs(5000, liteMode) : false,
   });
 
   const seenIds = useRef<Set<string>>(new Set());

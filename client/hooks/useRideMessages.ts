@@ -3,6 +3,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useQuery } from "@tanstack/react-query";
 
 import { presentLocalNotification } from "@/lib/notifications";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 
 interface RideMessage {
   id: string;
@@ -33,6 +34,7 @@ export function useRideMessages(params: {
   senderLabel?: string;
 }) {
   const { rideId, myUserId, active, chatOpen = false, senderLabel } = params;
+  const { liteMode } = useLiteMode();
   const [lastReadAt, setLastReadAt] = useState<number>(0);
   const loadedForRide = useRef<string | undefined>(undefined);
   const notifiedIds = useRef<Set<string>>(new Set());
@@ -61,7 +63,7 @@ export function useRideMessages(params: {
   const { data: messages } = useQuery<RideMessage[]>({
     queryKey: ["/api/rides", rideId, "messages"],
     enabled: !!rideId && active,
-    refetchInterval: active ? 6000 : false,
+    refetchInterval: active ? litePollMs(6000, liteMode) : false,
   });
 
   const otherMessages = (messages || []).filter((m) => m.senderId !== myUserId);

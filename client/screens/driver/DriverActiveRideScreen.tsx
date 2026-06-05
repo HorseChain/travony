@@ -23,6 +23,8 @@ import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
 import { MapView, Marker, mapsAvailable } from "@/components/NativeMaps";
 import WebViewMap from "@/components/WebViewMap";
+import LiteTripView from "@/components/LiteTripView";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 
 type NavigationProp = NativeStackNavigationProp<DriverHomeStackParamList>;
 type RouteProps = RouteProp<DriverHomeStackParamList, "DriverActiveRide">;
@@ -40,12 +42,16 @@ interface Ride {
   actualFare?: string;
   paymentMethod?: string;
   otp?: string;
+  isShared?: boolean;
+  poolGroupId?: string | null;
   customer?: {
     name: string;
     phone?: string;
     avatar?: string;
   };
 }
+
+const ACTIVE_LEG_STATES = ["accepted", "arriving", "started", "in_progress"];
 
 type RideStatus = "accepted" | "arriving" | "started" | "in_progress" | "completed";
 
@@ -155,6 +161,7 @@ export default function DriverActiveRideScreen() {
   const { rideId } = route.params || {};
   const validRideId = typeof rideId === "string" ? rideId : "";
   const { user } = useAuth();
+  const { liteMode } = useLiteMode();
 
   const [chatVisible, setChatVisible] = useState(false);
   const [showEarningsFlash, setShowEarningsFlash] = useState(false);
@@ -166,9 +173,26 @@ export default function DriverActiveRideScreen() {
 
   const { data: ride, isLoading } = useQuery<Ride>({
     queryKey: ["/api/rides", validRideId],
-    refetchInterval: 5000,
+    refetchInterval: litePollMs(5000, liteMode),
     enabled: !!validRideId,
   });
+
+  const poolGroupId = ride?.isShared ? ride?.poolGroupId : null;
+  const { data: poolLegs } = useQuery<Ride[]>({
+    queryKey: ["/api/rides/shared", poolGroupId, "legs"],
+    refetchInterval: litePollMs(5000, liteMode),
+    enabled: !!poolGroupId,
+  });
+
+  const sharedLegs = poolGroupId && poolLegs ? poolLegs : [];
+  const isSharedTrip = sharedLegs.length > 1;
+  const currentLegIndex = isSharedTrip
+    ? sharedLegs.findIndex((l) => l.id === validRideId)
+    : -1;
+  const remainingLegs = isSharedTrip
+    ? sharedLegs.filter((l) => l.id !== validRideId && ACTIVE_LEG_STATES.includes(l.status))
+    : [];
+  const nextLeg = remainingLegs[0] || null;
 
   const { unreadCount, markRead } = useRideMessages({
     rideId: validRideId,
@@ -194,7 +218,25 @@ export default function DriverActiveRideScreen() {
     },
     onSuccess: async (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/rides", validRideId] });
+      if (poolGroupId) {
+        queryClient.invalidateQueries({ queryKey: ["/api/rides/shared", poolGroupId, "legs"] });
+      }
       if (data.status === "completed") {
+        // Shared trip: hand off to the next rider's leg instead of ending the
+        // whole trip, so no co-rider leg is ever left stranded.
+        if (isSharedTrip && nextLeg) {
+          Alert.alert(
+            "Rider Dropped Off",
+            "Continue to the next rider in this shared trip.",
+            [
+              {
+                text: "Next Rider",
+                onPress: () => navigation.replace("DriverActiveRide", { rideId: nextLeg.id }),
+              },
+            ]
+          );
+          return;
+        }
         const fare = data.actualFare || data.estimatedFare || "0.00";
         setPostRideFare(fare);
         try {
@@ -328,6 +370,18 @@ export default function DriverActiveRideScreen() {
   };
 
   const renderMap = () => {
+    if (liteMode) {
+      return (
+        <View style={styles.map}>
+          <LiteTripView
+            pickupAddress={ride?.pickupAddress}
+            dropoffAddress={ride?.dropoffAddress}
+            statusTitle="Navigate your trip"
+            statusSubtitle="Map is off to save data. Use the address above and your phone's map app to navigate."
+          />
+        </View>
+      );
+    }
     if (Platform.OS === "android") {
       return (
         <View style={styles.map}>
@@ -415,6 +469,49 @@ export default function DriverActiveRideScreen() {
             </ThemedText>
           </View>
         </View>
+
+        {isSharedTrip ? (
+          <View style={[styles.sharedBanner, { backgroundColor: Colors.travonyGreen + "12" }]}>
+            <View style={styles.sharedBannerHeader}>
+              <Ionicons name="people-outline" size={18} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.sharedBannerTitle, { color: Colors.travonyGreen }]}>
+                Shared ride · Rider {currentLegIndex >= 0 ? currentLegIndex + 1 : 1} of {sharedLegs.length}
+              </ThemedText>
+            </View>
+            {sharedLegs.map((leg, idx) => {
+              const isCurrent = leg.id === validRideId;
+              const done = leg.status === "completed";
+              const cancelled = leg.status === "cancelled";
+              return (
+                <View key={leg.id} style={styles.sharedStopRow}>
+                  <View
+                    style={[
+                      styles.sharedStopDot,
+                      {
+                        backgroundColor: done
+                          ? Colors.travonyGreen
+                          : isCurrent
+                          ? Colors.travonyGreen
+                          : theme.border,
+                      },
+                    ]}
+                  >
+                    <ThemedText style={styles.sharedStopDotText}>{idx + 1}</ThemedText>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={[styles.sharedStopText, { color: theme.text }]} numberOfLines={1}>
+                      {leg.pickupAddress} → {leg.dropoffAddress}
+                    </ThemedText>
+                    <ThemedText style={[styles.sharedStopMeta, { color: theme.textMuted }]}>
+                      AED {leg.actualFare || leg.estimatedFare || "0.00"}
+                      {done ? " · Completed" : cancelled ? " · Cancelled" : isCurrent ? " · Current" : " · Waiting"}
+                    </ThemedText>
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
 
         {ride?.status === "arriving" ? (
           <View style={[styles.otpBanner, { backgroundColor: Colors.travonyGreen + "12" }]}>
@@ -625,6 +722,47 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     borderRadius: BorderRadius.lg,
     marginBottom: Spacing.lg,
+  },
+  sharedBanner: {
+    padding: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    marginBottom: Spacing.lg,
+    gap: Spacing.sm,
+  },
+  sharedBannerHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
+  sharedBannerTitle: {
+    ...Typography.body,
+    fontWeight: "700",
+  },
+  sharedStopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  sharedStopDot: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sharedStopDotText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#fff",
+  },
+  sharedStopText: {
+    ...Typography.small,
+    fontWeight: "600",
+  },
+  sharedStopMeta: {
+    ...Typography.small,
+    fontSize: 11,
   },
   otpBannerText: {
     ...Typography.body,

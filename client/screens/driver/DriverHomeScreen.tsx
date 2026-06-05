@@ -22,6 +22,8 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import RideMap from "@/components/RideMap";
+import LiteTripView from "@/components/LiteTripView";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
@@ -52,6 +54,14 @@ interface RideRequest {
   pmgthPremiumPercent?: number;
   pmgthDirectionScore?: number;
   isEvRide?: boolean;
+  isShared?: boolean;
+  poolGroupId?: string;
+  riderCount?: number;
+  maxSeats?: number;
+  combinedFare?: number;
+  combinedDriverEarnings?: number;
+  currency?: string;
+  stops?: Array<{ rideId: string; pickupAddress: string; dropoffAddress: string; fare: number; riderName?: string }>;
 }
 
 interface Hub {
@@ -328,6 +338,7 @@ export default function DriverHomeScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { liteMode } = useLiteMode();
   const navigation = useNavigation<NavigationProp>();
   const queryClient = useQueryClient();
 
@@ -391,25 +402,25 @@ export default function DriverHomeScreen() {
   const { data: pendingRides } = useQuery<RideRequest[]>({
     queryKey: ["/api/drivers/pending-rides"],
     enabled: isOnline,
-    refetchInterval: 5000,
+    refetchInterval: litePollMs(5000, liteMode),
   });
 
   const { data: earningsData } = useQuery<{ totalEarnings: string; totalTrips: number }>({
     queryKey: ["/api/drivers/earnings"],
     enabled: !!user,
-    refetchInterval: isOnline ? 30000 : undefined,
+    refetchInterval: isOnline ? litePollMs(30000, liteMode) : undefined,
   });
 
   const { data: hubsData } = useQuery<Hub[]>({
     queryKey: ["/api/openclaw/hubs"],
     enabled: isOnline && !!currentLocation,
-    refetchInterval: 60000,
+    refetchInterval: litePollMs(60000, liteMode),
   });
 
   const { data: evHubsData } = useQuery<{ hubs: Hub[] }, Error, Hub[]>({
     queryKey: ["/api/openclaw/hubs/ev-hubs"],
     enabled: isOnline && !!currentLocation,
-    refetchInterval: 60000,
+    refetchInterval: litePollMs(60000, liteMode),
     select: (d) => (Array.isArray(d?.hubs) ? d.hubs : []),
   });
 
@@ -721,6 +732,17 @@ export default function DriverHomeScreen() {
 
   const acceptRideNow = async (rideId: string) => {
     try {
+      const req = incomingRequest;
+      if (req?.isShared && req.poolGroupId) {
+        const result: any = await apiRequest(`/api/rides/shared/${req.poolGroupId}/accept`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        });
+        const firstRideId = result?.rideIds?.[0] || rideId;
+        navigation.navigate("DriverActiveRide", { rideId: firstRideId });
+        setIncomingRequest(null);
+        return;
+      }
       await apiRequest(`/api/rides/${rideId}`, {
         method: "PATCH",
         body: JSON.stringify({ status: "accepted" }),
@@ -793,12 +815,29 @@ export default function DriverHomeScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <RideMap
-        currentLocation={currentLocation}
-        showUserLocation={true}
-        interactive={true}
-        height="100%"
-      />
+      {liteMode ? (
+        <LiteTripView
+          statusTitle={isOnline ? "You're online" : "You're offline"}
+          statusSubtitle={
+            isOnline
+              ? "Waiting for ride requests. Map is off to save data."
+              : "Go online below to start receiving requests."
+          }
+          pickupAddress={isOnline ? "Ready for requests" : "Not accepting rides"}
+          dropoffAddress={
+            isOnline
+              ? `AED ${todayEarnings} today · ${todayTrips} trip${todayTrips !== 1 ? "s" : ""}`
+              : "AED 0 · Start earning"
+          }
+        />
+      ) : (
+        <RideMap
+          currentLocation={currentLocation}
+          showUserLocation={true}
+          interactive={true}
+          height="100%"
+        />
+      )}
 
       <View style={[styles.statusBar, { top: insets.top + Spacing.md }]}>
         <View style={[styles.statusCard, { backgroundColor: theme.backgroundRoot }]}>
@@ -958,6 +997,14 @@ export default function DriverHomeScreen() {
                     <ThemedText style={[styles.evBadgeText, { color: "#2196F3" }]}>EV Requested</ThemedText>
                   </View>
                 ) : null}
+                {incomingRequest.isShared ? (
+                  <View style={[styles.evBadge, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                    <Ionicons name="people" size={12} color={Colors.travonyGreen} />
+                    <ThemedText style={[styles.evBadgeText, { color: Colors.travonyGreen }]}>
+                      Shared · {incomingRequest.riderCount || 2} riders
+                    </ThemedText>
+                  </View>
+                ) : null}
               </View>
             </View>
             <View style={styles.fareContainer}>
@@ -967,6 +1014,13 @@ export default function DriverHomeScreen() {
               {incomingRequest.isPmgthRide && incomingRequest.pmgthPremiumAmount ? (
                 <View style={[styles.premiumBadge, { backgroundColor: Colors.travonyGold }]}>
                   <ThemedText style={styles.premiumText}>+AED {Number(incomingRequest.pmgthPremiumAmount).toFixed(2)}</ThemedText>
+                </View>
+              ) : null}
+              {incomingRequest.isShared && incomingRequest.combinedDriverEarnings != null ? (
+                <View style={[styles.premiumBadge, { backgroundColor: Colors.travonyGreen }]}>
+                  <ThemedText style={styles.premiumText}>
+                    You earn {incomingRequest.currency || "AED"} {Number(incomingRequest.combinedDriverEarnings).toFixed(2)}
+                  </ThemedText>
                 </View>
               ) : null}
             </View>
@@ -994,27 +1048,51 @@ export default function DriverHomeScreen() {
             </View>
           ) : null}
 
-          <View style={styles.locationInfo}>
-            <View style={styles.locationRow}>
-              <View style={[styles.locationDot, { backgroundColor: Colors.travonyGreen }]} />
-              <View style={styles.locationTextContainer}>
-                <ThemedText style={[styles.locationLabel, { color: theme.textSecondary }]}>Pickup</ThemedText>
-                <ThemedText style={styles.locationAddress} numberOfLines={1}>
-                  {incomingRequest.pickupAddress}
-                </ThemedText>
+          {incomingRequest.isShared && incomingRequest.stops && incomingRequest.stops.length > 0 ? (
+            <View style={styles.locationInfo}>
+              {incomingRequest.stops.map((stop, idx) => (
+                <View key={stop.rideId}>
+                  {idx > 0 ? <View style={styles.locationLine} /> : null}
+                  <View style={styles.locationRow}>
+                    <View style={[styles.locationDot, { backgroundColor: Colors.travonyGreen }]} />
+                    <View style={styles.locationTextContainer}>
+                      <ThemedText style={[styles.locationLabel, { color: theme.textSecondary }]}>
+                        {stop.riderName || `Rider ${idx + 1}`} · {incomingRequest.currency || "AED"} {Number(stop.fare).toFixed(2)}
+                      </ThemedText>
+                      <ThemedText style={styles.locationAddress} numberOfLines={1}>
+                        {stop.pickupAddress}
+                      </ThemedText>
+                      <ThemedText style={[styles.locationAddress, { color: theme.textMuted }]} numberOfLines={1}>
+                        to {stop.dropoffAddress}
+                      </ThemedText>
+                    </View>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.locationInfo}>
+              <View style={styles.locationRow}>
+                <View style={[styles.locationDot, { backgroundColor: Colors.travonyGreen }]} />
+                <View style={styles.locationTextContainer}>
+                  <ThemedText style={[styles.locationLabel, { color: theme.textSecondary }]}>Pickup</ThemedText>
+                  <ThemedText style={styles.locationAddress} numberOfLines={1}>
+                    {incomingRequest.pickupAddress}
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.locationLine} />
+              <View style={styles.locationRow}>
+                <View style={[styles.locationDot, { backgroundColor: theme.error }]} />
+                <View style={styles.locationTextContainer}>
+                  <ThemedText style={[styles.locationLabel, { color: theme.textSecondary }]}>Drop-off</ThemedText>
+                  <ThemedText style={styles.locationAddress} numberOfLines={1}>
+                    {incomingRequest.dropoffAddress}
+                  </ThemedText>
+                </View>
               </View>
             </View>
-            <View style={styles.locationLine} />
-            <View style={styles.locationRow}>
-              <View style={[styles.locationDot, { backgroundColor: theme.error }]} />
-              <View style={styles.locationTextContainer}>
-                <ThemedText style={[styles.locationLabel, { color: theme.textSecondary }]}>Drop-off</ThemedText>
-                <ThemedText style={styles.locationAddress} numberOfLines={1}>
-                  {incomingRequest.dropoffAddress}
-                </ThemedText>
-              </View>
-            </View>
-          </View>
+          )}
 
           <View style={styles.rideStats}>
             {(() => {

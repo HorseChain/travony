@@ -18,6 +18,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ThemedText } from "@/components/ThemedText";
 import RideMap from "@/components/RideMap";
+import LiteTripView from "@/components/LiteTripView";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import BookingBottomSheet from "@/components/BookingBottomSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
@@ -74,6 +76,7 @@ export default function HomeScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { liteMode } = useLiteMode();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
 
@@ -125,7 +128,7 @@ export default function HomeScreen() {
   const { data: telemetryData } = useQuery<TelemetryData>({
     queryKey: ["/api/rides", activeRide?.id, "telemetry"],
     enabled: !!activeRide?.id,
-    refetchInterval: 10000,
+    refetchInterval: litePollMs(10000, liteMode),
   });
 
   const { data: savedAddresses } = useQuery<{ id: string; label: string; address: string; lat: string; lng: string }[]>({
@@ -321,6 +324,18 @@ export default function HomeScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+      {liteMode ? (
+        <LiteTripView
+          pickupAddress={pickupLocation?.address}
+          dropoffAddress={dropoffLocation?.address}
+          statusTitle={activeRide ? "Trip in progress" : "Ready when you are"}
+          statusSubtitle={
+            activeRide
+              ? "Open your trip for live status."
+              : "Set your destination below to book a ride."
+          }
+        />
+      ) : (
       <RideMap
         currentLocation={currentLocation}
         pickupLocation={pickupLocation}
@@ -341,6 +356,7 @@ export default function HomeScreen() {
             : undefined
         }
       />
+      )}
 
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <View style={[styles.greetingCard, { backgroundColor: theme.card }]}>

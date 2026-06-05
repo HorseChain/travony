@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
+import { LiteModeSetting } from "@/components/LiteModeSetting";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
@@ -134,6 +135,10 @@ export default function ProfileScreen() {
           onPress={() => navigation.navigate("Help")}
         />
       </Card>
+
+      <View style={styles.menuCard}>
+        <LiteModeSetting />
+      </View>
 
       <Card style={styles.menuCard}>
         <MenuItem

@@ -8,6 +8,7 @@ import {
   Share,
   Platform,
   Animated,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -20,6 +21,8 @@ import { apiRequest } from "@/lib/query-client";
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import RideMap from "@/components/RideMap";
+import LiteTripView from "@/components/LiteTripView";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
 import { useAuth } from "@/hooks/useAuth";
@@ -53,6 +56,21 @@ interface Ride {
   driverId?: string;
   driverPhone?: string;
   isEvRide?: boolean;
+  isShared?: boolean;
+}
+
+interface PoolStatus {
+  isShared: true;
+  poolGroupId: string | null;
+  poolStatus: "forming" | "matched" | "accepted" | "started" | "completed" | "cancelled" | "no_match";
+  seatsFilled: number;
+  maxSeats: number;
+  coRiderCount: number;
+  yourFare: number;
+  soloFare: number;
+  savings: number;
+  currency: string;
+  windowSecondsLeft: number;
 }
 
 interface TelemetryData {
@@ -88,6 +106,7 @@ export default function ActiveRideScreen() {
 
   const { rideId } = route.params;
   const { user } = useAuth();
+  const { liteMode } = useLiteMode();
 
   const [prevStatus, setPrevStatus] = useState<string | null>(null);
   const [sharePromptShown, setSharePromptShown] = useState(false);
@@ -99,13 +118,42 @@ export default function ActiveRideScreen() {
 
   const { data: ride, refetch } = useQuery<Ride>({
     queryKey: ["/api/rides", rideId],
-    refetchInterval: 5000,
+    refetchInterval: litePollMs(5000, liteMode),
   });
 
   const { data: telemetry } = useQuery<TelemetryData>({
     queryKey: ["/api/rides", rideId, "telemetry"],
-    refetchInterval: 3000,
+    refetchInterval: litePollMs(3000, liteMode),
     enabled: !!rideId && ride?.status !== "completed",
+  });
+
+  const { data: pool, refetch: refetchPool } = useQuery<PoolStatus>({
+    queryKey: ["/api/rides", rideId, "pool"],
+    refetchInterval: litePollMs(4000, liteMode),
+    enabled: !!rideId && !!ride?.isShared && ride?.status === "pending",
+  });
+
+  const goSoloMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/rides/${rideId}/pool/go-solo`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: () => {
+      refetch();
+      refetchPool();
+    },
+    onError: (error: any) => Alert.alert("Error", error.message || "Could not switch to a solo ride"),
+  });
+
+  const extendPoolMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/rides/${rideId}/pool/extend`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: () => refetchPool(),
+    onError: (error: any) => Alert.alert("Error", error.message || "Could not keep waiting"),
   });
 
   useEffect(() => {
@@ -274,18 +322,28 @@ export default function ActiveRideScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
-      <RideMap
-        pickupLocation={pickupLocation}
-        dropoffLocation={dropoffLocation}
-        driverLocation={driverLocation}
-        routeCoordinates={routeCoordinates}
-        showUserLocation={true}
-        showRoute={true}
-        showDriverMarker={showDriverMarker}
-        eta={eta || undefined}
-        rideStatus={ride?.status}
-        interactive={true}
-      />
+      {liteMode ? (
+        <LiteTripView
+          pickupAddress={pickupLocation?.address}
+          dropoffAddress={dropoffLocation?.address}
+          statusTitle={statusInfo.title}
+          statusSubtitle={statusInfo.subtitle}
+          eta={eta}
+        />
+      ) : (
+        <RideMap
+          pickupLocation={pickupLocation}
+          dropoffLocation={dropoffLocation}
+          driverLocation={driverLocation}
+          routeCoordinates={routeCoordinates}
+          showUserLocation={true}
+          showRoute={true}
+          showDriverMarker={showDriverMarker}
+          eta={eta || undefined}
+          rideStatus={ride?.status}
+          interactive={true}
+        />
+      )}
 
       <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
         <Pressable
@@ -530,6 +588,62 @@ export default function ActiveRideScreen() {
               <Ionicons name="close-outline" size={16} color="#92400E" />
             </Pressable>
           </Animated.View>
+        ) : null}
+
+        {ride?.status === "pending" && ride?.isShared && pool ? (
+          <View style={[styles.poolBanner, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            {pool.poolStatus === "no_match" ? (
+              <>
+                <View style={styles.poolHeaderRow}>
+                  <Ionicons name="people-outline" size={20} color={theme.warning} />
+                  <ThemedText style={[styles.poolTitle, { color: theme.text }]}>No co-rider yet</ThemedText>
+                </View>
+                <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
+                  We couldn't find anyone going your way right now. Go solo at the full fare, or keep waiting for a share.
+                </ThemedText>
+                <View style={styles.poolActions}>
+                  <Pressable
+                    style={[styles.poolBtnOutline, { borderColor: theme.border }]}
+                    onPress={() => extendPoolMutation.mutate()}
+                    disabled={extendPoolMutation.isPending}
+                  >
+                    <ThemedText style={[styles.poolBtnOutlineText, { color: theme.text }]}>Keep waiting</ThemedText>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.poolBtnFilled, { backgroundColor: theme.primary }]}
+                    onPress={() => goSoloMutation.mutate()}
+                    disabled={goSoloMutation.isPending}
+                  >
+                    <ThemedText style={styles.poolBtnFilledText}>
+                      Go solo · {pool.currency} {pool.soloFare.toFixed(2)}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              </>
+            ) : pool.poolStatus === "matched" ? (
+              <View style={styles.poolHeaderRow}>
+                <Ionicons name="checkmark-circle" size={20} color={theme.success} />
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={[styles.poolTitle, { color: theme.text }]}>
+                    Share matched — you save {pool.currency} {pool.savings.toFixed(2)}
+                  </ThemedText>
+                  <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
+                    {pool.coRiderCount === 1 ? "1 co-rider joined" : `${pool.coRiderCount} co-riders joined`} · finding a driver
+                  </ThemedText>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.poolHeaderRow}>
+                <ActivityIndicator color={theme.primary} />
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={[styles.poolTitle, { color: theme.text }]}>Finding someone to share with</ThemedText>
+                  <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
+                    Holding your discounted fare{pool.windowSecondsLeft > 0 ? ` · ${pool.windowSecondsLeft}s` : ""}
+                  </ThemedText>
+                </View>
+              </View>
+            )}
+          </View>
         ) : null}
 
         {ride?.status === "pending" ? (
@@ -896,6 +1010,52 @@ const styles = StyleSheet.create({
   },
   cancelButtonText: {
     ...Typography.button,
+  },
+  poolBanner: {
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+  },
+  poolHeaderRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  poolTitle: {
+    ...Typography.bodyMedium,
+    fontWeight: "700",
+  },
+  poolSubtitle: {
+    ...Typography.small,
+    marginTop: Spacing.xs,
+  },
+  poolActions: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.md,
+  },
+  poolBtnOutline: {
+    flex: 1,
+    height: Spacing.buttonHeight,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  poolBtnOutlineText: {
+    ...Typography.button,
+  },
+  poolBtnFilled: {
+    flex: 1,
+    height: Spacing.buttonHeight,
+    borderRadius: BorderRadius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  poolBtnFilledText: {
+    ...Typography.button,
+    color: "#FFFFFF",
   },
   etaIntelligence: {
     flexDirection: "row",

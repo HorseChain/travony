@@ -19,6 +19,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { MapView, Marker, mapsAvailable, WebMapFallback } from "@/components/NativeMaps";
 import WebViewMap from "@/components/WebViewMap";
+import { useLiteMode } from "@/hooks/useLiteMode";
 
 type Region = {
   latitude: number;
@@ -141,6 +142,7 @@ export default function SelectLocationScreen() {
   const insets = useSafeAreaInsets();
   const headerHeight = useHeaderHeight();
   const { theme, isDark } = useTheme();
+  const { liteMode } = useLiteMode();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
   const mapRef = useRef<any>(null);
@@ -342,6 +344,18 @@ export default function SelectLocationScreen() {
   );
 
   const renderMap = () => {
+    if (liteMode) {
+      return (
+        <View style={[styles.map, styles.webMapFallback, { backgroundColor: theme.backgroundDefault }]}>
+          <View style={styles.webMapContent}>
+            <Ionicons name="list-outline" size={48} color={theme.primary} />
+            <ThemedText style={[styles.webMapText, { color: theme.textSecondary }]}>
+              Lite mode is on. Search or pick a place from the list to save data.
+            </ThemedText>
+          </View>
+        </View>
+      );
+    }
     if (Platform.OS === "android") {
       return (
         <>

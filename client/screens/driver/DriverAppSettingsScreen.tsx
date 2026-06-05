@@ -8,6 +8,7 @@ import Slider from "@react-native-community/slider";
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { LiteModeSetting } from "@/components/LiteModeSetting";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
@@ -294,6 +295,13 @@ export default function DriverAppSettingsScreen() {
               Setting a high minimum may reduce route requests
             </ThemedText>
           </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
+            DATA & PERFORMANCE
+          </ThemedText>
+          <LiteModeSetting />
         </View>
 
         <View style={styles.section}>
