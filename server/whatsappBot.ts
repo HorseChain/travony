@@ -288,6 +288,34 @@ Dudas? Responde a este mensaje.`;
   return true;
 }
 
+export function getApprovalSmsMessage(phone: string): string {
+  const clean = phone.trim().replace(/\s+/g, "");
+  if (clean.startsWith("+971") || clean.startsWith("971")) {
+    return "Travony: تمت الموافقة على حسابك. افتح تطبيق T Driver وابدأ العمل الآن.";
+  }
+  if (clean.startsWith("+62") || clean.startsWith("62")) {
+    return "Travony: Akun driver Anda disetujui! Buka T Driver dan mulai terima penumpang sekarang.";
+  }
+  if (clean.startsWith("+52") || clean.startsWith("52")) {
+    return "Travony: Tu cuenta de conductor fue aprobada. Abre T Driver y empieza a recibir viajes.";
+  }
+  return "Travony: Your driver account is approved! Open the T Driver app and start accepting rides now.";
+}
+
+function getApprovalMessage(phone: string): string {
+  const clean = phone.trim().replace(/\s+/g, "");
+  if (clean.startsWith("+971") || clean.startsWith("971")) {
+    return `*تمت الموافقة على حسابك في Travony*\n\nيمكنك الآن الاتصال وقبول الرحلات.\n\n- العمولة: 10% فقط\n- الأرباح: إيداع يومي\n- الدعم: 24/7\n\nافتح تطبيق T Driver وابدأ.`;
+  }
+  if (clean.startsWith("+62") || clean.startsWith("62")) {
+    return `*Akun Travony Anda DISETUJUI*\n\nAnda sekarang bisa online dan menerima penumpang.\n\n- Komisi: Hanya 10%\n- Penghasilan: Transfer harian\n- Dukungan: 24/7\n\nBuka aplikasi T Driver dan mulai.`;
+  }
+  if (clean.startsWith("+52") || clean.startsWith("52")) {
+    return `*Tu cuenta fue APROBADA en Travony*\n\nYa puedes conectarte y recibir viajes.\n\n- Comision: Solo 10%\n- Ganancias: Deposito diario\n- Soporte: 24/7\n\nAbre la app T Driver y empieza.`;
+  }
+  return `*Your Travony driver account is APPROVED*\n\nYou can now go online and start accepting rides.\n\n- Commission: Only 10%\n- Earnings: Daily transfer\n- Support: 24/7\n\nOpen the T Driver app and get started.`;
+}
+
 export async function sendDriverApprovalWhatsApp(driverId: string): Promise<boolean> {
   const [driver] = await db.select()
     .from(drivers)
@@ -299,16 +327,6 @@ export async function sendDriverApprovalWhatsApp(driverId: string): Promise<bool
     return false;
   }
 
-  const message = `*Tu cuenta fue APROBADA*
-
-Ya puedes conectarte y recibir viajes.
-
-Recuerda:
-- Comision: Solo 10%
-- Ganancias: Deposito diario
-- Soporte: Este chat 24/7
-
-Escribe "conectar" para activarte.`;
-
+  const message = getApprovalMessage(driver.users.phone);
   return sendWhatsAppMessage(driver.users.phone, message);
 }

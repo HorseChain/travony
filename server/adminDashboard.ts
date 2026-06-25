@@ -165,16 +165,31 @@ export async function approveDriver(driverId: string) {
   await db.update(drivers)
     .set({ status: "approved", updatedAt: new Date() })
     .where(eq(drivers.id, driverId));
-  
+
+  const [driverRow] = await db.select({ phone: users.phone, name: users.name })
+    .from(drivers)
+    .innerJoin(users, eq(drivers.userId, users.id))
+    .where(eq(drivers.id, driverId))
+    .limit(1);
+
   const { sendDriverApprovalNotification } = await import("./telegramBot");
-  const { sendDriverApprovalWhatsApp } = await import("./whatsappBot");
-  
-  await Promise.all([
-    sendDriverApprovalNotification(driverId),
-    sendDriverApprovalWhatsApp(driverId),
+  const { sendDriverApprovalWhatsApp, getApprovalSmsMessage } = await import("./whatsappBot");
+  const { sendSmsMessage } = await import("./twilioService");
+
+  const [telegramOk, whatsappOk] = await Promise.all([
+    sendDriverApprovalNotification(driverId).catch(() => false),
+    sendDriverApprovalWhatsApp(driverId).catch(() => false),
   ]);
-  
-  return { success: true };
+
+  let smsOk = false;
+  if (!whatsappOk && driverRow?.phone) {
+    const smsBody = getApprovalSmsMessage(driverRow.phone);
+    const smsResult = await sendSmsMessage(driverRow.phone, smsBody).catch(() => ({ success: false }));
+    smsOk = smsResult.success;
+  }
+
+  console.log(`[ApproveDriver] ${driverRow?.name} (${driverRow?.phone}) — telegram:${telegramOk} whatsapp:${whatsappOk} sms:${smsOk}`);
+  return { success: true, notified: { telegram: telegramOk, whatsapp: whatsappOk, sms: smsOk } };
 }
 
 export async function rejectDriver(driverId: string, reason?: string) {
