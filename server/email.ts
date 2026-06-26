@@ -853,6 +853,34 @@ export async function sendDriverApprovalEmail(data: {
   return true;
 }
 
+// Generic branded transactional email for ride/coffee status updates. Lets every
+// lifecycle event (accepted, arriving, started, cancelled, etc.) reach riders and
+// drivers by email through the same Gmail-primary queue.
+export function sendStatusUpdateEmail(opts: {
+  to: string;
+  subject: string;
+  headerSubtitle: string;
+  heading: string;
+  bodyHtml: string;
+}): void {
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
+<tr><td style="background:#00B14F;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#fff;font-size:28px;">Travony</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">${opts.headerSubtitle}</p>
+</td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="margin:0 0 16px;color:#333;font-size:18px;font-weight:600;">${opts.heading}</p>
+${opts.bodyHtml}
+</td></tr>
+<tr><td style="background:#f5f5f5;padding:24px;text-align:center;">
+<p style="margin:0;color:#999;font-size:11px;">Travony Mobility Network - Movement has value.</p>
+</td></tr></table></body></html>`;
+  const text = htmlToPlainText(html);
+  queueEmail(opts.to, opts.subject, html, text);
+}
+
 export async function sendAccountVerificationEmail(data: {
   userName: string;
   userEmail: string;

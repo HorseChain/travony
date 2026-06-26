@@ -15,7 +15,7 @@ import {
   createRideReceipt
 } from "./blockchain";
 import { sendWeeklyFeedbackEmail } from "./email";
-import { notifyOnlineDriversOfNewRide, sendRideCompletionEmails } from "./rideNotifications";
+import { notifyOnlineDriversOfNewRide, sendRideCompletionEmails, sendRideStatusEmails } from "./rideNotifications";
 import { getSystemHealth } from "./healthService";
 import { nowPaymentsService } from "./nowpayments";
 import { createRideInvoices } from "./invoiceService";
@@ -26,7 +26,8 @@ import {
   getAllRegions, 
   calculateFare, 
   getPhoneCodesList,
-  detectRegionFromPhone
+  detectRegionFromPhone,
+  detectRegionFromCoordinates
 } from "./regionService";
 import { 
   createAndResolveDispute, 
@@ -79,6 +80,19 @@ import * as incentivePolicy from "./incentivePolicy";
 import * as walletService from "./walletService";
 import { generateCarAgentSummary } from "./carAgent";
 import { getHubsNearLocation } from "./openClawService";
+import {
+  isThreeWheeler,
+  joinOrCreatePool,
+  getPoolStatus,
+  extendPoolWindow,
+  convertToSolo,
+  reconcilePoolOnCancel,
+  buildSharedGroupCards,
+  acceptGroup,
+  riderShare,
+  BASE_SHARE_DISCOUNT,
+} from "./sharedRideService";
+import { sharedRideGroups } from "@shared/schema";
 import * as intentEngine from "./intentEngine";
 import * as cityBrain from "./cityBrain";
 import * as antiGamingService from "./antiGamingService";
@@ -794,9 +808,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (paymentMethod === "wallet") {
         const walletBalance = parseFloat(riderUser.walletBalance || "0");
         if (walletBalance < estimatedFareAmount) {
+          const walletCur = typeof req.body.currency === "string" ? req.body.currency : "AED";
           return res.status(400).json({ 
             code: "INSUFFICIENT_WALLET_BALANCE",
-            message: `Insufficient wallet balance. You have AED ${walletBalance.toFixed(2)} but need AED ${estimatedFareAmount.toFixed(2)}. Please top up your wallet first.`,
+            message: `Insufficient wallet balance. You have ${walletCur} ${walletBalance.toFixed(2)} but need ${walletCur} ${estimatedFareAmount.toFixed(2)}. Please top up your wallet first.`,
             walletBalance,
             requiredAmount: estimatedFareAmount,
           });
@@ -812,6 +827,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
       
+      // Capture the rider's original vehicle choice BEFORE it is normalized to a
+      // standard st-* service type. Pooling needs the real three-wheeler type
+      // (cng/rickshaw/tuktuk/moto) to keep tuktuks pooling only with tuktuks.
+      const originalServiceType = req.body.serviceTypeId;
+
       // Validate and normalize serviceTypeId
       if (req.body.serviceTypeId) {
         const validServiceTypes = ["st-economy", "st-comfort", "st-premium", "st-xl"];
@@ -848,7 +868,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const rideId = uuidv4();
       // customerId already declared above for payment validation
       const estimatedFare = parseFloat(req.body.estimatedFare || "0");
-      const feeBreakdown = calculateFeeBreakdown(estimatedFare);
+      // Region-aware fee so the persisted platformFee/driverEarnings + blockchain
+      // hash reflect the market's real cut (e.g. 5% for budget markets like BD).
+      // The backend is AUTHORITATIVE: region/currency are derived from pickup
+      // coordinates server-side, NOT trusted from the client, so a rider cannot
+      // spoof regionCode="BD" to obtain the cheaper 5% fee on a non-BD ride.
+      const pLat = parseFloat(req.body.pickupLat);
+      const pLng = parseFloat(req.body.pickupLng);
+      // Never trust a client-supplied region. If coordinates are missing/invalid
+      // we fall back to the platform default ("AE", full 10% fee) rather than the
+      // client's regionCode, so the cheaper budget fee can't be spoofed.
+      const createRegionCode = Number.isFinite(pLat) && Number.isFinite(pLng)
+        ? detectRegionFromCoordinates(pLat, pLng)
+        : "AE";
+      const createRegion = await getRegionByCode(createRegionCode).catch(() => null);
+      const createFeePercent = createRegion ? createRegion.platformFeePercent : 10;
+      // Persist the server-derived region + its currency, overriding client input.
+      req.body.regionCode = createRegionCode;
+      req.body.currency = createRegion?.currency || req.body.currency || "AED";
+
+      // Shared / pooled three-wheeler handling (fare split). Backend-authoritative:
+      // only enable for a genuine three-wheeler in a region whose vehicle type
+      // seats >= 2, and derive the discounted upfront fare from the solo fare
+      // server-side so the share price cannot be spoofed by the client. The fee
+      // breakdown is computed on whatever fare is actually persisted.
+      let shareEligible = false;
+      let shareMaxSeats = 3;
+      let shareVehicleType = "";
+      const shareSoloFare = parseFloat(req.body.soloFare || req.body.estimatedFare || "0");
+      const wantsShare = req.body.isShared === true || req.body.isShared === "true";
+      if (wantsShare && isThreeWheeler(originalServiceType)) {
+        const vt = createRegion?.vehicleTypes?.find((v: any) => v.type === originalServiceType);
+        const seats = vt?.maxPassengers ?? 0;
+        if (seats >= 2) {
+          shareEligible = true;
+          shareMaxSeats = seats;
+          shareVehicleType = originalServiceType;
+        }
+      }
+      if (shareEligible) {
+        const preview = riderShare(shareSoloFare, 2);
+        req.body.isShared = true;
+        req.body.soloFare = shareSoloFare.toFixed(2);
+        req.body.estimatedFare = preview.toFixed(2);
+        req.body.sharedDiscountPercent = (BASE_SHARE_DISCOUNT * 100).toFixed(2);
+      } else {
+        // Not eligible (wrong vehicle/region) — strip any share flag so it books
+        // as a normal solo ride and the existing flow is untouched.
+        req.body.isShared = false;
+        delete req.body.soloFare;
+      }
+      // Recompute the fare actually persisted (discounted preview for shared rides).
+      const fareToPersist = parseFloat(req.body.estimatedFare || "0");
+      const feeBreakdown = calculateFeeBreakdown(fareToPersist, createFeePercent);
       
       // Intent-based matching
       const priority = req.body.priority || "reliable";
@@ -943,7 +1015,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         driverId: intentData.driverId || "pending",
         pickupAddress: req.body.pickupAddress || "",
         dropoffAddress: req.body.dropoffAddress || "",
-        fare: estimatedFare,
+        fare: fareToPersist,
         platformFee: feeBreakdown.platformFee,
         driverShare: feeBreakdown.driverShare,
         timestamp: new Date(),
@@ -971,7 +1043,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // wins — matching the Telegram booking path and the pending-rides poll.
       // Previously this only pinged a single pre-matched driver (or nobody when
       // unmatched), so app-booked rides reached no drivers on any channel.
-      notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+      //
+      // Shared rides are special: a lone forming pool must NOT be broadcast — it
+      // waits for a co-rider during the matching window. Only once a co-rider
+      // joins (pool flips to "ready") do we surface the combined trip to drivers.
+      if (shareEligible) {
+        try {
+          const poolResult = await joinOrCreatePool({
+            rideId: ride.id,
+            pickupLat: parseFloat(req.body.pickupLat),
+            pickupLng: parseFloat(req.body.pickupLng),
+            dropoffLat: parseFloat(req.body.dropoffLat),
+            dropoffLng: parseFloat(req.body.dropoffLng),
+            regionCode: createRegionCode,
+            currency: req.body.currency,
+            serviceTypeId: req.body.serviceTypeId,
+            vehicleType: shareVehicleType,
+            maxSeats: shareMaxSeats,
+            soloFare: shareSoloFare,
+          });
+          (ride as any).poolGroupId = poolResult.groupId;
+          if (poolResult.ready) {
+            notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+          }
+        } catch (poolErr) {
+          // If pooling fails for any reason, never strand the rider — fall back
+          // to broadcasting the request as a normal solo ride.
+          console.error("Shared pool error, broadcasting as solo:", poolErr);
+          notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+        }
+      } else {
+        notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+      }
 
       // Log EV demand signal for fleet operator analytics
       if (evPreferred) {
@@ -1014,6 +1117,109 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       res.json(ride);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ---- Shared / pooled ride status & rider controls --------------------------
+
+  // Live pool status for the rider's tracking screen (lazily evaluated, no
+  // server timers): waiting for co-riders, matched, accepted, or no_match (the
+  // window expired with no co-rider, prompting the solo / keep-waiting choice).
+  app.get("/api/rides/:id/pool", requireAuth, async (req: any, res) => {
+    try {
+      const ride = await storage.getRide(req.params.id);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (ride.customerId !== req.userId && req.userRole !== "admin") {
+        return res.status(403).json({ message: "Not authorized for this ride" });
+      }
+      const status = await getPoolStatus(ride);
+      if (!status) return res.json({ isShared: false });
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Rider gives up waiting for a co-rider and takes the tuktuk privately at the
+  // full solo fare. Detaches from the (now empty) pool and broadcasts as normal.
+  app.post("/api/rides/:id/pool/go-solo", requireAuth, async (req: any, res) => {
+    try {
+      const ride = await storage.getRide(req.params.id);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (ride.customerId !== req.userId) {
+        return res.status(403).json({ message: "Not authorized for this ride" });
+      }
+      if (!ride.isShared || ride.status !== "pending") {
+        return res.status(400).json({ message: "This ride can no longer switch to solo." });
+      }
+      const result = await convertToSolo(ride);
+      if (!result) return res.status(400).json({ message: "This ride is not in a pool." });
+      notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+      const updated = await storage.getRide(ride.id);
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Rider chooses to keep waiting — extend the pool's matching window.
+  app.post("/api/rides/:id/pool/extend", requireAuth, async (req: any, res) => {
+    try {
+      const ride = await storage.getRide(req.params.id);
+      if (!ride) return res.status(404).json({ message: "Ride not found" });
+      if (ride.customerId !== req.userId) {
+        return res.status(403).json({ message: "Not authorized for this ride" });
+      }
+      if (!ride.isShared || !ride.poolGroupId) {
+        return res.status(400).json({ message: "This ride is not in a pool." });
+      }
+      const ok = await extendPoolWindow(ride.poolGroupId);
+      if (!ok) return res.status(409).json({ message: "Pool can no longer be extended." });
+      const status = await getPoolStatus(ride);
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // The assigned driver fetches every leg of a claimed pool so the active-ride
+  // screen can show the full stop queue and progress each rider in turn.
+  app.get("/api/rides/shared/:groupId/legs", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) return res.status(404).json({ message: "Driver profile not found" });
+      const legs = await storage.getRidesByPoolGroup(req.params.groupId);
+      if (legs.length === 0) return res.json([]);
+      // Legs are only meaningful once a driver has claimed the group, and only
+      // that driver may read them. Deny unassigned pools and other drivers.
+      const assignedDriverId = legs.find((l) => l.driverId)?.driverId;
+      if (!assignedDriverId || assignedDriverId !== driver.id) {
+        return res.status(403).json({ message: "Not authorized for this shared ride." });
+      }
+      res.json(legs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // A driver claims an entire ready pool atomically. Locks each rider's fare at
+  // the final occupancy and assigns the group to the driver/vehicle so the
+  // existing per-ride completion pipeline settles each leg unchanged.
+  app.post("/api/rides/shared/:groupId/accept", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) return res.status(404).json({ message: "Driver profile not found" });
+      if (driver.status !== "approved") {
+        return res.status(403).json({ message: "Your driver account is not approved yet." });
+      }
+      const result = await acceptGroup(req.params.groupId, driver.id);
+      if (!result.ok) {
+        return res.status(409).json({ code: result.code, message: result.message });
+      }
+      const memberRides = await Promise.all((result.rideIds || []).map((id) => storage.getRide(id)));
+      res.json({ groupId: result.groupId, rideIds: result.rideIds || [], rides: memberRides.filter(Boolean) });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1066,6 +1272,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else if (isDriver || isAdmin) {
         // Drivers and admins can update more fields
         Object.assign(allowedUpdates, req.body);
+
+        // Monetary trust fields are set authoritatively at ride creation and must
+        // never be mutated by a driver via a status update — otherwise a driver
+        // could send status:"completed" + regionCode:"BD" to settle a non-BD ride
+        // at the cheaper 5% budget fee. Strip them for non-admin actors.
+        if (!isAdmin) {
+          for (const f of ["regionCode", "currency", "platformFee", "driverEarnings", "estimatedFare", "actualFare", "paymentMethod"]) {
+            delete allowedUpdates[f];
+          }
+        }
         
         // Convert date strings to Date objects for Drizzle timestamp columns
         if (allowedUpdates.completedAt && typeof allowedUpdates.completedAt === 'string') {
@@ -1098,6 +1314,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       if (req.body.status === "cancelled" && existingRide.status !== "cancelled") {
+        // Keep the shared pool consistent when a pooled leg is cancelled so a
+        // lone remaining rider is never stranded on the pooled discount path.
+        // Awaited so a co-rider's immediate status read sees the reconciled pool.
+        if (existingRide.isShared && existingRide.poolGroupId) {
+          await reconcilePoolOnCancel(existingRide).catch(console.error);
+        }
         const acceptedAt = existingRide.acceptedAt ? new Date(existingRide.acceptedAt) : null;
         const minutesAfterAccept = acceptedAt 
           ? (Date.now() - acceptedAt.getTime()) / 60000 
@@ -1167,8 +1389,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           let paymentStatus = "completed";
           let paymentMethod = (ride as any).paymentMethod || "cash";
           
-          const driverShare = fare * 0.90;
-          const platformFee = fare * 0.10;
+          // Per-region platform fee: budget markets (e.g. Bangladesh) take a
+          // smaller cut so drivers keep more of each fare. Falls back to 10%.
+          const feeRegion = await getRegionByCode(ride.regionCode || "AE").catch(() => null);
+          const feePercent = feeRegion ? feeRegion.platformFeePercent : 10;
+          const feeRate = feePercent / 100;
+          const feePctLabel = feePercent % 1 === 0 ? feePercent.toFixed(0) : feePercent.toFixed(1);
+          const driverShare = fare * (1 - feeRate);
+          const platformFee = fare * feeRate;
           
           if (paymentMethod === "wallet") {
             const balance = parseFloat(user.walletBalance || "0");
@@ -1251,7 +1479,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               type: "platform_fee",
               amount: platformFee.toFixed(2),
               status: "completed",
-              description: `Platform service fee (10%) - ${paymentMethod} ride`,
+              description: `Platform service fee (${feePctLabel}%) - ${paymentMethod} ride`,
               completedAt: new Date(),
             });
 
@@ -1260,7 +1488,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               amount: platformFee,
               rideId: ride.id,
               driverId: ride.driverId,
-              description: `10% service fee from ${paymentMethod} ride ${ride.id.substring(0, 8)}`,
+              description: `${feePctLabel}% service fee from ${paymentMethod} ride ${ride.id.substring(0, 8)}`,
               currency: ride.currency || "AED",
             });
 
@@ -1327,6 +1555,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         import("./telegramRiderBot")
           .then((m) => m.notifyRiderRideUpdate(ride.id))
           .catch((err) => console.error("[Telegram] rider notify error:", err));
+        sendRideStatusEmails(ride.id).catch((err) =>
+          console.error("[Email] ride status notify error:", err),
+        );
       }
 
       res.json(ride);
@@ -1351,19 +1582,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const regionCode = (req.query.region as string) || "AE";
       
-      // Get regional pricing config - use default if not available
-      const regionConfig = { currencyCode: regionCode === "PK" ? "PKR" : regionCode === "BD" ? "BDT" : "AED" };
+      // Region-aware pricing config so budget markets show their real lower fee.
+      const region = await getRegionByCode(regionCode).catch(() => null);
+      const feePercent = region ? region.platformFeePercent : 10;
+      const driverPercent = 100 - feePercent;
+      const feePctLabel = feePercent % 1 === 0 ? feePercent.toFixed(0) : feePercent.toFixed(1);
+      const driverPctLabel = driverPercent % 1 === 0 ? driverPercent.toFixed(0) : driverPercent.toFixed(1);
+      const currencyCode = region?.currency || (regionCode === "PK" ? "PKR" : regionCode === "BD" ? "BDT" : "AED");
+      const regionConfig = { currencyCode };
       const serviceTypes = await storage.getServiceTypes();
       
       const payFormula = {
-        platformCommission: "10%",
-        commissionDescription: "Flat 10% platform fee on all rides",
-        driverShare: "90%",
-        driverShareDescription: "You keep 90% of the fare",
+        platformCommission: `${feePctLabel}%`,
+        commissionDescription: `Flat ${feePctLabel}% platform fee on all rides`,
+        driverShare: `${driverPctLabel}%`,
+        driverShareDescription: `You keep ${driverPctLabel}% of the fare`,
         
         fareCalculation: {
           description: "Your guaranteed earnings are calculated before you accept",
-          formula: "Driver Earnings = (Base Fare + Distance × Per-km Rate + Time × Per-minute Rate) × 0.90",
+          formula: `Driver Earnings = (Base Fare + Distance × Per-km Rate + Time × Per-minute Rate) × ${(driverPercent / 100).toFixed(2)}`,
           components: [
             { name: "Base Fare", description: "Fixed starting amount per vehicle type" },
             { name: "Distance Rate", description: "Per kilometer charge based on route" },
@@ -1384,7 +1621,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           pmgth: {
             name: "Pay Me to Go Home",
             description: "80% of direction premium goes to you",
-            example: "If rider pays 20 AED premium, you get 16 AED extra"
+            example: `If rider pays 20 ${currencyCode} premium, you get 16 ${currencyCode} extra`
           },
           tips: {
             name: "Tips",
@@ -1393,14 +1630,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         },
         
-        vehicleRates: serviceTypes.map(st => ({
-          type: st.type,
-          name: st.name,
-          baseFare: st.baseFare,
-          perKmRate: st.perKmRate,
-          perMinuteRate: st.perMinuteRate,
-          currency: regionConfig?.currencyCode || "AED"
-        })),
+        vehicleRates: (region?.vehicleTypes && region.vehicleTypes.length > 0
+          ? region.vehicleTypes.map(v => ({
+              type: v.type,
+              name: v.localName,
+              baseFare: v.baseFare.toFixed(2),
+              perKmRate: v.perKmRate.toFixed(2),
+              perMinuteRate: v.perMinuteRate.toFixed(2),
+              currency: currencyCode,
+            }))
+          : serviceTypes.map(st => ({
+              type: st.type,
+              name: st.name,
+              baseFare: st.baseFare,
+              perKmRate: st.perKmRate,
+              perMinuteRate: st.perMinuteRate,
+              currency: currencyCode,
+            }))),
         
         payoutSchedule: {
           frequency: "Weekly",
@@ -2113,7 +2359,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ai/price", async (req, res) => {
     try {
-      const { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType } = req.query;
+      const { pickupLat, pickupLng, dropoffLat, dropoffLng, vehicleType, regionCode } = req.query;
       
       if (!pickupLat || !pickupLng || !dropoffLat || !dropoffLng) {
         return res.status(400).json({ message: "Coordinates are required" });
@@ -2124,12 +2370,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         parseFloat(pickupLng as string),
         parseFloat(dropoffLat as string),
         parseFloat(dropoffLng as string),
-        (vehicleType as string) || "economy"
+        (vehicleType as string) || "economy",
+        (regionCode as string) || "AE"
       );
 
       const combinedMultiplier = Math.min(
         pricing.demandMultiplier * pricing.timeOfDayMultiplier * pricing.trafficMultiplier,
-        1.5
+        pricing.surgeCap
       );
       const subtotal = pricing.baseFare + pricing.distanceCharge + pricing.timeCharge;
       const surgeCharge = combinedMultiplier > 1 ? subtotal * (combinedMultiplier - 1) : 0;
@@ -2145,9 +2392,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         platformFee: pricing.platformFee,
         driverEarnings: pricing.driverEarnings,
         priceExplanation: pricing.priceExplanation,
+        currency: pricing.currency,
         aiPowered: true,
-        maxSurgeCap: 1.5,
-        surgeCapped: combinedMultiplier >= 1.5,
+        maxSurgeCap: pricing.surgeCap,
+        surgeCapped: combinedMultiplier >= pricing.surgeCap,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -2179,7 +2427,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Ride ID and fare are required" });
       }
 
-      const feeBreakdown = calculateFeeBreakdown(parseFloat(fare));
+      const blkRide = await storage.getRide(rideId).catch(() => null);
+      const blkRegion = await getRegionByCode((blkRide as any)?.regionCode || "AE").catch(() => null);
+      const blkFeePercent = blkRegion ? blkRegion.platformFeePercent : 10;
+      const feeBreakdown = calculateFeeBreakdown(parseFloat(fare), blkFeePercent);
 
       const result = await recordRideToBlockchain({
         rideId,
@@ -2459,9 +2710,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // the single driver a ride was auto-matched to. This ensures rides booked
       // via the app OR Telegram always reach an available driver instead of being
       // stranded on one (possibly offline) account. First driver to accept wins.
-      const driverRides = allRides;
+      //
+      // Shared/pooled rides are collapsed into ONE card per ready pool (combined
+      // earnings + every stop) so a driver sees a single "2 riders sharing"
+      // entry rather than separate cards. Still-forming pools (no co-rider yet)
+      // are held back from the pool entirely.
+      const { soloRides, sharedCards } = await buildSharedGroupCards(allRides);
+      const driverRides = soloRides;
       
-      console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length}`);
+      console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length} solo + ${sharedCards.length} shared`);
       
       // Check if driver has an active PMGTH (Going Home) session
       const pmgthSession = await pmgthService.getActivePmgthSession(driver.id);
@@ -2563,7 +2820,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
         };
       }));
       
-      res.json(enrichedRides);
+      // Append shared/pooled trips as combined cards. Skipped while the driver is
+      // in a Going Home (PMGTH) session, which targets single direction-matched
+      // solo rides rather than multi-stop pools.
+      const sharedEnriched = pmgthSession
+        ? []
+        : await Promise.all(
+            sharedCards.map(async (card) => {
+              const stops = await Promise.all(
+                card.stops.map(async (s, idx) => {
+                  const m = await storage.getRide(s.rideId);
+                  let riderName = `Rider ${idx + 1}`;
+                  if (m?.customerId) {
+                    const u = await storage.getUser(m.customerId);
+                    riderName = u?.name || u?.email?.split("@")[0] || riderName;
+                  }
+                  return { ...s, riderName };
+                }),
+              );
+              return {
+                id: card.id,
+                poolGroupId: card.poolGroupId,
+                isShared: true,
+                riderCount: card.riderCount,
+                maxSeats: card.maxSeats,
+                pickupAddress: card.pickupAddress,
+                dropoffAddress: card.dropoffAddress,
+                estimatedFare: card.combinedFare.toFixed(2),
+                combinedFare: card.combinedFare,
+                combinedDriverEarnings: card.combinedDriverEarnings,
+                currency: card.currency,
+                stops,
+                pickupLat: card.pickupLat,
+                pickupLng: card.pickupLng,
+                dropoffLat: card.dropoffLat,
+                dropoffLng: card.dropoffLng,
+                customerName: `${card.riderCount} riders sharing`,
+                customerRating: 5.0,
+                customerTotalRides: 0,
+                distance: "—",
+                duration: "—",
+                farePerKm: "0",
+                isPmgthRide: false,
+                pmgthPremiumAmount: 0,
+                pmgthPremiumPercent: 0,
+                pmgthDirectionScore: 0,
+              };
+            }),
+          );
+
+      res.json([...sharedEnriched, ...enrichedRides]);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -2961,6 +3267,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter(p => p.status === "pending" || (p.status as string) === "pending_bank_setup")
         .reduce((sum, p) => sum + parseFloat(p.amount || "0"), 0);
       
+      // Derive the driver's operating region from their most recent ride so the
+      // displayed commission split matches their market (e.g. BD = 5% fee).
+      const driverRides = await storage.getRidesByDriver(req.params.driverId).catch(() => []);
+      const driverRegionCode = driverRides.find(r => (r as any).regionCode)?.regionCode || "AE";
+      const driverRegion = await getRegionByCode(driverRegionCode).catch(() => null);
+      const walletFeePct = driverRegion?.platformFeePercent ?? 10;
+      
       res.json({
         balance: operatorBalance.toFixed(2),
         totalEarnings: driver.totalEarnings || "0.00",
@@ -2976,8 +3289,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         },
         
         platformInfo: {
-          platformFeePercent: 10,
-          driverSharePercent: 90,
+          platformFeePercent: walletFeePct,
+          driverSharePercent: 100 - walletFeePct,
           minPayoutAmount: 50,
           payoutMethods: ["bank", "crypto"],
         },
@@ -4363,10 +4676,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const driverUser = ride.driverId ? await storage.getDriver(ride.driverId) : null;
       const driverProfile = driverUser ? await storage.getUser(driverUser.userId) : null;
 
-      // Calculate fare breakdown
+      // Calculate fare breakdown (region-aware platform fee)
       const totalFare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-      const platformFee = totalFare * 0.10;
-      const driverEarnings = totalFare * 0.90;
+      const receiptRegion = await getRegionByCode(ride.regionCode || "AE").catch(() => null);
+      const receiptFeeRate = (receiptRegion ? receiptRegion.platformFeePercent : 10) / 100;
+      const platformFee = totalFare * receiptFeeRate;
+      const driverEarnings = totalFare * (1 - receiptFeeRate);
       
       // Get invoices
       const invoices = await storage.getRideInvoicesByRide(ride.id);
@@ -4564,11 +4879,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   <div class="section">
     <div class="section-title">Payment</div>
-    <div class="row"><span>Total Amount</span><span class="total">${invoice.currency} ${invoice.totalAmount}</span></div>
     ${invoice.invoiceType === 'driver' ? `
-    <div class="row"><span>Platform Fee (10%)</span><span>-${invoice.currency} ${invoice.platformFee || '0.00'}</span></div>
-    <div class="row"><span>Your Earnings</span><span style="color: #00B14F; font-weight: bold;">${invoice.currency} ${(parseFloat(invoice.totalAmount || '0') - parseFloat(invoice.platformFee || '0')).toFixed(2)}</span></div>
-    ` : ''}
+    <div class="row"><span>Ride Fare</span><span>${invoice.currency} ${parseFloat(invoice.subtotal || invoice.totalAmount || '0').toFixed(2)}</span></div>
+    <div class="row"><span>Platform Fee${parseFloat(invoice.subtotal || '0') > 0 ? ` (${Math.round((parseFloat(invoice.platformFee || '0') / parseFloat(invoice.subtotal || '1')) * 100)}%)` : ''}</span><span>-${invoice.currency} ${invoice.platformFee || '0.00'}</span></div>
+    <div class="row"><span>Your Earnings</span><span class="total" style="color: #00B14F; font-weight: bold;">${invoice.currency} ${invoice.totalAmount}</span></div>
+    ` : `
+    <div class="row"><span>Total Amount</span><span class="total">${invoice.currency} ${invoice.totalAmount}</span></div>
+    `}
   </div>
 
   ${ride?.blockchainHash ? `
@@ -4977,7 +5294,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Invalid tip amount" });
       }
       if (amount > 100) {
-        return res.status(400).json({ message: "Maximum tip is 100 AED" });
+        const tipCur = ride.currency || "AED";
+        return res.status(400).json({ message: `Maximum tip is 100 ${tipCur}` });
       }
 
       // Update ride with tip

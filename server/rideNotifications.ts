@@ -3,10 +3,18 @@ import { vehicles, drivers } from "@shared/schema";
 import { and, eq } from "drizzle-orm";
 import { storage } from "./storage";
 import { calculateFeeBreakdown } from "./blockchain";
-import { sendRideReceiptEmail, sendDriverEarningsEmail, sendDriverRideRequestEmail } from "./email";
+import { getRegionByCode } from "./regionService";
+import { sendRideReceiptEmail, sendDriverEarningsEmail, sendDriverRideRequestEmail, sendStatusUpdateEmail } from "./email";
 import { sendDriverNotification, sendTelegramMessage } from "./telegramBot";
 import { sendSmsMessage } from "./twilioService";
 import { sendWhatsAppMessage } from "./whatsappBot";
+
+// Region-aware platform fee percent for a ride (falls back to 10%). Keeps driver
+// pay/receipt figures consistent with the ride's market (e.g. 5% budget markets).
+async function regionFeePercent(ride: any): Promise<number> {
+  const region = await getRegionByCode(ride?.regionCode || "AE").catch(() => null);
+  return region ? region.platformFeePercent : 10;
+}
 
 // Real, dialable phone numbers only (skip empty/synthetic).
 function isSendablePhone(phone?: string | null): boolean {
@@ -23,6 +31,18 @@ function isSendableEmail(email?: string | null): boolean {
   if (lower.endsWith("@travony.local")) return false;
   if (lower.endsWith(".local")) return false;
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+// Escape user-controlled text before it is interpolated into outbound email HTML
+// (addresses, names, vehicle info, OTP) to prevent HTML/content injection.
+function escapeHtml(value?: string | null): string {
+  if (!value) return "";
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 async function getDriverDescriptors(driverId: string | null | undefined): Promise<{
@@ -53,7 +73,8 @@ export async function buildAndSendRiderReceipt(
     const ride = await storage.getRide(rideId);
     if (!ride) return false;
     const total = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-    const fees = calculateFeeBreakdown(total);
+    const feePct = await regionFeePercent(ride);
+    const fees = calculateFeeBreakdown(total, feePct);
     const { driverName, vehicleInfo } = await getDriverDescriptors(ride.driverId);
 
     return await sendRideReceiptEmail({
@@ -72,6 +93,8 @@ export async function buildAndSendRiderReceipt(
       completedAt: new Date(ride.completedAt || new Date()).toISOString(),
       driverName,
       vehicleInfo,
+      currency: ride.currency || "AED",
+      feePercent: feePct,
     });
   } catch (error) {
     console.error("[RideNotifications] buildAndSendRiderReceipt error:", error);
@@ -86,7 +109,8 @@ export async function sendRideCompletionEmails(rideId: string): Promise<void> {
     const ride = await storage.getRide(rideId);
     if (!ride) return;
     const total = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-    const fees = calculateFeeBreakdown(total);
+    const feePct = await regionFeePercent(ride);
+    const fees = calculateFeeBreakdown(total, feePct);
     const completedAt = new Date(ride.completedAt || new Date()).toISOString();
 
     // Rider receipt
@@ -112,11 +136,136 @@ export async function sendRideCompletionEmails(rideId: string): Promise<void> {
           blockchainHash: ride.blockchainHash || "",
           blockchainTxHash: (ride as any).blockchainTxHash || undefined,
           completedAt,
+          currency: ride.currency || "AED",
+          feePercent: feePct,
         });
       }
     }
   } catch (error) {
     console.error("[RideNotifications] sendRideCompletionEmails error:", error);
+  }
+}
+
+// Fire-and-forget: email BOTH the rider and (if assigned) the driver on every ride
+// lifecycle change so nobody relies on Telegram/SMS alone. Completion is handled by
+// sendRideCompletionEmails (full receipt/earnings), so it is skipped here. Synthetic
+// placeholder addresses are filtered out by isSendableEmail.
+export async function sendRideStatusEmails(rideId: string): Promise<void> {
+  try {
+    const ride = await storage.getRide(rideId);
+    if (!ride) return;
+    const status = ride.status;
+    if (status === "completed") return; // receipt/earnings emails cover this
+
+    const rider = await storage.getUser(ride.customerId);
+    const { driverName, vehicleInfo } = await getDriverDescriptors(ride.driverId);
+    const pickupSafe = escapeHtml(ride.pickupAddress);
+    const dropoffSafe = escapeHtml(ride.dropoffAddress);
+    const routeHtml = `<table width="100%" cellpadding="0" cellspacing="0" style="background:#f0f7f2;border-radius:12px;padding:16px;margin:16px 0;">
+<tr><td style="color:#666;font-size:13px;">From</td></tr>
+<tr><td style="color:#333;font-size:14px;font-weight:600;padding-bottom:8px;">${pickupSafe}</td></tr>
+<tr><td style="color:#666;font-size:13px;">To</td></tr>
+<tr><td style="color:#333;font-size:14px;font-weight:600;">${dropoffSafe}</td></tr></table>`;
+
+    // What the rider should be told for each status.
+    let riderSubject = "";
+    let riderSubtitle = "";
+    let riderHeading = "";
+    let riderBody = "";
+    switch (status) {
+      case "accepted": {
+        let driverLine = "";
+        if (driverName) driverLine += `<p style="margin:0 0 4px;color:#333;font-size:14px;">Driver: <strong>${escapeHtml(driverName)}</strong></p>`;
+        if (vehicleInfo) driverLine += `<p style="margin:0 0 4px;color:#333;font-size:14px;">Car: ${escapeHtml(vehicleInfo)}</p>`;
+        const otpLine = ride.otp ? `<p style="margin:16px 0 0;color:#333;font-size:14px;">Pickup code: <strong style="font-size:20px;letter-spacing:2px;">${escapeHtml(ride.otp)}</strong></p>` : "";
+        riderSubject = "Your driver is confirmed — Travony";
+        riderSubtitle = "Driver Confirmed";
+        riderHeading = "A driver is on the way";
+        riderBody = `${driverLine}${routeHtml}${otpLine}<p style="margin:16px 0 0;color:#999;font-size:12px;">Show your pickup code to the driver when you board.</p>`;
+        break;
+      }
+      case "arriving":
+        riderSubject = "Your driver is arriving — Travony";
+        riderSubtitle = "Driver Arriving";
+        riderHeading = "Your driver is almost there";
+        riderBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">Please start making your way to the pickup point.</p>`;
+        break;
+      case "started":
+      case "in_progress":
+        riderSubject = "Your trip has started — Travony";
+        riderSubtitle = "Trip Started";
+        riderHeading = "Trip started";
+        riderBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">Sit back and enjoy the ride. Your receipt will arrive by email when you reach your destination.</p>`;
+        break;
+      case "cancelled":
+        riderSubject = "Your ride was cancelled — Travony";
+        riderSubtitle = "Ride Cancelled";
+        riderHeading = "Ride cancelled";
+        riderBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">No in-app charge was processed. If your trip had already started, please settle any cash owed directly with your driver.</p>`;
+        break;
+      default:
+        return; // unknown/intermediate status — nothing to email
+    }
+
+    if (rider && isSendableEmail(rider.email) && riderSubject) {
+      sendStatusUpdateEmail({
+        to: rider.email!,
+        subject: riderSubject,
+        headerSubtitle: riderSubtitle,
+        heading: `${riderHeading}${rider.name ? `, ${escapeHtml(rider.name)}` : ""}`,
+        bodyHtml: riderBody,
+      });
+    }
+
+    // Driver-side confirmations for the events that concern them.
+    if (ride.driverId) {
+      const driver = await storage.getDriver(ride.driverId);
+      const driverUser = driver ? await storage.getUser(driver.userId) : undefined;
+      if (driverUser && isSendableEmail(driverUser.email)) {
+        let dSubject = "";
+        let dSubtitle = "";
+        let dHeading = "";
+        let dBody = "";
+        switch (status) {
+          case "accepted":
+            dSubject = "Ride accepted — Travony";
+            dSubtitle = "Ride Accepted";
+            dHeading = "You accepted a ride";
+            dBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">Head to the pickup point. The rider has been notified you're on the way.</p>`;
+            break;
+          case "arriving":
+            dSubject = "Marked as arriving — Travony";
+            dSubtitle = "Arriving";
+            dHeading = "You're marked as arriving";
+            dBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">The rider has been told you're almost at the pickup point.</p>`;
+            break;
+          case "started":
+          case "in_progress":
+            dSubject = "Trip started — Travony";
+            dSubtitle = "Trip Started";
+            dHeading = "Trip started";
+            dBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">Drive safely. Your earnings summary will be emailed when the trip completes.</p>`;
+            break;
+          case "cancelled":
+            dSubject = "Ride cancelled — Travony";
+            dSubtitle = "Ride Cancelled";
+            dHeading = "This ride was cancelled";
+            dBody = `${routeHtml}<p style="margin:16px 0 0;color:#666;font-size:14px;">You're free to go back online and accept new rides.</p>`;
+            break;
+        }
+        if (dSubject) {
+          sendStatusUpdateEmail({
+            to: driverUser.email!,
+            subject: dSubject,
+            headerSubtitle: dSubtitle,
+            heading: `${dHeading}${driverUser.name ? `, ${escapeHtml(driverUser.name)}` : ""}`,
+            bodyHtml: dBody,
+          });
+        }
+      }
+    }
+  } catch (error) {
+    console.error("[RideNotifications] sendRideStatusEmails error:", error);
   }
 }
 
@@ -130,12 +279,13 @@ export async function notifyDriverOfNewRide(rideId: string): Promise<void> {
     const fare = parseFloat(ride.estimatedFare || ride.actualFare || "0");
     const dist = ride.distance ? `${parseFloat(ride.distance).toFixed(1)} km` : null;
     const currency = ride.currency || "AED";
+    const drvPct = 100 - (await regionFeePercent(ride));
 
     const lines = [
       "<b>New ride request</b>",
       `<b>From</b>  ${ride.pickupAddress}`,
       `<b>To</b>  ${ride.dropoffAddress}`,
-      `Fare: ${currency} ${fare.toFixed(2)} (you keep 90%)`,
+      `Fare: ${currency} ${fare.toFixed(2)} (you keep ${drvPct}%)`,
       ...(dist ? [`Distance: ~${dist}`] : []),
       "",
       "Open your T Driver app to accept.",
@@ -162,7 +312,8 @@ export async function messageDriverOfNewRide(rideId: string): Promise<void> {
     if (!driverUser) return;
 
     const fare = parseFloat(ride.estimatedFare || ride.actualFare || "0");
-    const fees = calculateFeeBreakdown(fare);
+    const feePct = await regionFeePercent(ride);
+    const fees = calculateFeeBreakdown(fare, feePct);
     const currency = ride.currency || "AED";
     const driverName = driverUser.name || "Driver";
 
@@ -179,6 +330,7 @@ export async function messageDriverOfNewRide(rideId: string): Promise<void> {
         currency,
         distance: ride.distance ? `${parseFloat(ride.distance).toFixed(1)} km` : undefined,
         paymentMethod: ride.paymentMethod || undefined,
+        feePercent: feePct,
       }).catch((e) => console.error("[RideNotifications] driver request email error:", e));
     }
 
@@ -223,7 +375,8 @@ export async function notifyOnlineDriversOfNewRide(rideId: string): Promise<void
     if (onlineDrivers.length === 0) return;
 
     const fare = parseFloat(ride.estimatedFare || ride.actualFare || "0");
-    const fees = calculateFeeBreakdown(fare);
+    const feePct = await regionFeePercent(ride);
+    const fees = calculateFeeBreakdown(fare, feePct);
     const currency = ride.currency || "AED";
 
     const smsBody =
@@ -270,6 +423,7 @@ export async function notifyOnlineDriversOfNewRide(rideId: string): Promise<void
           currency,
           distance: ride.distance ? `${parseFloat(ride.distance).toFixed(1)} km` : undefined,
           paymentMethod: ride.paymentMethod || undefined,
+          feePercent: feePct,
         }).catch((e) => console.error("[RideNotifications] broadcast email error:", e));
       }
     }
