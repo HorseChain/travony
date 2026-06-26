@@ -1,5 +1,28 @@
 import { storage } from "./storage";
+import { getRegionByCode } from "./regionService";
 import { v4 as uuidv4 } from "uuid";
+import { sendPreformattedEmail } from "./email";
+
+// Escape user-controlled text before interpolating into invoice HTML emails.
+function escapeHtml(value?: string | null): string {
+  if (!value) return "";
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Phone/Telegram signups get synthetic, non-deliverable addresses; never email those.
+function isSendableEmail(email?: string | null): boolean {
+  if (!email) return false;
+  const lower = email.toLowerCase();
+  if (lower.endsWith("@telegram.travony")) return false;
+  if (lower.endsWith("@travony.local")) return false;
+  if (lower.endsWith(".local")) return false;
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 
 interface InvoiceData {
   rideId: string;
@@ -8,7 +31,7 @@ interface InvoiceData {
   subtotal: number;
   platformFee?: number;
   totalAmount: number;
-  currency: "AED" | "USDT";
+  currency: string;
   paymentMethod: "card" | "cash" | "wallet" | "usdt";
   blockchainHash?: string;
   pickupAddress: string;
@@ -32,10 +55,18 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
     return null;
   }
 
-  const totalFare = parseFloat(ride.estimatedFare || "0");
-  const platformFee = totalFare * 0.1;
-  const driverEarnings = totalFare * 0.9;
-  const currency = ride.paymentMethod === "usdt" ? "USDT" : "AED";
+  const totalFare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
+  // Region-aware split so budget markets (e.g. BD = 5%) show the real cut. Prefer
+  // the fee already persisted on the ride; fall back to the region's fee percent.
+  const region = await getRegionByCode((ride as any).regionCode || "AE").catch(() => null);
+  const feePercent = region ? region.platformFeePercent : 10;
+  const persistedFee = parseFloat(ride.platformFee || "0");
+  const platformFee = persistedFee > 0 ? persistedFee : totalFare * (feePercent / 100);
+  const driverEarnings = parseFloat(ride.driverEarnings || "0") > 0
+    ? parseFloat(ride.driverEarnings || "0")
+    : totalFare - platformFee;
+  // USDT settlement keeps its symbol; otherwise use the ride's local currency.
+  const currency = ride.paymentMethod === "usdt" ? "USDT" : ((ride as any).currency || "AED");
 
   const customerInvoiceData: InvoiceData = {
     rideId,
@@ -44,7 +75,7 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
     subtotal: totalFare,
     platformFee: undefined,
     totalAmount: totalFare,
-    currency: currency as "AED" | "USDT",
+    currency: currency,
     paymentMethod: ride.paymentMethod as any,
     blockchainHash: ride.blockchainHash || undefined,
     pickupAddress: ride.pickupAddress,
@@ -61,7 +92,7 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
     subtotal: totalFare,
     platformFee: platformFee,
     totalAmount: driverEarnings,
-    currency: currency as "AED" | "USDT",
+    currency: currency,
     paymentMethod: ride.paymentMethod as any,
     blockchainHash: ride.blockchainHash || undefined,
     pickupAddress: ride.pickupAddress,
@@ -79,7 +110,7 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
     subtotal: customerInvoiceData.subtotal.toFixed(2),
     platformFee: null,
     totalAmount: customerInvoiceData.totalAmount.toFixed(2),
-    currency: customerInvoiceData.currency,
+    currency: customerInvoiceData.currency as any,
     paymentMethod: customerInvoiceData.paymentMethod,
     blockchainHash: customerInvoiceData.blockchainHash,
     pickupAddress: customerInvoiceData.pickupAddress,
@@ -99,7 +130,7 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
       subtotal: driverInvoiceData.subtotal.toFixed(2),
       platformFee: (driverInvoiceData.platformFee || 0).toFixed(2),
       totalAmount: driverInvoiceData.totalAmount.toFixed(2),
-      currency: driverInvoiceData.currency,
+      currency: driverInvoiceData.currency as any,
       paymentMethod: driverInvoiceData.paymentMethod,
       blockchainHash: driverInvoiceData.blockchainHash,
       pickupAddress: driverInvoiceData.pickupAddress,
@@ -114,7 +145,12 @@ export async function createRideInvoices(rideId: string): Promise<{ customerInvo
 }
 
 export function formatInvoiceHtml(invoice: any, recipientName: string, recipientEmail: string): string {
-  const currencySymbol = invoice.currency === "USDT" ? "USDT " : "AED ";
+  const currencySymbol = (invoice.currency || "AED") + " ";
+  // Derive the real platform-fee percent from the persisted amounts so budget
+  // markets (e.g. BD = 5%) never show a misleading "10%".
+  const sub = parseFloat(invoice.subtotal || "0");
+  const fee = parseFloat(invoice.platformFee || "0");
+  const feePctLabel = sub > 0 ? Math.round((fee / sub) * 100) : 10;
   const date = new Date(invoice.rideCompletedAt).toLocaleDateString("en-US", {
     year: "numeric",
     month: "long",
@@ -162,8 +198,8 @@ export function formatInvoiceHtml(invoice: any, recipientName: string, recipient
 
     <div class="section">
       <div class="section-title">${invoice.invoiceType === "customer" ? "Billed To" : "Earnings Statement For"}</div>
-      <div style="font-weight: bold">${recipientName}</div>
-      <div style="color: #666">${recipientEmail}</div>
+      <div style="font-weight: bold">${escapeHtml(recipientName)}</div>
+      <div style="color: #666">${escapeHtml(recipientEmail)}</div>
     </div>
 
     <div class="section">
@@ -171,16 +207,16 @@ export function formatInvoiceHtml(invoice: any, recipientName: string, recipient
       <div class="trip-info">
         <div class="location">
           <div class="dot pickup"></div>
-          <div>${invoice.pickupAddress}</div>
+          <div>${escapeHtml(invoice.pickupAddress)}</div>
         </div>
         <div class="location" style="margin-bottom: 0">
           <div class="dot dropoff"></div>
-          <div>${invoice.dropoffAddress}</div>
+          <div>${escapeHtml(invoice.dropoffAddress)}</div>
         </div>
         <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #ddd; display: flex; justify-content: space-between; color: #666; font-size: 14px;">
           <span>${parseFloat(invoice.distance).toFixed(1)} km</span>
           <span>${invoice.duration} min</span>
-          <span>Paid via ${invoice.paymentMethod.toUpperCase()}</span>
+          <span>Paid via ${escapeHtml(String(invoice.paymentMethod || "cash")).toUpperCase()}</span>
         </div>
       </div>
     </div>
@@ -193,7 +229,7 @@ export function formatInvoiceHtml(invoice: any, recipientName: string, recipient
           <span>${currencySymbol}${parseFloat(invoice.subtotal).toFixed(2)}</span>
         </div>
         <div class="amount-row">
-          <span>Platform Fee (10%)</span>
+          <span>Platform Fee (${feePctLabel}%)</span>
           <span>-${currencySymbol}${parseFloat(invoice.platformFee).toFixed(2)}</span>
         </div>
         <div class="amount-row total">
@@ -211,8 +247,8 @@ export function formatInvoiceHtml(invoice: any, recipientName: string, recipient
     ${invoice.blockchainHash ? `
       <div class="blockchain">
         <div class="blockchain-title">Verified on Polygon Blockchain</div>
-        <div class="blockchain-hash">${invoice.blockchainHash}</div>
-        <a href="https://amoy.polygonscan.com/tx/${invoice.blockchainHash}" style="color: #2E7D32; font-size: 12px;">View on Explorer</a>
+        <div class="blockchain-hash">${escapeHtml(invoice.blockchainHash)}</div>
+        <a href="https://amoy.polygonscan.com/tx/${encodeURIComponent(invoice.blockchainHash)}" style="color: #2E7D32; font-size: 12px;">View on Explorer</a>
       </div>
     ` : ""}
 
@@ -224,4 +260,39 @@ export function formatInvoiceHtml(invoice: any, recipientName: string, recipient
 </body>
 </html>
   `;
+}
+
+// Fire-and-forget: email the customer invoice to the rider and the driver invoice
+// (earnings statement) to the driver after invoices are created on completion.
+// Skips synthetic placeholder addresses; sends through the Gmail-primary queue.
+export async function sendRideInvoiceEmails(rideId: string): Promise<void> {
+  try {
+    const invoices = await storage.getRideInvoicesByRide(rideId);
+    if (!invoices || invoices.length === 0) return;
+    const ride = await storage.getRide(rideId);
+    if (!ride) return;
+
+    for (const invoice of invoices) {
+      try {
+        if (invoice.invoiceType === "customer") {
+          const rider = await storage.getUser(ride.customerId);
+          if (rider && isSendableEmail(rider.email)) {
+            const html = formatInvoiceHtml(invoice, rider.name || "there", rider.email!);
+            sendPreformattedEmail(rider.email!, `Your Travony invoice ${invoice.invoiceNumber}`, html);
+          }
+        } else if (invoice.invoiceType === "driver" && ride.driverId) {
+          const driver = await storage.getDriver(ride.driverId);
+          const driverUser = driver ? await storage.getUser(driver.userId) : undefined;
+          if (driverUser && isSendableEmail(driverUser.email)) {
+            const html = formatInvoiceHtml(invoice, driverUser.name || "Driver", driverUser.email!);
+            sendPreformattedEmail(driverUser.email!, `Your Travony earnings statement ${invoice.invoiceNumber}`, html);
+          }
+        }
+      } catch (perInvoiceErr) {
+        console.error(`[InvoiceService] failed to email invoice ${invoice.invoiceNumber}:`, perInvoiceErr);
+      }
+    }
+  } catch (error) {
+    console.error("[InvoiceService] sendRideInvoiceEmails error:", error);
+  }
 }

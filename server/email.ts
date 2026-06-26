@@ -881,6 +881,12 @@ ${opts.bodyHtml}
   queueEmail(opts.to, opts.subject, html, text);
 }
 
+// Send a pre-formatted, complete HTML document (e.g. a ride invoice) as an email.
+// The HTML is already a full branded document, so it is queued as-is.
+export function sendPreformattedEmail(to: string, subject: string, html: string): void {
+  queueEmail(to, subject, html, htmlToPlainText(html));
+}
+
 export async function sendAccountVerificationEmail(data: {
   userName: string;
   userEmail: string;

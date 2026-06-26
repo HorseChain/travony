@@ -18,7 +18,7 @@ import { sendWeeklyFeedbackEmail } from "./email";
 import { notifyOnlineDriversOfNewRide, sendRideCompletionEmails, sendRideStatusEmails } from "./rideNotifications";
 import { getSystemHealth } from "./healthService";
 import { nowPaymentsService } from "./nowpayments";
-import { createRideInvoices } from "./invoiceService";
+import { createRideInvoices, sendRideInvoiceEmails } from "./invoiceService";
 import { 
   initializeRegions,
   initializeServiceTypes,
@@ -1535,6 +1535,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
             try {
               await createRideInvoices(ride.id);
+              sendRideInvoiceEmails(ride.id).catch((err) =>
+                console.error("[Email] ride invoice notify error:", err),
+              );
             } catch (invoiceError: any) {
               console.log("Invoice generation error:", invoiceError.message);
             }
