@@ -32,15 +32,23 @@ async function processEmailQueue(): Promise<void> {
   while (emailQueue.length > 0) {
     const email = emailQueue[0];
     try {
-      await transporter.sendMail({
-        from: `"Travony" <${process.env.SMTP_USER || 'noreply@travony.app'}>`,
-        to: email.to,
-        subject: email.subject,
-        html: email.html,
-        text: email.text,
-      });
+      let sentVia = "";
+      try {
+        const { sendEmailViaGmail } = await import("./gmailClient");
+        await sendEmailViaGmail(email.to, email.subject, email.html);
+        sentVia = "gmail";
+      } catch (gmailErr: any) {
+        await transporter.sendMail({
+          from: `"Travony" <${process.env.SMTP_USER || 'noreply@travony.app'}>`,
+          to: email.to,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+        });
+        sentVia = "smtp";
+      }
       emailQueue.shift();
-      console.log(`Email sent: ${email.subject} -> ${email.to}`);
+      console.log(`Email sent (${sentVia}): ${email.subject} -> ${email.to}`);
     } catch (error: any) {
       email.attempts++;
       email.lastError = error.message;
@@ -91,6 +99,8 @@ interface RideReceiptData {
   completedAt: string;
   driverName?: string;
   vehicleInfo?: string;
+  currency?: string;
+  feePercent?: number;
 }
 
 export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boolean> {
@@ -102,6 +112,11 @@ export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boole
   const polygonScanUrl = data.blockchainTxHash
     ? `https://amoy.polygonscan.com/tx/${data.blockchainTxHash}`
     : `https://amoy.polygonscan.com/address/0xA8C20314004FEA3bE339f73cE4E192eCAaA062Ec`;
+
+  // Region-aware money labels so budget markets (e.g. BD = 5% fee) read correctly.
+  const cur = data.currency || "AED";
+  const feePct = data.feePercent ?? 10;
+  const drvPct = 100 - feePct;
 
   const htmlContent = `
 <!DOCTYPE html>
@@ -184,7 +199,7 @@ export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boole
           <tr>
             <td style="padding: 16px 0;">
               <span style="color: #333; font-size: 18px; font-weight: 700;">Total</span>
-              <span style="float: right; color: #00B14F; font-size: 24px; font-weight: 700;">AED ${data.fare}</span>
+              <span style="float: right; color: #00B14F; font-size: 24px; font-weight: 700;">${cur} ${data.fare}</span>
             </td>
           </tr>
         </table>
@@ -204,14 +219,14 @@ export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boole
                 </tr>
                 <tr>
                   <td style="padding: 6px 0;">
-                    <span style="color: rgba(255,255,255,0.8); font-size: 12px;">Platform Fee (10%)</span>
-                    <span style="float: right; color: #ffffff; font-size: 13px;">AED ${data.platformFee}</span>
+                    <span style="color: rgba(255,255,255,0.8); font-size: 12px;">Platform Fee (${feePct}%)</span>
+                    <span style="float: right; color: #ffffff; font-size: 13px;">${cur} ${data.platformFee}</span>
                   </td>
                 </tr>
                 <tr>
                   <td style="padding: 6px 0;">
-                    <span style="color: rgba(255,255,255,0.8); font-size: 12px;">Driver Earnings (90%)</span>
-                    <span style="float: right; color: #ffffff; font-size: 13px;">AED ${data.driverEarnings}</span>
+                    <span style="color: rgba(255,255,255,0.8); font-size: 12px;">Driver Earnings (${drvPct}%)</span>
+                    <span style="float: right; color: #ffffff; font-size: 13px;">${cur} ${data.driverEarnings}</span>
                   </td>
                 </tr>
               </table>
@@ -258,7 +273,7 @@ export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boole
     await transporter.sendMail({
       from: `"Travony" <${process.env.SMTP_USER}>`,
       to: data.customerEmail,
-      subject: `Your Travony Ride Receipt - AED ${data.fare}`,
+      subject: `Your Travony Ride Receipt - ${cur} ${data.fare}`,
       html: htmlContent,
     });
     console.log(`Ride receipt email sent to ${data.customerEmail}`);
@@ -281,6 +296,8 @@ interface DriverEarningsEmailData {
   blockchainHash: string;
   blockchainTxHash?: string;
   completedAt: string;
+  currency?: string;
+  feePercent?: number;
 }
 
 export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Promise<boolean> {
@@ -288,6 +305,11 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
     console.log("Email not configured - skipping driver earnings email");
     return false;
   }
+
+  // Region-aware money labels so budget markets (e.g. BD = 5% fee) read correctly.
+  const cur = data.currency || "AED";
+  const feePct = data.feePercent ?? 10;
+  const drvPct = 100 - feePct;
 
   const polygonScanUrl = data.blockchainTxHash
     ? `https://amoy.polygonscan.com/tx/${data.blockchainTxHash}`
@@ -322,8 +344,8 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
         <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #E8F5E9; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: center;">
           <tr>
             <td>
-              <p style="margin: 0 0 8px; color: #666; font-size: 14px;">Your Earnings (90%)</p>
-              <p style="margin: 0; color: #00B14F; font-size: 36px; font-weight: 700;">AED ${data.earnings}</p>
+              <p style="margin: 0 0 8px; color: #666; font-size: 14px;">Your Earnings (${drvPct}%)</p>
+              <p style="margin: 0; color: #00B14F; font-size: 36px; font-weight: 700;">${cur} ${data.earnings}</p>
             </td>
           </tr>
         </table>
@@ -354,19 +376,19 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
           <tr>
             <td style="padding: 12px 0; border-bottom: 1px solid #eee;">
               <span style="color: #666; font-size: 14px;">Total Fare</span>
-              <span style="float: right; color: #333; font-size: 14px; font-weight: 500;">AED ${data.totalFare}</span>
+              <span style="float: right; color: #333; font-size: 14px; font-weight: 500;">${cur} ${data.totalFare}</span>
             </td>
           </tr>
           <tr>
             <td style="padding: 12px 0; border-bottom: 1px solid #eee;">
-              <span style="color: #666; font-size: 14px;">Platform Fee (10%)</span>
-              <span style="float: right; color: #E53935; font-size: 14px; font-weight: 500;">- AED ${data.platformFee}</span>
+              <span style="color: #666; font-size: 14px;">Platform Fee (${feePct}%)</span>
+              <span style="float: right; color: #E53935; font-size: 14px; font-weight: 500;">- ${cur} ${data.platformFee}</span>
             </td>
           </tr>
           <tr>
             <td style="padding: 12px 0;">
               <span style="color: #333; font-size: 16px; font-weight: 600;">Your Earnings</span>
-              <span style="float: right; color: #00B14F; font-size: 18px; font-weight: 700;">AED ${data.earnings}</span>
+              <span style="float: right; color: #00B14F; font-size: 18px; font-weight: 700;">${cur} ${data.earnings}</span>
             </td>
           </tr>
         </table>
@@ -403,7 +425,7 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
     <tr>
       <td style="background-color: #f5f5f5; padding: 24px; text-align: center;">
         <p style="margin: 0; color: #999; font-size: 11px;">
-          Travony - 90% to Drivers, Always
+          Travony - ${drvPct}% to Drivers, Always
         </p>
       </td>
     </tr>
@@ -416,7 +438,7 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
     await transporter.sendMail({
       from: `"Travony" <${process.env.SMTP_USER}>`,
       to: data.driverEmail,
-      subject: `Route Completed - Yield: AED ${data.earnings}`,
+      subject: `Route Completed - Yield: ${cur} ${data.earnings}`,
       html: htmlContent,
     });
     console.log(`Driver earnings email sent to ${data.driverEmail}`);
@@ -438,6 +460,7 @@ interface DriverRideRequestEmailData {
   currency: string;
   distance?: string;
   paymentMethod?: string;
+  feePercent?: number;
 }
 
 export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailData): Promise<boolean> {
@@ -445,6 +468,9 @@ export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailDat
     console.log("Email not configured - skipping driver ride request email");
     return false;
   }
+
+  // Driver share percent reflects the ride's region (e.g. BD = 95% to driver).
+  const drvPct = 100 - (data.feePercent ?? 10);
 
   const payLabel = data.paymentMethod === "usdt"
     ? "Crypto (USDT)"
@@ -480,7 +506,7 @@ export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailDat
         <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #E8F5E9; border-radius: 12px; padding: 20px; margin-bottom: 24px; text-align: center;">
           <tr>
             <td>
-              <p style="margin: 0 0 8px; color: #666; font-size: 14px;">You earn (90%)</p>
+              <p style="margin: 0 0 8px; color: #666; font-size: 14px;">You earn (${drvPct}%)</p>
               <p style="margin: 0; color: #00B14F; font-size: 36px; font-weight: 700;">${data.currency} ${data.earnings}</p>
             </td>
           </tr>
@@ -538,7 +564,7 @@ export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailDat
     <tr>
       <td style="background-color: #f5f5f5; padding: 24px; text-align: center;">
         <p style="margin: 0; color: #999; font-size: 11px;">
-          Travony - 90% to Drivers, Always
+          Travony - ${drvPct}% to Drivers, Always
         </p>
       </td>
     </tr>
@@ -547,7 +573,7 @@ export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailDat
 </html>
   `;
 
-  const textContent = `New ride request\n\nHi ${data.driverName}, you have a new ride request.\n\nFrom: ${data.pickupAddress}\nTo: ${data.dropoffAddress}\nEstimated fare: ${data.currency} ${data.fare}\nYou earn (90%): ${data.currency} ${data.earnings}${data.distance ? `\nDistance: ~${data.distance}` : ""}\nPayment: ${payLabel}\n\nOpen your T Driver app to accept. First driver to accept wins.\n\nRide ID: ${data.rideId}`;
+  const textContent = `New ride request\n\nHi ${data.driverName}, you have a new ride request.\n\nFrom: ${data.pickupAddress}\nTo: ${data.dropoffAddress}\nEstimated fare: ${data.currency} ${data.fare}\nYou earn (${drvPct}%): ${data.currency} ${data.earnings}${data.distance ? `\nDistance: ~${data.distance}` : ""}\nPayment: ${payLabel}\n\nOpen your T Driver app to accept. First driver to accept wins.\n\nRide ID: ${data.rideId}`;
 
   queueEmail(
     data.driverEmail,
@@ -787,6 +813,45 @@ export async function sendDriverOnboardingEmail(data: {
 
   const text = htmlToPlainText(html);
   queueEmail(data.driverEmail, `Welcome to Travony, ${data.driverName}!`, html, text);
+  return true;
+}
+
+export async function sendDriverApprovalEmail(data: {
+  driverName: string;
+  driverEmail: string;
+}): Promise<boolean> {
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
+
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
+<table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
+<tr><td style="background:#00B14F;padding:24px;text-align:center;">
+<h1 style="margin:0;color:#fff;font-size:28px;">Travony</h1>
+<p style="margin:8px 0 0;color:rgba(255,255,255,0.9);font-size:14px;">Driver Account Approved</p>
+</td></tr>
+<tr><td style="padding:32px 24px;">
+<p style="margin:0 0 24px;color:#333;font-size:18px;font-weight:600;">You're approved, ${data.driverName}!</p>
+<p style="margin:0 0 16px;color:#666;font-size:14px;">Your Travony driver account is now active. You can go online and start accepting rides right away.</p>
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#E8F5E9;border-radius:12px;padding:20px;margin:24px 0;">
+<tr><td style="text-align:center;">
+<p style="margin:0 0 8px;color:#666;font-size:12px;">YOU KEEP</p>
+<p style="margin:0;color:#00B14F;font-size:32px;font-weight:700;">90%</p>
+<p style="margin:8px 0 0;color:#666;font-size:13px;">of every fare. Always.</p>
+</td></tr></table>
+<p style="margin:0 0 16px;color:#333;font-size:14px;font-weight:600;">Get started:</p>
+<table width="100%" cellpadding="0" cellspacing="0">
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">1. Open the T Driver app</td></tr>
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">2. Tap Go Online</td></tr>
+<tr><td style="padding:8px 0;color:#666;font-size:14px;">3. Start accepting rides and earning</td></tr>
+</table>
+<p style="margin:24px 0 0;color:#999;font-size:12px;">Earnings are deposited daily. Support is available 24/7.</p>
+</td></tr>
+<tr><td style="background:#f5f5f5;padding:24px;text-align:center;">
+<p style="margin:0;color:#999;font-size:11px;">Travony Mobility Network - Movement has value.</p>
+</td></tr></table></body></html>`;
+
+  const text = htmlToPlainText(html);
+  queueEmail(data.driverEmail, `Your Travony driver account is approved, ${data.driverName}!`, html, text);
   return true;
 }
 

@@ -166,7 +166,7 @@ export async function approveDriver(driverId: string) {
     .set({ status: "approved", updatedAt: new Date() })
     .where(eq(drivers.id, driverId));
 
-  const [driverRow] = await db.select({ phone: users.phone, name: users.name })
+  const [driverRow] = await db.select({ phone: users.phone, name: users.name, email: users.email })
     .from(drivers)
     .innerJoin(users, eq(drivers.userId, users.id))
     .where(eq(drivers.id, driverId))
@@ -175,10 +175,16 @@ export async function approveDriver(driverId: string) {
   const { sendDriverApprovalNotification } = await import("./telegramBot");
   const { sendDriverApprovalWhatsApp, getApprovalSmsMessage } = await import("./whatsappBot");
   const { sendSmsMessage } = await import("./twilioService");
+  const { sendDriverApprovalEmail } = await import("./email");
 
-  const [telegramOk, whatsappOk] = await Promise.all([
+  const hasRealEmail = !!driverRow?.email && !driverRow.email.endsWith("@travony.local");
+
+  const [telegramOk, whatsappOk, emailOk] = await Promise.all([
     sendDriverApprovalNotification(driverId).catch(() => false),
     sendDriverApprovalWhatsApp(driverId).catch(() => false),
+    hasRealEmail
+      ? sendDriverApprovalEmail({ driverName: driverRow!.name || "Driver", driverEmail: driverRow!.email }).catch(() => false)
+      : Promise.resolve(false),
   ]);
 
   let smsOk = false;
@@ -188,8 +194,8 @@ export async function approveDriver(driverId: string) {
     smsOk = smsResult.success;
   }
 
-  console.log(`[ApproveDriver] ${driverRow?.name} (${driverRow?.phone}) — telegram:${telegramOk} whatsapp:${whatsappOk} sms:${smsOk}`);
-  return { success: true, notified: { telegram: telegramOk, whatsapp: whatsappOk, sms: smsOk } };
+  console.log(`[ApproveDriver] ${driverRow?.name} (${driverRow?.phone}) — telegram:${telegramOk} whatsapp:${whatsappOk} sms:${smsOk} email:${emailOk}`);
+  return { success: true, notified: { telegram: telegramOk, whatsapp: whatsappOk, sms: smsOk, email: emailOk } };
 }
 
 export async function rejectDriver(driverId: string, reason?: string) {
