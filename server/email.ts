@@ -820,8 +820,6 @@ export async function sendDriverApprovalEmail(data: {
   driverName: string;
   driverEmail: string;
 }): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
-
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">
