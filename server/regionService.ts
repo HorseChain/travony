@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { regions, regionalVehicleTypes, regionalEmergencyContacts, exchangeRates } from "@shared/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, asc } from "drizzle-orm";
 
 export interface RegionConfig {
   code: string;
@@ -58,7 +58,7 @@ const DEFAULT_REGIONS: Omit<RegionConfig, 'vehicleTypes' | 'emergencyContacts'>[
   { code: "TR", name: "Turkey", currency: "TRY", currencySymbol: "₺", phoneCode: "+90", timezone: "Europe/Istanbul", language: "tr", surgeCap: 1.5, platformFeePercent: 10, minFare: 50, emergencyNumber: "112", supportedPaymentMethods: ["cash", "usdt"] },
   { code: "BR", name: "Brazil", currency: "BRL", currencySymbol: "R$", phoneCode: "+55", timezone: "America/Sao_Paulo", language: "pt", surgeCap: 1.5, platformFeePercent: 10, minFare: 8, emergencyNumber: "190", supportedPaymentMethods: ["cash", "usdt"] },
   { code: "MX", name: "Mexico", currency: "MXN", currencySymbol: "$", phoneCode: "+52", timezone: "America/Mexico_City", language: "es", surgeCap: 1.5, platformFeePercent: 10, minFare: 35, emergencyNumber: "911", supportedPaymentMethods: ["cash", "usdt"] },
-  { code: "BD", name: "Bangladesh", currency: "BDT", currencySymbol: "৳", phoneCode: "+880", timezone: "Asia/Dhaka", language: "bn", surgeCap: 1.5, platformFeePercent: 10, minFare: 50, emergencyNumber: "999", supportedPaymentMethods: ["cash", "usdt"] },
+  { code: "BD", name: "Bangladesh", currency: "BDT", currencySymbol: "৳", phoneCode: "+880", timezone: "Asia/Dhaka", language: "bn", surgeCap: 1.2, platformFeePercent: 5, minFare: 20, emergencyNumber: "999", supportedPaymentMethods: ["cash", "usdt"] },
   { code: "PK", name: "Pakistan", currency: "PKR", currencySymbol: "₨", phoneCode: "+92", timezone: "Asia/Karachi", language: "ur", surgeCap: 1.5, platformFeePercent: 10, minFare: 100, emergencyNumber: "15", supportedPaymentMethods: ["cash", "usdt"] },
 ];
 
@@ -68,6 +68,10 @@ const REGIONAL_VEHICLES: Record<string, RegionalVehicle[]> = {
     { type: "comfort", localName: "Comfort", description: "Spacious comfort", icon: "car", baseFare: 15, perKmRate: 3.5, perMinuteRate: 0.75, minFare: 15, maxPassengers: 4 },
     { type: "premium", localName: "Premium", description: "Luxury experience", icon: "car", baseFare: 25, perKmRate: 5, perMinuteRate: 1, minFare: 25, maxPassengers: 4 },
     { type: "xl", localName: "XL", description: "For groups", icon: "truck", baseFare: 20, perKmRate: 4, perMinuteRate: 0.8, minFare: 20, maxPassengers: 6 },
+    // Safe Driver (Zofeur-style): a vetted driver comes and drives the RIDER'S
+    // OWN car. Time-weighted pricing — low per-km, high per-minute — since the
+    // rider supplies the vehicle and fuel; the fare pays for the driver's time.
+    { type: "safe_driver", localName: "Safe Driver", description: "A pro driver drives YOUR car", icon: "user-check", baseFare: 20, perKmRate: 0.5, perMinuteRate: 1.5, minFare: 35, maxPassengers: 4 },
   ],
   "IN": [
     { type: "rickshaw", localName: "Auto Rickshaw", description: "Quick city rides", icon: "navigation", baseFare: 25, perKmRate: 12, perMinuteRate: 2, minFare: 25, maxPassengers: 3 },
@@ -118,9 +122,9 @@ const REGIONAL_VEHICLES: Record<string, RegionalVehicle[]> = {
     { type: "minibus", localName: "Минивэн", description: "For groups", icon: "truck", baseFare: 249, perKmRate: 30, perMinuteRate: 6, minFare: 249, maxPassengers: 7 },
   ],
   "BD": [
-    { type: "cng", localName: "CNG Auto", description: "Green auto rickshaw", icon: "navigation", baseFare: 30, perKmRate: 12, perMinuteRate: 2, minFare: 30, maxPassengers: 3 },
-    { type: "rickshaw", localName: "Easy Bike", description: "Electric rickshaw", icon: "navigation", baseFare: 20, perKmRate: 8, perMinuteRate: 1.5, minFare: 20, maxPassengers: 3 },
-    { type: "moto", localName: "Bike", description: "Motorcycle ride", icon: "navigation", baseFare: 25, perKmRate: 10, perMinuteRate: 2, minFare: 25, maxPassengers: 1 },
+    { type: "rickshaw", localName: "Easy Bike", description: "Cheapest electric rickshaw", icon: "navigation", baseFare: 15, perKmRate: 7, perMinuteRate: 1, minFare: 15, maxPassengers: 3 },
+    { type: "cng", localName: "CNG Auto", description: "Green auto rickshaw", icon: "navigation", baseFare: 25, perKmRate: 10, perMinuteRate: 1.5, minFare: 25, maxPassengers: 3 },
+    { type: "moto", localName: "Bike", description: "Fast motorcycle ride", icon: "navigation", baseFare: 20, perKmRate: 9, perMinuteRate: 1.5, minFare: 20, maxPassengers: 1 },
     { type: "economy", localName: "Car", description: "Affordable car", icon: "car", baseFare: 80, perKmRate: 25, perMinuteRate: 4, minFare: 80, maxPassengers: 4 },
     { type: "comfort", localName: "Sedan", description: "AC sedan", icon: "car", baseFare: 120, perKmRate: 35, perMinuteRate: 6, minFare: 120, maxPassengers: 4 },
   ],
@@ -189,6 +193,63 @@ export async function initializeRegions(): Promise<void> {
       });
 
       console.log(`Initialized region: ${regionData.name}`);
+    } else {
+      // Region already seeded. Re-sync the config-driven fields from code so
+      // edits (e.g. a lower platform fee, calmer surge cap, cheaper fares) are
+      // actually applied to existing rows instead of being silently skipped.
+      // Dev and prod use SEPARATE databases, so this runs on each on startup.
+      const region = existing[0];
+      await db.update(regions).set({
+        name: regionData.name,
+        currency: regionData.currency as any,
+        currencySymbol: regionData.currencySymbol,
+        phoneCode: regionData.phoneCode,
+        timezone: regionData.timezone,
+        language: regionData.language,
+        surgeCap: regionData.surgeCap.toString(),
+        platformFeePercent: regionData.platformFeePercent.toString(),
+        minFare: regionData.minFare.toString(),
+        emergencyNumber: regionData.emergencyNumber,
+        supportedPaymentMethods: regionData.supportedPaymentMethods.join(","),
+      }).where(eq(regions.id, region.id));
+
+      // Upsert each code-defined vehicle type: update pricing + sort order if it
+      // exists, insert it if missing. Existing extra rows are left untouched.
+      const existingVehicles = await db.select().from(regionalVehicleTypes)
+        .where(eq(regionalVehicleTypes.regionId, region.id));
+      const vehicles = REGIONAL_VEHICLES[regionData.code] || DEFAULT_VEHICLES;
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        const match = existingVehicles.find(ev => ev.type === (v.type as any));
+        if (match) {
+          await db.update(regionalVehicleTypes).set({
+            localName: v.localName,
+            description: v.description,
+            icon: v.icon,
+            baseFare: v.baseFare.toString(),
+            perKmRate: v.perKmRate.toString(),
+            perMinuteRate: v.perMinuteRate.toString(),
+            minFare: v.minFare.toString(),
+            maxPassengers: v.maxPassengers,
+            sortOrder: i,
+            isActive: true,
+          }).where(eq(regionalVehicleTypes.id, match.id));
+        } else {
+          await db.insert(regionalVehicleTypes).values({
+            regionId: region.id,
+            type: v.type as any,
+            localName: v.localName,
+            description: v.description,
+            icon: v.icon,
+            baseFare: v.baseFare.toString(),
+            perKmRate: v.perKmRate.toString(),
+            perMinuteRate: v.perMinuteRate.toString(),
+            minFare: v.minFare.toString(),
+            maxPassengers: v.maxPassengers,
+            sortOrder: i,
+          });
+        }
+      }
     }
   }
   
@@ -201,7 +262,8 @@ export async function getRegionByCode(code: string): Promise<RegionConfig | null
   if (!region) return null;
   
   const vehicles = await db.select().from(regionalVehicleTypes)
-    .where(and(eq(regionalVehicleTypes.regionId, region.id), eq(regionalVehicleTypes.isActive, true)));
+    .where(and(eq(regionalVehicleTypes.regionId, region.id), eq(regionalVehicleTypes.isActive, true)))
+    .orderBy(asc(regionalVehicleTypes.sortOrder));
   
   const emergencyContactsList = await db.select().from(regionalEmergencyContacts)
     .where(eq(regionalEmergencyContacts.regionId, region.id));
@@ -248,6 +310,23 @@ export async function getAllRegions(): Promise<RegionConfig[]> {
   }
   
   return result;
+}
+
+// Authoritative server-side region detection from coordinates. Mirrors the
+// client ranges so the backend — not client input — decides which market's
+// fee/currency a ride settles under (prevents spoofing BD's 5% fee on non-BD rides).
+export function detectRegionFromCoordinates(lat: number, lng: number): string {
+  if (lat >= 22.5 && lat <= 26.5 && lng >= 88.0 && lng <= 92.5) return "BD";
+  if (lat >= 6.0 && lat <= 35.5 && lng >= 68.0 && lng <= 97.5) return "IN";
+  if (lat >= 23.5 && lat <= 37.0 && lng >= 60.5 && lng <= 77.5) return "PK";
+  if (lat >= 22.0 && lat <= 26.5 && lng >= 51.0 && lng <= 56.5) return "AE";
+  if (lat >= 5.5 && lat <= 21.0 && lng >= 97.0 && lng <= 106.0) return "TH";
+  if (lat >= 4.5 && lat <= 20.5 && lng >= 95.0 && lng <= 141.5) return "ID";
+  if (lat >= 8.0 && lat <= 22.0 && lng >= 102.0 && lng <= 110.0) return "VN";
+  if (lat >= 4.5 && lat <= 21.0 && lng >= 116.5 && lng <= 127.0) return "PH";
+  if (lat >= 4.0 && lat <= 14.5 && lng >= 2.5 && lng <= 15.0) return "NG";
+  if (lat >= -4.5 && lat <= 5.5 && lng >= 33.5 && lng <= 42.0) return "KE";
+  return "AE";
 }
 
 export async function detectRegionFromPhone(phone: string): Promise<string> {

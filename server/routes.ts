@@ -835,7 +835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Validate and normalize serviceTypeId
       if (req.body.serviceTypeId) {
         const validServiceTypes = ["st-economy", "st-comfort", "st-premium", "st-xl"];
-        const regionalVehicleTypes = ["cng", "rickshaw", "tuktuk", "moto", "economy", "comfort", "premium", "xl", "minibus"];
+        const regionalVehicleTypes = ["cng", "rickshaw", "tuktuk", "moto", "economy", "comfort", "premium", "xl", "minibus", "safe_driver"];
         const serviceTypeMap: Record<string, string> = {
           "economy": "st-economy",
           "comfort": "st-comfort", 
@@ -845,7 +845,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           "rickshaw": "st-economy",
           "tuktuk": "st-economy",
           "moto": "st-economy",
-          "minibus": "st-xl"
+          "minibus": "st-xl",
+          // Safe Driver (driver drives the rider's own car) settles under the
+          // economy service-type FK; the ride itself carries isSafeDriver.
+          "safe_driver": "st-economy"
         };
         
         // If it's already a valid st- format, use it directly
@@ -886,6 +889,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Persist the server-derived region + its currency, overriding client input.
       req.body.regionCode = createRegionCode;
       req.body.currency = createRegion?.currency || req.body.currency || "AED";
+
+      // Safe Driver (Gulf): a vetted driver drives the RIDER'S OWN car. This is
+      // strictly region-gated — the SERVER-derived region config must actually
+      // offer an active safe_driver type, so a client can't request it in a
+      // market where it's switched off. The flag is derived from the rider's
+      // service-type choice, never trusted from the request body.
+      const isSafeDriverRide = originalServiceType === "safe_driver";
+      if (isSafeDriverRide) {
+        const sdAvailable = createRegion?.vehicleTypes?.some((v: any) => v.type === "safe_driver");
+        if (!sdAvailable) {
+          return res.status(400).json({
+            code: "SAFE_DRIVER_NOT_AVAILABLE",
+            message: "Safe Driver is not available in your area yet.",
+          });
+        }
+      }
+      req.body.isSafeDriver = isSafeDriverRide;
 
       // Shared / pooled three-wheeler handling (fare split). Backend-authoritative:
       // only enable for a genuine three-wheeler in a region whose vehicle type
@@ -1033,6 +1053,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // isEvRide captures rider intent (demand signal) — true whenever rider requested EV.
         // Actual EV fulfillment is tracked via matchType: "ev_preferred" on intentData.
         isEvRide: evPreferred,
+        isSafeDriver: isSafeDriverRide,
         ...intentData,
       });
 
@@ -1214,6 +1235,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (driver.status !== "approved") {
         return res.status(403).json({ message: "Your driver account is not approved yet." });
       }
+      // Pooled trips always run in the DRIVER'S vehicle — carless drivers
+      // (Safe Driver only) must not claim a pool, even by calling this
+      // endpoint directly (the pending list already hides pools from them).
+      const groupAcceptVehicles = await storage.getDriverVehicles(driver.id);
+      if (!groupAcceptVehicles.some((v: any) => v.isActive)) {
+        return res.status(403).json({
+          code: "VEHICLE_REQUIRED",
+          message: "You need a registered vehicle to accept shared rides.",
+        });
+      }
       const result = await acceptGroup(req.params.groupId, driver.id);
       if (!result.ok) {
         return res.status(409).json({ code: result.code, message: result.message });
@@ -1281,6 +1312,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           for (const f of ["regionCode", "currency", "platformFee", "driverEarnings", "estimatedFare", "actualFare", "paymentMethod"]) {
             delete allowedUpdates[f];
           }
+          // Server-derived trust flags: isSafeDriver is derived from the
+          // service type at creation and isShared from the pooling flow. A
+          // driver must never be able to flip them via a status update.
+          delete allowedUpdates.isSafeDriver;
+          delete allowedUpdates.isShared;
         }
         
         // Convert date strings to Date objects for Drizzle timestamp columns
@@ -1294,9 +1330,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
           allowedUpdates.startedAt = new Date(allowedUpdates.startedAt);
         }
         
+        // Safe Driver rides use the RIDER'S OWN car — never attach a driver
+        // vehicle to the ride (keeps payout on the driver wallet and prevents
+        // the driver's own vehicle showing on receipts for this service).
+        if (existingRide.isSafeDriver) {
+          delete allowedUpdates.vehicleId;
+        }
+
         // If driver is accepting a pending ride, atomically claim it so two
         // drivers can't accept the same request (broadcast model race guard).
         if (driverRecord && existingRide.status === "pending" && req.body.status === "accepted") {
+          // Carless drivers may ONLY take Safe Driver jobs (they drive the
+          // rider's car). Standard rides still require an active registered
+          // vehicle — this keeps driver-labour decoupling gated strictly to
+          // the Safe Driver service type.
+          if (!existingRide.isSafeDriver) {
+            const acceptVehicles = await storage.getDriverVehicles(driverRecord.id);
+            const hasActiveVehicle = acceptVehicles.some((v: any) => v.isActive);
+            if (!hasActiveVehicle) {
+              return res.status(403).json({
+                code: "VEHICLE_REQUIRED",
+                message: "You need a registered vehicle to accept standard rides. You can still accept Safe Driver jobs.",
+              });
+            }
+          }
           const claimed = await storage.claimPendingRide(existingRide.id, driverRecord.id);
           if (!claimed) {
             return res.status(409).json({ message: "This ride was just accepted by another driver." });
@@ -1833,9 +1890,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lng: dropoffLng,
           address: ride.dropoffAddress,
         },
+        isSafeDriver: !!(ride as any).isSafeDriver,
         driver: await (async () => {
           if (!driver) return null;
           const driverUser = await storage.getUser(driver.userId);
+          // Safe Driver rides use the RIDER'S OWN car — never surface the
+          // driver's personal vehicle details to the rider for this service.
+          if ((ride as any).isSafeDriver) {
+            return {
+              id: driver.id,
+              name: driverUser?.name || "Driver",
+              phone: driverUser?.phone || null,
+              rating: driver.rating || "4.9",
+              vehicleType: "safe_driver",
+              licensePlate: "",
+              vehicleMake: "",
+              vehicleModel: "",
+              vehicleColor: "",
+              vehicleVerified: false,
+              isElectric: false,
+            };
+          }
           const vehicles = await storage.getDriverVehicles(driver.id);
           const vehicle = vehicles[0];
           return {
@@ -2719,7 +2794,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // entry rather than separate cards. Still-forming pools (no co-rider yet)
       // are held back from the pool entirely.
       const { soloRides, sharedCards } = await buildSharedGroupCards(allRides);
-      const driverRides = soloRides;
+
+      // Carless drivers (no active registered vehicle) only see Safe Driver
+      // jobs — they drive the rider's own car. Drivers WITH a vehicle see
+      // everything, including Safe Driver jobs.
+      const pendingVehicles = await storage.getDriverVehicles(driver.id);
+      const driverHasActiveVehicle = pendingVehicles.some((v: any) => v.isActive);
+      const driverRides = driverHasActiveVehicle
+        ? soloRides
+        : soloRides.filter((r: any) => r.isSafeDriver);
       
       console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length} solo + ${sharedCards.length} shared`);
       
@@ -2815,6 +2898,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           pickupLng: ride.pickupLng,
           dropoffLat: ride.dropoffLat,
           dropoffLng: ride.dropoffLng,
+          // Safe Driver job: the driver goes to the rider and drives the
+          // RIDER'S OWN car to the destination (no driver vehicle needed).
+          isSafeDriver: !!(ride as any).isSafeDriver,
           // PMGTH premium info - driver earns this extra for direction-compatible rides
           isPmgthRide: !!pmgthInfo,
           pmgthPremiumAmount: pmgthInfo?.premiumAmount || 0,
@@ -2825,8 +2911,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Append shared/pooled trips as combined cards. Skipped while the driver is
       // in a Going Home (PMGTH) session, which targets single direction-matched
-      // solo rides rather than multi-stop pools.
-      const sharedEnriched = pmgthSession
+      // solo rides rather than multi-stop pools. Carless drivers can't take
+      // pooled trips either — those need the driver's own vehicle.
+      const sharedEnriched = pmgthSession || !driverHasActiveVehicle
         ? []
         : await Promise.all(
             sharedCards.map(async (card) => {

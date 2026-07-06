@@ -8,7 +8,7 @@ export const rideStatusEnum = pgEnum("ride_status", ["pending", "accepted", "arr
 export const riderPriorityEnum = pgEnum("rider_priority", ["fastest", "cheapest", "reliable"]);
 export const paymentMethodEnum = pgEnum("payment_method", ["card", "cash", "wallet", "usdt"]);
 export const driverStatusEnum = pgEnum("driver_status", ["pending", "approved", "rejected", "suspended"]);
-export const vehicleTypeEnum = pgEnum("vehicle_type", ["economy", "comfort", "premium", "xl", "moto", "rickshaw", "tuktuk", "minibus", "cng", "auto_rickshaw", "motorcycle", "suv", "minivan"]);
+export const vehicleTypeEnum = pgEnum("vehicle_type", ["economy", "comfort", "premium", "xl", "moto", "rickshaw", "tuktuk", "minibus", "cng", "auto_rickshaw", "motorcycle", "suv", "minivan", "safe_driver"]);
 export const transactionTypeEnum = pgEnum("transaction_type", [
   "ride_payment",
   "wallet_topup",
@@ -189,6 +189,9 @@ export const rides = pgTable("rides", {
   regionCode: text("region_code").default("AE"),
   currency: currencyEnum("currency").default("AED"),
   isEvRide: boolean("is_ev_ride").default(false),
+  // Safe Driver (Gulf): a vetted driver drives the RIDER'S OWN car. No driver
+  // vehicle is attached to the ride; payout falls back to the driver wallet.
+  isSafeDriver: boolean("is_safe_driver").default(false),
   isPmgthRide: boolean("is_pmgth_ride").default(false),
   pmgthPremiumAmount: decimal("pmgth_premium_amount", { precision: 10, scale: 2 }),
   pmgthPremiumPercent: decimal("pmgth_premium_percent", { precision: 5, scale: 2 }),
@@ -204,6 +207,14 @@ export const rides = pgTable("rides", {
   isRematchInProgress: boolean("is_rematch_in_progress").default(false),
   isGhostRide: boolean("is_ghost_ride").default(false),
   ghostRideLocalId: text("ghost_ride_local_id"),
+  // Shared/pooled three-wheeler rides (fare split). isShared flags a poolable
+  // tuktuk request; poolGroupId links riders sharing one vehicle. soloFare is the
+  // full private fare (used for savings display + no-match fallback), and
+  // sharedDiscountPercent is the per-rider discount locked when a driver accepts.
+  isShared: boolean("is_shared").default(false),
+  poolGroupId: varchar("pool_group_id"),
+  soloFare: decimal("solo_fare", { precision: 10, scale: 2 }),
+  sharedDiscountPercent: decimal("shared_discount_percent", { precision: 5, scale: 2 }).default("0.00"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1313,6 +1324,38 @@ export const carpoolSuggestions = pgTable("carpool_suggestions", {
   expiresAt: timestamp("expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// A pool of riders sharing one three-wheeler (fare split). Each member keeps
+// their own rides row (poolGroupId points here); the group is the unit a driver
+// accepts. seatsFilled tracks current riders, maxSeats is the vehicle limit.
+// Status: forming (waiting for co-riders) -> ready (>=2 riders, broadcast to
+// drivers) -> accepted -> started -> completed | cancelled. The anchor* columns
+// hold the first rider's route, used for same-direction matching.
+export const sharedRideGroups = pgTable("shared_ride_groups", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  regionCode: text("region_code").notNull(),
+  currency: text("currency").default("AED").notNull(),
+  serviceTypeId: varchar("service_type_id"),
+  vehicleType: text("vehicle_type").notNull(),
+  driverId: varchar("driver_id").references(() => drivers.id),
+  vehicleId: varchar("vehicle_id").references(() => vehicles.id),
+  maxSeats: integer("max_seats").default(3).notNull(),
+  seatsFilled: integer("seats_filled").default(1).notNull(),
+  status: text("status").default("forming").notNull(),
+  anchorPickupLat: decimal("anchor_pickup_lat", { precision: 10, scale: 8 }).notNull(),
+  anchorPickupLng: decimal("anchor_pickup_lng", { precision: 11, scale: 8 }).notNull(),
+  anchorDropoffLat: decimal("anchor_dropoff_lat", { precision: 10, scale: 8 }).notNull(),
+  anchorDropoffLng: decimal("anchor_dropoff_lng", { precision: 11, scale: 8 }).notNull(),
+  routeBearing: decimal("route_bearing", { precision: 6, scale: 2 }),
+  combinedFare: decimal("combined_fare", { precision: 10, scale: 2 }).default("0.00"),
+  matchWindowExpiresAt: timestamp("match_window_expires_at"),
+  acceptedAt: timestamp("accepted_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type SharedRideGroup = typeof sharedRideGroups.$inferSelect;
+export type InsertSharedRideGroup = typeof sharedRideGroups.$inferInsert;
 
 export const rideEventTypeEnum = pgEnum("ride_event_type", [
   "requested", "matched", "accepted", "driver_arriving", "driver_arrived", 

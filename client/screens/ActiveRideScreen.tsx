@@ -450,7 +450,14 @@ export default function ActiveRideScreen() {
                 </View>
               ) : null}
             </View>
-            {(telemetry.driver.vehicleMake || telemetry.driver.vehicleColor) ? (
+            {(telemetry as any)?.isSafeDriver ? (
+              <View style={styles.vehicleDetails}>
+                <Ionicons name="shield-checkmark-outline" size={14} color={theme.primary} />
+                <ThemedText style={[styles.vehicleText, { color: theme.primary }]}>
+                  Safe Driver — driving your car
+                </ThemedText>
+              </View>
+            ) : (telemetry.driver.vehicleMake || telemetry.driver.vehicleColor) ? (
               <View style={styles.vehicleDetails}>
                 <Ionicons name="car-outline" size={14} color={theme.textSecondary} />
                 <ThemedText style={[styles.vehicleText, { color: theme.textSecondary }]}>

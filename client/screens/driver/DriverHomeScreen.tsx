@@ -54,6 +54,7 @@ interface RideRequest {
   pmgthPremiumPercent?: number;
   pmgthDirectionScore?: number;
   isEvRide?: boolean;
+  isSafeDriver?: boolean;
   isShared?: boolean;
   poolGroupId?: string;
   riderCount?: number;
@@ -764,6 +765,31 @@ export default function DriverHomeScreen() {
     if (!incomingRequest) return;
     const req = incomingRequest;
 
+    // Safe Driver job: the driver will operate the RIDER'S car, so make the
+    // conditions explicit before the accept goes through.
+    if (req.isSafeDriver) {
+      const ackTitle = "Safe Driver Job";
+      const ackMessage =
+        "You'll drive the RIDER'S car with the rider on board.\n\n" +
+        "By accepting you confirm:\n" +
+        "• You hold a valid UAE driving licence\n" +
+        "• You'll inspect the car with the rider before starting\n" +
+        "• You'll drive carefully and follow all traffic rules";
+      const confirmed = await new Promise<boolean>((resolve) => {
+        if (Platform.OS === "web") {
+          resolve(window.confirm(`${ackTitle}\n\n${ackMessage}`));
+        } else {
+          Alert.alert(ackTitle, ackMessage, [
+            { text: "Cancel", style: "cancel", onPress: () => resolve(false) },
+            { text: "I Agree — Accept", onPress: () => resolve(true) },
+          ]);
+        }
+      });
+      if (!confirmed) return;
+      await acceptRideNow(req.id);
+      return;
+    }
+
     // Soft low-battery awareness for EV drivers. Never blocks the accept.
     if (req.pickupLat && req.pickupLng && req.dropoffLat && req.dropoffLng) {
       try {
@@ -995,6 +1021,14 @@ export default function DriverHomeScreen() {
                   <View style={[styles.evBadge, { backgroundColor: "#2196F320" }]}>
                     <Ionicons name="flash" size={12} color="#2196F3" />
                     <ThemedText style={[styles.evBadgeText, { color: "#2196F3" }]}>EV Requested</ThemedText>
+                  </View>
+                ) : null}
+                {incomingRequest.isSafeDriver ? (
+                  <View style={[styles.evBadge, { backgroundColor: "#7C3AED20" }]}>
+                    <Ionicons name="shield-checkmark" size={12} color="#7C3AED" />
+                    <ThemedText style={[styles.evBadgeText, { color: "#7C3AED" }]}>
+                      Safe Driver · You drive THEIR car
+                    </ThemedText>
                   </View>
                 ) : null}
                 {incomingRequest.isShared ? (

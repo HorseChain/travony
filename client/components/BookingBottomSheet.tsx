@@ -89,6 +89,7 @@ const vehicleIconMap: Record<string, string> = {
   premium: "diamond-outline",
   xl: "people-outline",
   minibus: "bus-outline",
+  safe_driver: "shield-checkmark-outline",
 };
 
 const POPULAR_LOCATIONS_BY_REGION: Record<string, typeof POPULAR_LOCATIONS_UAE> = {};
@@ -316,6 +317,12 @@ const paymentMethods = [
 
 type TabType = "location" | "rides" | "confirm";
 
+// Shared / pooled three-wheeler rides (fare split). Only these vehicle types can
+// be shared, and only the 2-rider discount is shown upfront (a 3rd joiner just
+// makes it cheaper). The backend is authoritative on the actual discount.
+const THREE_WHEELER_TYPES = ["cng", "rickshaw", "tuktuk", "moto"];
+const SHARE_PREVIEW_DISCOUNT = 0.3;
+
 export default function BookingBottomSheet({
   currentLocation,
   onLocationChange,
@@ -349,6 +356,7 @@ export default function BookingBottomSheet({
   const [selectedPriority, setSelectedPriority] = useState<"fastest" | "cheapest" | "reliable">("reliable");
   const [detectedRegion, setDetectedRegion] = useState<string>("AE");
   const [evModeSelected, setEvModeSelected] = useState(false);
+  const [shareSelected, setShareSelected] = useState(false);
 
   const tabProgress = useRef(new RNAnimated.Value(0)).current;
 
@@ -359,10 +367,15 @@ export default function BookingBottomSheet({
     }
   }, [currentLocation]);
 
-  const { data: regionConfig } = useQuery<{ vehicleTypes?: any[] }>({
+  const { data: regionConfig } = useQuery<{ vehicleTypes?: any[]; currency?: string; surgeCap?: number; platformFeePercent?: number }>({
     queryKey: ["/api/regions", detectedRegion],
     enabled: !!detectedRegion,
   });
+
+  const currencyCode = regionConfig?.currency || "AED";
+  const platformFeePct = regionConfig?.platformFeePercent ?? 10;
+  const ownerPct = 100 - platformFeePct;
+  const fmtPct = (n: number) => (n % 1 === 0 ? n.toFixed(0) : n.toFixed(1));
 
   const { data: walletData } = useQuery<{ balance: string }>({
     queryKey: [`/api/wallet/balance/${user?.id}`],
@@ -452,11 +465,11 @@ export default function BookingBottomSheet({
   const estimatedDuration = Math.round(distance * 3);
 
   const { data: aiPricing, isLoading: pricingLoading } = useQuery({
-    queryKey: ["/api/ai/price", pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, selectedVehicle.type, distance],
+    queryKey: ["/api/ai/price", pickupLocation?.lat, pickupLocation?.lng, dropoffLocation?.lat, dropoffLocation?.lng, selectedVehicle.type, distance, detectedRegion],
     queryFn: async () => {
       if (!pickupLocation || !dropoffLocation) return null;
       const response = await apiRequest(
-        `/api/ai/price?pickupLat=${pickupLocation.lat}&pickupLng=${pickupLocation.lng}&dropoffLat=${dropoffLocation.lat}&dropoffLng=${dropoffLocation.lng}&vehicleType=${selectedVehicle.type}&distance=${distance}&duration=${estimatedDuration}`,
+        `/api/ai/price?pickupLat=${pickupLocation.lat}&pickupLng=${pickupLocation.lng}&dropoffLat=${dropoffLocation.lat}&dropoffLng=${dropoffLocation.lng}&vehicleType=${selectedVehicle.type}&distance=${distance}&duration=${estimatedDuration}&regionCode=${detectedRegion}`,
         { method: "GET" }
       );
       return response;
@@ -474,8 +487,26 @@ export default function BookingBottomSheet({
     return fare.toFixed(2);
   };
 
-  const platformFee = aiPricing ? aiPricing.platformFee : parseFloat(calculateFare(selectedVehicle)) * 0.1;
-  const driverEarnings = aiPricing ? aiPricing.driverEarnings : parseFloat(calculateFare(selectedVehicle)) * 0.9;
+  const platformFee = aiPricing ? aiPricing.platformFee : parseFloat(calculateFare(selectedVehicle)) * (platformFeePct / 100);
+  const driverEarnings = aiPricing ? aiPricing.driverEarnings : parseFloat(calculateFare(selectedVehicle)) * (ownerPct / 100);
+
+  // Sharing is only offered for genuine three-wheelers in a region that seats >= 2.
+  const shareEligible = useMemo(() => {
+    if (!THREE_WHEELER_TYPES.includes(selectedVehicle.type)) return false;
+    const vt = (regionConfig?.vehicleTypes || []).find((v: any) => v.type === selectedVehicle.type);
+    return (vt?.maxPassengers ?? 0) >= 2;
+  }, [selectedVehicle, regionConfig]);
+
+  useEffect(() => {
+    if (!shareEligible && shareSelected) setShareSelected(false);
+  }, [shareEligible]);
+
+  const soloFareValue = parseFloat(calculateFare(selectedVehicle));
+  const shareActive = shareSelected && shareEligible;
+  const effectiveFareValue = shareActive
+    ? Math.round(soloFareValue * (1 - SHARE_PREVIEW_DISCOUNT) * 100) / 100
+    : soloFareValue;
+  const shareSavings = Math.round((soloFareValue - effectiveFareValue) * 100) / 100;
 
   const bookRideMutation = useMutation({
     mutationFn: async () => {
@@ -493,7 +524,7 @@ export default function BookingBottomSheet({
           dropoffLat: dropoffLocation.lat.toString(),
           dropoffLng: dropoffLocation.lng.toString(),
           serviceTypeId: selectedVehicle.type,
-          estimatedFare: calculateFare(selectedVehicle),
+          estimatedFare: effectiveFareValue.toFixed(2),
           distance: Number(distance.toFixed(2)),
           duration: estimatedDuration,
           paymentMethod: selectedPayment.id,
@@ -503,6 +534,12 @@ export default function BookingBottomSheet({
           priceBreakdown: JSON.stringify(aiPricing || {}),
           priority: selectedPriority,
           isEvRide: evModeSelected,
+          // Shared/pooled ride: backend derives the authoritative discount from
+          // soloFare and only enables sharing for eligible three-wheelers.
+          isShared: shareActive,
+          soloFare: soloFareValue.toFixed(2),
+          regionCode: detectedRegion,
+          currency: currencyCode,
         }),
         headers: { "Content-Type": "application/json" },
       });
@@ -514,7 +551,7 @@ export default function BookingBottomSheet({
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               amount: parseFloat(calculateFare(selectedVehicle)),
-              currency: "AED",
+              currency: currencyCode,
             }),
           });
           
@@ -570,15 +607,15 @@ export default function BookingBottomSheet({
       return;
     }
     
-    // Calculate the fare for validation
-    const fareAmount = parseFloat(calculateFare(selectedVehicle));
+    // Calculate the fare for validation (discounted share price when sharing)
+    const fareAmount = effectiveFareValue;
     
     // PAYMENT VALIDATION - Require valid payment before booking
     if (selectedPayment.id === "wallet") {
       if (walletBalance < fareAmount) {
         showError(
           "Insufficient Balance",
-          `Your wallet balance (AED ${walletBalance.toFixed(2)}) is less than the fare (AED ${fareAmount.toFixed(2)}). Please top up your wallet first.`
+          `Your wallet balance (${currencyCode} ${walletBalance.toFixed(2)}) is less than the fare (${currencyCode} ${fareAmount.toFixed(2)}). Please top up your wallet first.`
         );
         return;
       }
@@ -592,6 +629,30 @@ export default function BookingBottomSheet({
     }
     
     console.log("Booking ride with payment:", selectedPayment.id, "fare:", fareAmount);
+
+    // Safe Driver: the driver operates the RIDER'S OWN car, so the rider must
+    // acknowledge the vehicle/insurance conditions before the request is sent.
+    if (selectedVehicle.type === "safe_driver") {
+      const ackTitle = "Safe Driver — Your Car";
+      const ackMessage =
+        "A vetted Travony driver will drive YOUR car with you in it.\n\n" +
+        "By booking you confirm:\n" +
+        "• The car is registered and insured in your name (or you're authorized to use it)\n" +
+        "• The car is roadworthy with enough fuel/charge\n" +
+        "• You'll stay in the car for the whole trip";
+      if (Platform.OS === "web") {
+        if (window.confirm(`${ackTitle}\n\n${ackMessage}`)) {
+          bookRideMutation.mutate();
+        }
+      } else {
+        Alert.alert(ackTitle, ackMessage, [
+          { text: "Cancel", style: "cancel" },
+          { text: "I Agree — Book", onPress: () => bookRideMutation.mutate() },
+        ]);
+      }
+      return;
+    }
+
     bookRideMutation.mutate();
   };
 
@@ -867,17 +928,26 @@ export default function BookingBottomSheet({
             <ThemedText style={styles.vehicleName}>{vehicle.name}</ThemedText>
             <ThemedText style={[styles.vehicleEta, { color: theme.textMuted }]}>{vehicle.eta}</ThemedText>
             <ThemedText style={[styles.vehiclePrice, { color: theme.primary }]}>
-              AED {calculateFare(vehicle)}
+              {currencyCode} {calculateFare(vehicle)}
             </ThemedText>
           </Pressable>
         ))}
       </ScrollView>
 
+      {selectedVehicle.type === "safe_driver" ? (
+        <View style={[styles.surgeBanner, { backgroundColor: theme.primary + "12" }]}>
+          <Ionicons name="shield-checkmark-outline" size={14} color={theme.primary} />
+          <ThemedText style={[styles.surgeText, { color: theme.primary }]}>
+            A vetted driver comes to you and drives YOUR car to the destination
+          </ThemedText>
+        </View>
+      ) : null}
+
       {aiPricing?.surgeMultiplier > 1 ? (
         <View style={[styles.surgeBanner, { backgroundColor: theme.warning + "20" }]}>
           <Ionicons name="trending-up-outline" size={14} color={theme.warning} />
           <ThemedText style={[styles.surgeText, { color: theme.warning }]}>
-            {aiPricing.surgeMultiplier.toFixed(1)}x demand pricing (max 1.5x)
+            {aiPricing.surgeMultiplier.toFixed(1)}x demand pricing (max {(aiPricing?.maxSurgeCap ?? regionConfig?.surgeCap ?? 1.5).toFixed(1)}x)
           </ThemedText>
         </View>
       ) : null}
@@ -916,9 +986,16 @@ export default function BookingBottomSheet({
               {selectedVehicle.name}
             </ThemedText>
           </View>
-          <ThemedText style={[styles.fareTotal, { color: theme.primary }]}>
-            AED {(Number(calculateFare(selectedVehicle)) + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
-          </ThemedText>
+          <View style={{ alignItems: "flex-end" }}>
+            {shareActive ? (
+              <ThemedText style={{ fontSize: 13, color: theme.textMuted, textDecorationLine: "line-through" }}>
+                {currencyCode} {(soloFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
+              </ThemedText>
+            ) : null}
+            <ThemedText style={[styles.fareTotal, { color: theme.primary }]}>
+              {currencyCode} {(effectiveFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
+            </ThemedText>
+          </View>
         </View>
 
         {selectedPmgthDriver ? (
@@ -954,25 +1031,57 @@ export default function BookingBottomSheet({
           </View>
         </Pressable>
 
+        {shareEligible ? (
+          <Pressable
+            onPress={() => {
+              setShareSelected((v) => !v);
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            style={[
+              styles.evToggleRow,
+              {
+                backgroundColor: shareActive ? theme.primary + "15" : theme.backgroundElevated,
+                borderColor: shareActive ? theme.primary : theme.border,
+                marginTop: Spacing.sm,
+              },
+            ]}
+          >
+            <Ionicons name={"people-outline" as keyof typeof Ionicons.glyphMap} size={18} color={shareActive ? theme.primary : theme.textMuted} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 13, fontWeight: "600", color: shareActive ? theme.primary : theme.text }}>
+                Share & save
+              </ThemedText>
+              <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+                {shareActive
+                  ? `Sharing with a co-rider going your way — you save ${currencyCode} ${shareSavings.toFixed(2)}`
+                  : "Ride with someone going your way and pay less"}
+              </ThemedText>
+            </View>
+            <View style={[styles.evToggleCheck, { backgroundColor: shareActive ? theme.primary : theme.border }]}>
+              {shareActive ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+            </View>
+          </Pressable>
+        ) : null}
+
         <View style={[styles.fareDivider, { backgroundColor: theme.border }]} />
 
         <View style={styles.fareBreakdown}>
           <View style={styles.fareRow}>
             <ThemedText style={[styles.fareLabel, { color: theme.textSecondary }]}>Base fare</ThemedText>
-            <ThemedText style={styles.fareValue}>AED {aiPricing?.baseFare?.toFixed(2) || selectedVehicle.baseFare.toFixed(2)}</ThemedText>
+            <ThemedText style={styles.fareValue}>{currencyCode} {aiPricing?.baseFare?.toFixed(2) || selectedVehicle.baseFare.toFixed(2)}</ThemedText>
           </View>
           <View style={styles.fareRow}>
             <ThemedText style={[styles.fareLabel, { color: theme.textSecondary }]}>Distance ({distance.toFixed(1)} km)</ThemedText>
-            <ThemedText style={styles.fareValue}>AED {aiPricing?.distanceCharge?.toFixed(2) || (distance * selectedVehicle.perKmRate).toFixed(2)}</ThemedText>
+            <ThemedText style={styles.fareValue}>{currencyCode} {aiPricing?.distanceCharge?.toFixed(2) || (distance * selectedVehicle.perKmRate).toFixed(2)}</ThemedText>
           </View>
           <View style={styles.fareRow}>
             <ThemedText style={[styles.fareLabel, { color: theme.textSecondary }]}>Time (~{estimatedDuration} min)</ThemedText>
-            <ThemedText style={styles.fareValue}>AED {aiPricing?.timeCharge?.toFixed(2) || (estimatedDuration * selectedVehicle.perMinuteRate).toFixed(2)}</ThemedText>
+            <ThemedText style={styles.fareValue}>{currencyCode} {aiPricing?.timeCharge?.toFixed(2) || (estimatedDuration * selectedVehicle.perMinuteRate).toFixed(2)}</ThemedText>
           </View>
           {selectedPmgthDriver ? (
             <View style={styles.fareRow}>
               <ThemedText style={[styles.fareLabel, { color: Colors.travonyGreen }]}>Faster Pickup</ThemedText>
-              <ThemedText style={[styles.fareValue, { color: Colors.travonyGreen }]}>AED {selectedPmgthDriver.premiumAmount.toFixed(2)}</ThemedText>
+              <ThemedText style={[styles.fareValue, { color: Colors.travonyGreen }]}>{currencyCode} {selectedPmgthDriver.premiumAmount.toFixed(2)}</ThemedText>
             </View>
           ) : null}
         </View>
@@ -980,13 +1089,13 @@ export default function BookingBottomSheet({
         <View style={[styles.transparencyRow, { backgroundColor: theme.primary + "08" }]}>
           <View style={styles.transparencyItem}>
             <Ionicons name="shield-checkmark-outline" size={14} color={theme.primary} />
-            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Platform (10%)</ThemedText>
-            <ThemedText style={styles.transparencyValue}>AED {Number(platformFee).toFixed(2)}</ThemedText>
+            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Platform ({fmtPct(platformFeePct)}%)</ThemedText>
+            <ThemedText style={styles.transparencyValue}>{currencyCode} {Number(platformFee).toFixed(2)}</ThemedText>
           </View>
           <View style={styles.transparencyItem}>
             <Ionicons name="person-outline" size={14} color={theme.success} />
-            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Vehicle Owner (90%)</ThemedText>
-            <ThemedText style={[styles.transparencyValue, { color: theme.success }]}>AED {Number(driverEarnings).toFixed(2)}</ThemedText>
+            <ThemedText style={[styles.transparencyLabel, { color: theme.textMuted }]}>Vehicle Owner ({fmtPct(ownerPct)}%)</ThemedText>
+            <ThemedText style={[styles.transparencyValue, { color: theme.success }]}>{currencyCode} {Number(driverEarnings).toFixed(2)}</ThemedText>
           </View>
         </View>
       </View>
@@ -1035,7 +1144,7 @@ export default function BookingBottomSheet({
       <View style={[styles.fareLockRow, { borderColor: theme.primary + "30" }]}>
         <Ionicons name="shield-checkmark-outline" size={14} color={theme.primary} />
         <ThemedText style={[styles.fareLockText, { color: theme.textSecondary }]}>
-          Fare locked at AED {(Number(calculateFare(selectedVehicle)) + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)} — verified on Travony's network
+          Fare locked at {currencyCode} {(effectiveFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)} — verified on Travony's network
         </ThemedText>
       </View>
 
@@ -1043,7 +1152,7 @@ export default function BookingBottomSheet({
       <View style={styles.paymentRow}>
         {paymentMethods.map((method) => {
           const isWallet = method.id === "wallet";
-          const fareAmount = parseFloat(calculateFare(selectedVehicle));
+          const fareAmount = effectiveFareValue;
           const walletInsufficient = isWallet && walletBalance < fareAmount;
           return (
             <Pressable
@@ -1068,7 +1177,7 @@ export default function BookingBottomSheet({
               {isWallet ? (
                 <View style={{ flex: 1, alignItems: "center" }}>
                   <ThemedText style={[styles.paymentText, { color: walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.text }]}>
-                    {walletInsufficient ? `Wallet · AED ${walletBalance.toFixed(2)} (top up needed)` : `Wallet · AED ${walletBalance.toFixed(2)}`}
+                    {walletInsufficient ? `Wallet · ${currencyCode} ${walletBalance.toFixed(2)} (top up needed)` : `Wallet · ${currencyCode} ${walletBalance.toFixed(2)}`}
                   </ThemedText>
                 </View>
               ) : (
@@ -1102,8 +1211,8 @@ export default function BookingBottomSheet({
             <ThemedText style={styles.bookButtonText}>Sign in to Book</ThemedText>
           ) : (
             <>
-              <ThemedText style={styles.bookButtonText}>Book {selectedVehicle.name}</ThemedText>
-              <ThemedText style={styles.bookButtonPrice}>AED {calculateFare(selectedVehicle)}</ThemedText>
+              <ThemedText style={styles.bookButtonText}>{shareActive ? `Share ${selectedVehicle.name}` : `Book ${selectedVehicle.name}`}</ThemedText>
+              <ThemedText style={styles.bookButtonPrice}>{currencyCode} {effectiveFareValue.toFixed(2)}</ThemedText>
             </>
           )}
         </Pressable>
