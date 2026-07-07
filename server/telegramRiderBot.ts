@@ -21,6 +21,7 @@ import {
   type CoffeeMenuItem,
 } from "./coffeeService";
 import { randomUUID } from "crypto";
+import { getRegionByCode, detectRegionFromCoordinates } from "./regionService";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -104,6 +105,12 @@ interface RiderSession {
   pendingHubId?: string;
   // Ride the rider asked to have emailed (awaiting an email address)
   receiptRideId?: string;
+  // Region detected from the pickup coordinates — drives currency labels, the
+  // vehicle line-up shown, and the platform fee %, so budget markets (e.g. BD)
+  // get their cheap fares in local currency rather than the AE/AED default.
+  regionCode?: string;
+  currency?: string;
+  feePercent?: number;
 }
 
 // In-memory per-chat state, backed by the telegram_booking_sessions table so
@@ -526,25 +533,52 @@ async function promptLink(
   );
 }
 
+// Maps a region's vehicle type to a valid backend service-type id. The bot
+// creates rides via storage.createRide directly (bypassing the HTTP route's
+// serviceTypeId normalization), so the id must already be a valid st-* value.
+const SERVICE_TYPE_BY_VEHICLE: Record<string, string> = {
+  economy: "st-economy", comfort: "st-comfort", premium: "st-premium", xl: "st-xl",
+  cng: "st-economy", rickshaw: "st-economy", tuktuk: "st-economy", moto: "st-economy", minibus: "st-xl",
+};
+function serviceTypeIdForVehicle(type: string): string {
+  return SERVICE_TYPE_BY_VEHICLE[type] || "st-economy";
+}
+
 async function computeEstimates(
   pickup: { lat: number; lng: number },
   destination: { lat: number; lng: number },
+  regionCode: string,
 ): Promise<{ id: string; type: string; label: string; fare: number }[]> {
+  const region = await getRegionByCode(regionCode).catch(() => null);
+  // Use the region's own vehicle line-up (e.g. Bangladesh's Easy Bike / CNG Auto)
+  // so budget markets see their cheap three-wheelers, not the default car tiers.
+  const lineup = region?.vehicleTypes?.length
+    ? region.vehicleTypes.map((v) => ({ id: serviceTypeIdForVehicle(v.type), type: v.type, label: v.localName }))
+    : CAR_TYPES;
   const estimates: { id: string; type: string; label: string; fare: number }[] = [];
-  for (const car of CAR_TYPES) {
+  for (const car of lineup) {
     try {
-      const pricing = await calculateOptimalPrice(pickup.lat, pickup.lng, destination.lat, destination.lng, car.type);
+      const pricing = await calculateOptimalPrice(pickup.lat, pickup.lng, destination.lat, destination.lng, car.type, regionCode);
       estimates.push({ id: car.id, type: car.type, label: car.label, fare: pricing.total });
     } catch (error) {
       console.error(`[TelegramRider] Price error for ${car.type}:`, error);
     }
   }
+  // Cheapest-first so low-income riders see the most affordable option at the top.
+  estimates.sort((a, b) => a.fare - b.fare);
   return estimates;
 }
 
 async function showCarTypes(chatId: number, session: RiderSession): Promise<void> {
   if (!session.pickup || !session.destination) return;
-  const estimates = await computeEstimates(session.pickup, session.destination);
+  // Derive the region from the pickup coords (server-authoritative) so currency,
+  // vehicle line-up and platform fee % all follow the rider's actual location.
+  const regionCode = detectRegionFromCoordinates(session.pickup.lat, session.pickup.lng);
+  const region = await getRegionByCode(regionCode).catch(() => null);
+  session.regionCode = regionCode;
+  session.currency = region?.currency || "AED";
+  session.feePercent = region ? region.platformFeePercent : 10;
+  const estimates = await computeEstimates(session.pickup, session.destination, regionCode);
   if (estimates.length === 0) {
     await sendTelegramMessage(chatId, "Sorry, we couldn't estimate a fare right now. Please try /book again.");
     session.step = undefined;
@@ -553,8 +587,9 @@ async function showCarTypes(chatId: number, session: RiderSession): Promise<void
   session.estimates = estimates;
   session.step = "awaiting_cartype";
 
+  const cur = session.currency || "AED";
   const buttons = estimates.map((e) => [
-    { text: `${e.label} — AED ${e.fare.toFixed(2)}`, callback_data: `r:car:${e.type}` },
+    { text: `${e.label} — ${cur} ${e.fare.toFixed(2)}`, callback_data: `r:car:${e.type}` },
   ]);
   buttons.push([
     { text: "Back", callback_data: "r:rebook:dest" },
@@ -575,7 +610,7 @@ async function showPaymentChoice(chatId: number, session: RiderSession): Promise
   const text = `<b>How would you like to pay?</b>
 
 Car: ${session.chosen.label}
-Estimated fare: <b>AED ${session.chosen.fare.toFixed(2)}</b>
+Estimated fare: <b>${session.currency || "AED"} ${session.chosen.fare.toFixed(2)}</b>
 
 <b>Cash</b> — pay your driver directly when you arrive.
 <b>Crypto (USDT)</b> — we'll send a secure pay link to settle in crypto from your wallet when the trip ends.`;
@@ -606,7 +641,7 @@ async function showConfirm(chatId: number, session: RiderSession): Promise<void>
 <b>To</b>  ${session.destination.address}
 
 Car: ${session.chosen.label}
-${distLine}Estimated fare: <b>AED ${session.chosen.fare.toFixed(2)}</b>
+${distLine}Estimated fare: <b>${session.currency || "AED"} ${session.chosen.fare.toFixed(2)}</b>
 ${payLine}
 
 Tap confirm and we'll find your driver.`;
@@ -659,7 +694,7 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
   }
 
   const fare = session.chosen.fare;
-  const fees = calculateFeeBreakdown(fare);
+  const fees = calculateFeeBreakdown(fare, session.feePercent ?? 10);
   const distanceKm = session.distanceKm ?? calculateDistanceKm(
     session.pickup.lat, session.pickup.lng, session.destination.lat, session.destination.lng,
   );
@@ -721,8 +756,8 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
       platformFee: fees.platformFee.toFixed(2),
       driverEarnings: fees.driverShare.toFixed(2),
       blockchainHash,
-      currency: "AED",
-      regionCode: "AE",
+      currency: session.currency || "AED",
+      regionCode: session.regionCode || "AE",
       riderPriority: "reliable",
       ...intentData,
     } as any);
@@ -762,12 +797,12 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
 
 From: ${session.pickup.address}
 To: ${session.destination.address}
-Fare: <b>AED ${fare.toFixed(2)}</b> (USDT)
+Fare: <b>${ride.currency || "AED"} ${fare.toFixed(2)}</b> (USDT)
 
 Tap below to pay securely. The moment your payment is confirmed, we'll find you a driver and message you right here.
 
 /cancelride to cancel`,
-      { reply_markup: { inline_keyboard: [[{ text: `Pay AED ${fare.toFixed(2)} with crypto`, url: payUrl }]] } } as any,
+      { reply_markup: { inline_keyboard: [[{ text: `Pay ${ride.currency || "AED"} ${fare.toFixed(2)} with crypto`, url: payUrl }]] } } as any,
     );
     return;
   }
@@ -1729,7 +1764,7 @@ async function handleRiderCommand(chatId: number, command: string, firstName: st
 Status: <b>${statusLabel}</b>
 From: ${ride.pickupAddress}
 To: ${ride.dropoffAddress}
-Fare: AED ${ride.estimatedFare || "0.00"} (cash)
+Fare: ${ride.currency || "AED"} ${ride.estimatedFare || "0.00"} (cash)
 Pickup code: <code>${ride.otp}</code>
 
 ${driverLine}
@@ -2371,15 +2406,20 @@ function publicBaseUrl(): string {
  * network minimum). The orderId is `ride_<rideId>_...` so the existing
  * /api/payments/nowpayments/ipn handler reconciles it on payment.
  */
-async function createRideCryptoInvoice(rideId: string, fareAed: number, currency: string): Promise<string | null> {
+async function createRideCryptoInvoice(rideId: string, fare: number, currency: string): Promise<string | null> {
   try {
     const minUsdt = await nowPaymentsService.getMinimumPaymentAmount("usdttrc20").catch(() => 1);
-    const estimatedUsdt = fareAed / 3.67;
-    if (estimatedUsdt < minUsdt) return null;
+    // Convert the local-currency fare to USDT via NOWPayments' own rates so the
+    // minimum-amount gate is correct in every region (AED, BDT, PKR, ...) rather
+    // than assuming an AED-pegged 3.67 divisor.
+    const estimatedUsdt = await nowPaymentsService
+      .getEstimatedCryptoAmount(fare, currency, "usdttrc20")
+      .catch(() => null);
+    if (estimatedUsdt !== null && estimatedUsdt < minUsdt) return null;
 
     const baseUrl = publicBaseUrl();
     const invoice = await nowPaymentsService.createInvoice({
-      price: fareAed,
+      price: fare,
       currency: currency.toLowerCase(),
       orderId: `ride_${rideId}_${Date.now()}`,
       description: `Travony ride payment ${rideId.slice(0, 8)}`,
@@ -2467,7 +2507,11 @@ export async function notifyRiderRideUpdate(rideId: string): Promise<void> {
         break;
       case "completed": {
         const total = parseFloat(ride.actualFare || ride.estimatedFare || "0");
-        const fees = calculateFeeBreakdown(total);
+        // Use the ride's own region (persisted at booking) so the receipt shows
+        // local currency and the correct platform fee % (e.g. BD = 5%, not 10%).
+        const cmplRegion = await getRegionByCode(ride.regionCode || "AE").catch(() => null);
+        const fees = calculateFeeBreakdown(total, cmplRegion ? cmplRegion.platformFeePercent : 10);
+        const cur = ride.currency || "AED";
         const receipt = ride.id.slice(0, 8).toUpperCase();
         const when = formatDateTime(ride.completedAt || new Date());
 
@@ -2512,16 +2556,16 @@ To: ${ride.dropoffAddress}
 ${distLine}${durLine}Date: ${when}
 ${driverBlock}
 <b>Payment</b>
-Total fare: <b>AED ${total.toFixed(2)}</b>
-Driver earnings (90%): AED ${fees.driverShare.toFixed(2)}
-Platform fee (10%): AED ${fees.platformFee.toFixed(2)}
+Total fare: <b>${cur} ${total.toFixed(2)}</b>
+Driver earnings (${fees.driverSharePercent}%): ${cur} ${fees.driverShare.toFixed(2)}
+Platform fee (${fees.platformFeePercent}%): ${cur} ${fees.platformFee.toFixed(2)}
 ${methodLine}
 
 We hope you enjoyed the ride. Type /book to ride again.`;
 
         const completedButtons: any[][] = [];
         if (cryptoPayUrl) {
-          completedButtons.push([{ text: `Pay AED ${total.toFixed(2)} with crypto`, url: cryptoPayUrl }]);
+          completedButtons.push([{ text: `Pay ${cur} ${total.toFixed(2)} with crypto`, url: cryptoPayUrl }]);
         }
         completedButtons.push([{ text: "Email me this receipt", callback_data: `r:rcpt:${ride.id}` }]);
 

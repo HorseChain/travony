@@ -240,14 +240,14 @@ export function createRideReceipt(record: RideBlockchainRecord): {
   return { hash, receipt, verificationUrl };
 }
 
-export function calculateFeeBreakdown(totalFare: number): {
+export function calculateFeeBreakdown(totalFare: number, feePercent: number = 10): {
   platformFee: number;
   driverShare: number;
   platformFeePercent: number;
   driverSharePercent: number;
 } {
-  const platformFeePercent = 10;
-  const driverSharePercent = 90;
+  const platformFeePercent = feePercent;
+  const driverSharePercent = 100 - feePercent;
   
   const platformFee = totalFare * (platformFeePercent / 100);
   const driverShare = totalFare * (driverSharePercent / 100);

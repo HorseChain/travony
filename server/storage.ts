@@ -8,7 +8,7 @@ import {
   type InsertUser, type Session, type DriverCryptoSettings, type RideInvoice
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, desc, sql, lt, inArray, isNull } from "drizzle-orm";
+import { eq, and, asc, desc, sql, lt, inArray, isNull } from "drizzle-orm";
 import type { VehicleMilestone, EarningPatterns } from "./carAgent";
 
 // Stable, human-readable public identity for a vehicle (e.g. "TRV-7Q2K9X").
@@ -693,6 +693,10 @@ export class DatabaseStorage implements IStorage {
 
   async getRidesByDriver(driverId: string): Promise<Ride[]> {
     return db.select().from(rides).where(eq(rides.driverId, driverId)).orderBy(desc(rides.createdAt));
+  }
+
+  async getRidesByPoolGroup(groupId: string): Promise<Ride[]> {
+    return db.select().from(rides).where(eq(rides.poolGroupId, groupId)).orderBy(asc(rides.acceptedAt), asc(rides.createdAt));
   }
 
   async createRide(data: Partial<Ride>): Promise<Ride> {

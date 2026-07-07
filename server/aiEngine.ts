@@ -1,4 +1,5 @@
 import { storage } from "./storage";
+import { getRegionByCode } from "./regionService";
 
 interface DriverScore {
   driverId: string;
@@ -35,6 +36,8 @@ interface PriceBreakdown {
   driverEarnings: number;
   savings: number;
   priceExplanation: string[];
+  currency: string;
+  surgeCap: number;
 }
 
 interface DemandData {
@@ -209,21 +212,43 @@ export async function calculateOptimalPrice(
   pickupLng: number,
   dropoffLat: number,
   dropoffLng: number,
-  vehicleType: string = "economy"
+  vehicleType: string = "economy",
+  regionCode: string = "AE"
 ): Promise<PriceBreakdown> {
   const distance = calculateDistance(pickupLat, pickupLng, dropoffLat, dropoffLng);
   const estimatedMinutes = Math.round(distance * 3 + 5);
 
-  const serviceTypes = await storage.getServiceTypes();
-  const service = serviceTypes.find(s => s.type === vehicleType) || {
-    baseFare: "5.00",
-    perKmRate: "2.00",
-    perMinuteRate: "0.30",
-  };
+  // Region-aware pricing: use the region's own vehicle fares, platform fee,
+  // surge cap and currency. This keeps budget markets (e.g. Bangladesh) truly
+  // cheap with a smaller platform cut, instead of the old global AED defaults.
+  const region = await getRegionByCode(regionCode).catch(() => null);
 
-  const baseFare = parseFloat(service.baseFare);
-  const perKmRate = parseFloat(service.perKmRate);
-  const perMinuteRate = parseFloat(service.perMinuteRate);
+  const regionVehicle = region?.vehicleTypes.find(v => v.type === vehicleType);
+  let baseFare: number;
+  let perKmRate: number;
+  let perMinuteRate: number;
+  let vehicleMinFare = 0;
+
+  if (regionVehicle) {
+    baseFare = regionVehicle.baseFare;
+    perKmRate = regionVehicle.perKmRate;
+    perMinuteRate = regionVehicle.perMinuteRate;
+    vehicleMinFare = regionVehicle.minFare;
+  } else {
+    const serviceTypes = await storage.getServiceTypes();
+    const service = serviceTypes.find(s => s.type === vehicleType) || {
+      baseFare: "5.00",
+      perKmRate: "2.00",
+      perMinuteRate: "0.30",
+    };
+    baseFare = parseFloat(service.baseFare);
+    perKmRate = parseFloat(service.perKmRate);
+    perMinuteRate = parseFloat(service.perMinuteRate);
+  }
+
+  const currency = region?.currency || "AED";
+  const surgeCap = region?.surgeCap ?? 1.5;
+  const platformFeeRate = (region?.platformFeePercent ?? 10) / 100;
 
   const distanceCharge = distance * perKmRate;
   const timeCharge = estimatedMinutes * perMinuteRate;
@@ -236,9 +261,9 @@ export async function calculateOptimalPrice(
 
   const priceExplanation: string[] = [];
   
-  priceExplanation.push(`Base fare: AED ${baseFare.toFixed(2)}`);
-  priceExplanation.push(`Distance (${distance.toFixed(1)} km × ${perKmRate.toFixed(2)}): AED ${distanceCharge.toFixed(2)}`);
-  priceExplanation.push(`Time (~${estimatedMinutes} min × ${perMinuteRate.toFixed(2)}): AED ${timeCharge.toFixed(2)}`);
+  priceExplanation.push(`Base fare: ${currency} ${baseFare.toFixed(2)}`);
+  priceExplanation.push(`Distance (${distance.toFixed(1)} km × ${perKmRate.toFixed(2)}): ${currency} ${distanceCharge.toFixed(2)}`);
+  priceExplanation.push(`Time (~${estimatedMinutes} min × ${perMinuteRate.toFixed(2)}): ${currency} ${timeCharge.toFixed(2)}`);
 
   let subtotal = baseFare + distanceCharge + timeCharge;
 
@@ -254,24 +279,24 @@ export async function calculateOptimalPrice(
 
   const combinedMultiplier = Math.min(
     demandInfo.multiplier * timeOfDayInfo.multiplier * trafficInfo.multiplier,
-    1.5
+    surgeCap
   );
 
-  const adjustedTotal = subtotal * combinedMultiplier;
+  const adjustedTotal = Math.max(subtotal * combinedMultiplier, vehicleMinFare);
 
-  const platformFeeRate = 0.10;
   const platformFee = adjustedTotal * platformFeeRate;
   const total = adjustedTotal;
   const driverEarnings = total - platformFee;
 
-  priceExplanation.push(`Platform fee (10%): AED ${platformFee.toFixed(2)}`);
-  priceExplanation.push(`Driver receives: AED ${driverEarnings.toFixed(2)}`);
+  const platformFeePctLabel = (platformFeeRate * 100).toFixed(platformFeeRate * 100 % 1 === 0 ? 0 : 1);
+  priceExplanation.push(`Platform fee (${platformFeePctLabel}%): ${currency} ${platformFee.toFixed(2)}`);
+  priceExplanation.push(`Driver receives: ${currency} ${driverEarnings.toFixed(2)}`);
 
   const regularPrice = subtotal * 1.25;
   const savings = Math.max(0, regularPrice - total);
 
   if (savings > 0) {
-    priceExplanation.push(`AI optimization saved you: AED ${savings.toFixed(2)}`);
+    priceExplanation.push(`AI optimization saved you: ${currency} ${savings.toFixed(2)}`);
   }
 
   return {
@@ -286,6 +311,8 @@ export async function calculateOptimalPrice(
     driverEarnings: Math.round(driverEarnings * 100) / 100,
     savings: Math.round(savings * 100) / 100,
     priceExplanation,
+    currency,
+    surgeCap,
   };
 }
 

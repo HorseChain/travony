@@ -149,6 +149,34 @@ export class NowPaymentsService {
     return 1;
   }
 
+  /**
+   * Estimate how much crypto a fiat amount converts to, using NOWPayments' own
+   * exchange rates. Lets callers gate on the crypto minimum without hardcoding
+   * any per-currency FX rate. Returns null if the estimate is unavailable.
+   */
+  async getEstimatedCryptoAmount(
+    amount: number,
+    currencyFrom: string,
+    currencyTo: string = "usdttrc20",
+  ): Promise<number | null> {
+    try {
+      const response = await fetch(
+        `${NOWPAYMENTS_API_URL}/estimate?amount=${amount}&currency_from=${currencyFrom.toLowerCase()}&currency_to=${currencyTo}`,
+        {
+          headers: { "x-api-key": this.apiKey! },
+        }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        const estimated = parseFloat(data.estimated_amount);
+        return Number.isFinite(estimated) ? estimated : null;
+      }
+    } catch (error: any) {
+      console.error("NOWPayments estimate error:", error.message);
+    }
+    return null;
+  }
+
   verifyIpnSignature(payload: any, receivedSignature: string): boolean {
     if (!process.env.NOWPAYMENTS_IPN_SECRET) {
       return true;
