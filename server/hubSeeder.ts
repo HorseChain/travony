@@ -181,3 +181,55 @@ export async function initializeEvHubs(): Promise<void> {
     console.log(`[EV HUBS] All EV hubs already configured`);
   }
 }
+
+// Mosque hubs for Prayer Rides — one landmark mosque per launch city.
+// Seeded idempotently by name (safe to run on every boot).
+const mosqueHubData = [
+  { name: "Jumeirah Mosque", lat: "25.23360000", lng: "55.26550000", radiusMeters: 350, regionCode: "AE-DU", description: "Dubai's iconic mosque on Jumeirah Beach Road - major prayer and cultural visit destination", address: "Jumeirah Beach Road, Jumeirah 1, Dubai, UAE", peakHours: "04:30-06:00,12:00-13:30,18:00-20:30" },
+  { name: "Sheikh Zayed Grand Mosque", lat: "24.41290000", lng: "54.47500000", radiusMeters: 500, regionCode: "AE-AZ", description: "UAE's largest mosque - landmark prayer destination with capacity for 40,000+ worshippers", address: "Sheikh Rashid Bin Saeed Street, Abu Dhabi, UAE", peakHours: "04:30-06:00,12:00-13:30,18:00-20:30" },
+  { name: "Al Noor Mosque", lat: "25.33900000", lng: "55.38620000", radiusMeters: 300, regionCode: "AE-SH", description: "Sharjah's landmark mosque on Khaled Lagoon - Ottoman-style architecture, central prayer hub", address: "Corniche Street, Al Majaz, Sharjah, UAE", peakHours: "04:30-06:00,12:00-13:30,18:00-20:30" },
+  { name: "Sheikh Zayed Mosque Ajman", lat: "25.39930000", lng: "55.47940000", radiusMeters: 300, regionCode: "AE-AJ", description: "Ajman's largest mosque - central Friday prayer destination", address: "Sheikh Rashid Bin Humaid Street, Ajman, UAE", peakHours: "04:30-06:00,12:00-13:30,18:00-20:30" },
+  { name: "Al Rajhi Grand Mosque", lat: "24.65440000", lng: "46.75980000", radiusMeters: 400, regionCode: "SA-RY", description: "One of Riyadh's largest mosques - major Friday congregation point in east Riyadh", address: "Al Rabwah, Riyadh, KSA", peakHours: "04:00-05:30,11:45-13:15,17:45-20:00" },
+  { name: "Al Rahma Floating Mosque", lat: "21.60540000", lng: "39.10230000", radiusMeters: 300, regionCode: "SA-JD", description: "Jeddah's famous mosque on the Red Sea corniche - popular prayer and visit destination", address: "Corniche Road, Al Shati, Jeddah, KSA", peakHours: "04:00-05:30,11:45-13:15,17:45-20:00" },
+  { name: "Imam Feisal Bin Turki Mosque", lat: "26.42300000", lng: "50.08800000", radiusMeters: 300, regionCode: "SA-DM", description: "Central Dammam mosque near the corniche - key Friday prayer gathering point", address: "King Saud Street, Dammam, KSA", peakHours: "04:00-05:30,11:45-13:15,17:45-20:00" },
+  { name: "Grand Mosque of Kuwait", lat: "29.37890000", lng: "47.98550000", radiusMeters: 400, regionCode: "KW-KU", description: "Kuwait's largest mosque - national landmark hosting major congregations in Kuwait City", address: "Al Soor Street, Kuwait City, Kuwait", peakHours: "04:00-05:30,11:45-13:15,17:45-20:00" },
+  { name: "Al Fateh Grand Mosque", lat: "26.21230000", lng: "50.59560000", radiusMeters: 400, regionCode: "BH-MA", description: "Bahrain's largest mosque - landmark prayer destination for up to 7,000 worshippers", address: "Awal Avenue, Juffair, Manama, Bahrain", peakHours: "04:00-05:30,11:45-13:15,17:45-20:00" },
+];
+
+export async function initializeMosqueHubs(): Promise<void> {
+  const existing = await db.select({ name: hubs.name }).from(hubs).where(eq(hubs.type, "mosque"));
+  const existingNames = new Set(existing.map((h) => h.name));
+
+  const allCities = await db.select({ id: cities.id, regionCode: cities.regionCode }).from(cities);
+  const cityMap = new Map<string, string>();
+  for (const city of allCities) {
+    if (city.regionCode) cityMap.set(city.regionCode, city.id);
+  }
+
+  const toInsert = [];
+  for (const m of mosqueHubData) {
+    if (existingNames.has(m.name)) continue;
+    const cityId = cityMap.get(m.regionCode);
+    if (!cityId) continue;
+    toInsert.push({
+      name: m.name,
+      type: "mosque" as const,
+      lat: m.lat,
+      lng: m.lng,
+      radiusMeters: m.radiusMeters,
+      cityId,
+      regionCode: m.regionCode,
+      description: m.description,
+      address: m.address,
+      peakHours: m.peakHours,
+      status: "active" as const,
+    });
+  }
+
+  if (toInsert.length > 0) {
+    await db.insert(hubs).values(toInsert);
+    console.log(`[MOSQUE HUBS] Seeded ${toInsert.length} mosque hubs`);
+  } else {
+    console.log(`[MOSQUE HUBS] All mosque hubs already configured`);
+  }
+}

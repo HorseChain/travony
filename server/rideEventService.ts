@@ -9,7 +9,9 @@ export type RideEventType =
   | "cancelled_system" | "fare_updated" | "route_deviated" | "payment_initiated"
   | "payment_completed" | "payment_failed" | "dispute_opened" | "dispute_resolved"
   | "tip_added" | "rating_submitted" | "rematch_initiated" | "rematch_completed"
-  | "blockchain_recorded" | "eta_updated";
+  | "blockchain_recorded" | "eta_updated"
+  | "offer_created" | "offer_raised" | "offer_expired"
+  | "bid_placed" | "bid_accepted" | "bids_closed";
 
 interface RecordEventParams {
   rideId: string;

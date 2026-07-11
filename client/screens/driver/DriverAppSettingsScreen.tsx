@@ -40,6 +40,16 @@ export default function DriverAppSettingsScreen() {
   const [ratingFilterEnabled, setRatingFilterEnabled] = useState(false);
   const [minRiderRating, setMinRiderRating] = useState(4.0);
 
+  // Prayer-Pause settings
+  const [prayerPauseEnabled, setPrayerPauseEnabled] = useState(false);
+  const [prayerPausePrayers, setPrayerPausePrayers] = useState<string[]>([
+    "fajr",
+    "dhuhr",
+    "asr",
+    "maghrib",
+    "isha",
+  ]);
+
   // Fetch current driver settings
   const { data: driverData } = useQuery<any>({
     queryKey: ["/api/drivers/me"],
@@ -50,8 +60,40 @@ export default function DriverAppSettingsScreen() {
     if (driverData) {
       setRatingFilterEnabled(driverData.minRiderRatingEnabled || false);
       setMinRiderRating(parseFloat(driverData.minRiderRating || "4.0"));
+      setPrayerPauseEnabled(driverData.prayerPauseEnabled || false);
+      if (driverData.prayerPausePrayers) {
+        setPrayerPausePrayers(String(driverData.prayerPausePrayers).split(",").filter(Boolean));
+      }
     }
   }, [driverData]);
+
+  const updatePrayerPause = useMutation({
+    mutationFn: async (data: { enabled?: boolean; prayers?: string[] }) =>
+      apiRequest("/api/drivers/prayer-pause", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }),
+    onError: (error: any) => {
+      Alert.alert("Error", error.message || "Failed to update Prayer-Pause");
+    },
+  });
+
+  const handlePrayerPauseToggle = (enabled: boolean) => {
+    setPrayerPauseEnabled(enabled);
+    updatePrayerPause.mutate({ enabled, prayers: prayerPausePrayers });
+  };
+
+  const togglePauselPrayer = (prayer: string) => {
+    setPrayerPausePrayers((prev) => {
+      const next = prev.includes(prayer) ? prev.filter((p) => p !== prayer) : [...prev, prayer];
+      if (next.length === 0) return prev;
+      if (prayerPauseEnabled) {
+        updatePrayerPause.mutate({ prayers: next });
+      }
+      return next;
+    });
+  };
 
   // Update rating filter mutation
   const updateRatingFilter = useMutation({
@@ -299,6 +341,75 @@ export default function DriverAppSettingsScreen() {
 
         <View style={styles.section}>
           <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
+            PRAYER-PAUSE
+          </ThemedText>
+          <View style={[styles.settingsCard, { backgroundColor: theme.backgroundElevated }]}>
+            <View
+              style={[
+                styles.settingItem,
+                prayerPauseEnabled && styles.settingItemBorder,
+                { borderBottomColor: theme.border },
+              ]}
+            >
+              <View style={[styles.settingIcon, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                <Ionicons name="moon-outline" size={20} color={Colors.travonyGreen} />
+              </View>
+              <View style={styles.settingContent}>
+                <ThemedText style={styles.settingLabel}>Prayer-Pause</ThemedText>
+                <ThemedText style={[styles.settingSubtitle, { color: theme.textSecondary }]}>
+                  30 min before prayer: no long trips, mosque rides first
+                </ThemedText>
+              </View>
+              <Switch
+                value={prayerPauseEnabled}
+                onValueChange={handlePrayerPauseToggle}
+                trackColor={{ false: theme.border, true: Colors.travonyGreen + "80" }}
+                thumbColor={prayerPauseEnabled ? Colors.travonyGreen : theme.textMuted}
+              />
+            </View>
+            {prayerPauseEnabled ? (
+              <View style={styles.prayerChipsContainer}>
+                <ThemedText style={[styles.settingSubtitle, { color: theme.textSecondary, marginBottom: Spacing.sm }]}>
+                  Pause around these prayers
+                </ThemedText>
+                <View style={styles.prayerChipsRow}>
+                  {[
+                    { key: "fajr", label: "Fajr" },
+                    { key: "dhuhr", label: "Dhuhr" },
+                    { key: "asr", label: "Asr" },
+                    { key: "maghrib", label: "Maghrib" },
+                    { key: "isha", label: "Isha" },
+                    { key: "jumuah", label: "Jumu'ah" },
+                  ].map((p) => {
+                    const active = prayerPausePrayers.includes(p.key);
+                    return (
+                      <Pressable
+                        key={p.key}
+                        style={[
+                          styles.prayerChip,
+                          {
+                            backgroundColor: active ? Colors.travonyGreen : "transparent",
+                            borderColor: active ? Colors.travonyGreen : theme.border,
+                          },
+                        ]}
+                        onPress={() => togglePauselPrayer(p.key)}
+                      >
+                        <ThemedText
+                          style={[styles.prayerChipText, { color: active ? "#fff" : theme.textSecondary }]}
+                        >
+                          {p.label}
+                        </ThemedText>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
             DATA & PERFORMANCE
           </ThemedText>
           <LiteModeSetting />
@@ -425,5 +536,24 @@ const styles = StyleSheet.create({
   warningText: {
     ...Typography.small,
     flex: 1,
+  },
+  prayerChipsContainer: {
+    padding: Spacing.md,
+    paddingTop: Spacing.sm,
+  },
+  prayerChipsRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: Spacing.sm,
+  },
+  prayerChip: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  prayerChipText: {
+    fontSize: 13,
+    fontWeight: "600",
   },
 });

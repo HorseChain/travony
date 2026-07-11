@@ -55,6 +55,9 @@ interface RideRequest {
   pmgthDirectionScore?: number;
   isEvRide?: boolean;
   isSafeDriver?: boolean;
+  isNamedFare?: boolean;
+  riderProposedFare?: string | null;
+  offerExpiresAt?: string | null;
   isShared?: boolean;
   poolGroupId?: string;
   riderCount?: number;
@@ -362,6 +365,11 @@ export default function DriverHomeScreen() {
   const dismissedHubProximityIds = useRef<Set<string>>(new Set());
   const [proximityHub, setProximityHub] = useState<Hub | null>(null);
   const [checkInSuccess, setCheckInSuccess] = useState(false);
+  // Name Your Fare: counter-offer modal state + rides already countered so
+  // the same request isn't re-surfaced after the driver sends a counter.
+  const [counterModalRide, setCounterModalRide] = useState<RideRequest | null>(null);
+  const [counterAmount, setCounterAmount] = useState(0);
+  const counteredRideIds = useRef<Set<string>>(new Set());
   const [checkInPrestige, setCheckInPrestige] = useState<number | null>(null);
 
   const hubSlideIn = useSharedValue(-100);
@@ -380,6 +388,7 @@ export default function DriverHomeScreen() {
     status?: string;
     evReady?: boolean;
     vehicle?: { isElectric?: boolean } | null;
+    prayerPauseEnabled?: boolean;
   }>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
@@ -405,6 +414,19 @@ export default function DriverHomeScreen() {
     enabled: isOnline,
     refetchInterval: litePollMs(5000, liteMode),
   });
+
+  const { data: prayerPauseStatus } = useQuery<{
+    enabled: boolean;
+    active: boolean;
+    prayerLabel: string | null;
+    until: string | null;
+  }>({
+    queryKey: ["/api/drivers/prayer-pause/status"],
+    enabled: isOnline && driverData?.prayerPauseEnabled === true,
+    refetchInterval: litePollMs(60000, liteMode),
+  });
+
+  const prayerPauseActive = prayerPauseStatus?.active === true;
 
   const { data: earningsData } = useQuery<{ totalEarnings: string; totalTrips: number }>({
     queryKey: ["/api/drivers/earnings"],
@@ -500,9 +522,52 @@ export default function DriverHomeScreen() {
 
   useEffect(() => {
     if (pendingRides && pendingRides.length > 0 && !incomingRequest) {
-      setIncomingRequest(pendingRides[0]);
+      // Skip named-fare rides the driver already countered — they're waiting
+      // on the rider now; a win is detected via the my-bids poll below.
+      const next = pendingRides.find((r) => !counteredRideIds.current.has(r.id));
+      if (next) setIncomingRequest(next);
     }
   }, [pendingRides, isOnline]);
+
+  // Name Your Fare: after countering, poll my-bids — when the rider accepts
+  // this driver's counter, jump straight into the active ride.
+  const { data: myBidsData } = useQuery<{ bids: Array<{ rideId: string; status: string; won: boolean; rideStatus: string }> }>({
+    queryKey: ["/api/drivers/my-bids"],
+    refetchInterval: 4000,
+    enabled: isOnline && counteredRideIds.current.size > 0,
+  });
+
+  const navigatedWonRideRef = useRef<string | null>(null);
+  useEffect(() => {
+    const won = myBidsData?.bids?.find((b) => b.won && counteredRideIds.current.has(b.rideId));
+    if (won && navigatedWonRideRef.current !== won.rideId) {
+      navigatedWonRideRef.current = won.rideId;
+      counteredRideIds.current.delete(won.rideId);
+      setIncomingRequest(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      navigation.navigate("DriverActiveRide", { rideId: won.rideId });
+    }
+  }, [myBidsData]);
+
+  const counterBidMutation = useMutation({
+    mutationFn: async ({ rideId, amount }: { rideId: string; amount: number }) =>
+      apiRequest(`/api/rides/${rideId}/bids`, {
+        method: "POST",
+        body: JSON.stringify({ amount: amount.toFixed(2) }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: (_data, vars) => {
+      counteredRideIds.current.add(vars.rideId);
+      setCounterModalRide(null);
+      setIncomingRequest(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    },
+    onError: (error: any) => {
+      const msg = error?.message || "Could not send counter-offer";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Counter-offer failed", msg);
+    },
+  });
 
   const declinedRideId = useRef<string | null>(null);
 
@@ -904,6 +969,15 @@ export default function DriverHomeScreen() {
             <ThemedText style={styles.liveBannerText}>You're Live</ThemedText>
           </View>
         ) : null}
+
+        {prayerPauseActive ? (
+          <View style={[styles.prayerPauseBanner, { backgroundColor: theme.backgroundElevated, borderColor: Colors.travonyGreen + "60" }]}>
+            <Ionicons name="moon-outline" size={16} color={Colors.travonyGreen} />
+            <ThemedText style={[styles.prayerPauseBannerText, { color: theme.textPrimary }]} numberOfLines={2}>
+              Prayer-Pause on{prayerPauseStatus?.prayerLabel ? ` — ${prayerPauseStatus.prayerLabel} soon` : ""}. Long trips hidden, mosque rides shown first.
+            </ThemedText>
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.quickActionsRow, { top: insets.top + Spacing.md + 106 }]}>
@@ -1036,6 +1110,14 @@ export default function DriverHomeScreen() {
                     <Ionicons name="people" size={12} color={Colors.travonyGreen} />
                     <ThemedText style={[styles.evBadgeText, { color: Colors.travonyGreen }]}>
                       Shared · {incomingRequest.riderCount || 2} riders
+                    </ThemedText>
+                  </View>
+                ) : null}
+                {incomingRequest.isNamedFare ? (
+                  <View style={[styles.evBadge, { backgroundColor: "#F59E0B20" }]}>
+                    <Ionicons name="pricetag" size={12} color="#F59E0B" />
+                    <ThemedText style={[styles.evBadgeText, { color: "#F59E0B" }]}>
+                      Rider offers {incomingRequest.currency || "AED"} {Number(incomingRequest.riderProposedFare || incomingRequest.estimatedFare).toFixed(2)}
                     </ThemedText>
                   </View>
                 ) : null}
@@ -1187,6 +1269,19 @@ export default function DriverHomeScreen() {
                 {checkingRange ? "Checking..." : "Accept Route"}
               </ThemedText>
             </Pressable>
+            {incomingRequest.isNamedFare && !incomingRequest.isShared ? (
+              <Pressable
+                style={[styles.declineButton, { borderColor: "#F59E0B" }]}
+                onPress={() => {
+                  const base = Number(incomingRequest.riderProposedFare || incomingRequest.estimatedFare || 0);
+                  setCounterAmount(Math.round(base * 1.1 * 100) / 100);
+                  setCounterModalRide(incomingRequest);
+                  if (countdownRef.current) clearInterval(countdownRef.current);
+                }}
+              >
+                <ThemedText style={[styles.declineButtonText, { color: "#F59E0B" }]}>Counter</ThemedText>
+              </Pressable>
+            ) : null}
             <Pressable
               style={[styles.declineButton, { borderColor: theme.border }]}
               onPress={handleDeclineRide}
@@ -1196,6 +1291,69 @@ export default function DriverHomeScreen() {
           </View>
         </View>
       ) : null}
+
+      <Modal
+        visible={!!counterModalRide}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCounterModalRide(null)}
+      >
+        <View style={styles.warnOverlay}>
+          <View style={[styles.warnCard, { backgroundColor: theme.backgroundRoot }]}>
+            <View style={[styles.warnIcon, { backgroundColor: "#F59E0B20" }]}>
+              <Ionicons name="pricetag" size={26} color="#F59E0B" />
+            </View>
+            <ThemedText style={styles.warnTitle}>Send a counter-offer</ThemedText>
+            <ThemedText style={[styles.warnMessage, { color: theme.textSecondary }]}>
+              Rider offered {counterModalRide?.currency || "AED"}{" "}
+              {Number(counterModalRide?.riderProposedFare || counterModalRide?.estimatedFare || 0).toFixed(2)}. Propose your price — they can accept it or wait for others.
+            </ThemedText>
+            <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: Spacing.lg, marginVertical: Spacing.md }}>
+              <Pressable
+                onPress={() => {
+                  const base = Number(counterModalRide?.riderProposedFare || counterModalRide?.estimatedFare || 0);
+                  const step = Math.max(1, Math.round(base * 0.05));
+                  setCounterAmount((a) => Math.round(Math.max(a - step, base) * 100) / 100);
+                }}
+                style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: theme.backgroundElevated }}
+              >
+                <Ionicons name="remove" size={22} color={theme.text} />
+              </Pressable>
+              <ThemedText style={{ fontSize: 24, fontWeight: "700", minWidth: 120, textAlign: "center" }}>
+                {counterModalRide?.currency || "AED"} {counterAmount.toFixed(2)}
+              </ThemedText>
+              <Pressable
+                onPress={() => {
+                  const base = Number(counterModalRide?.riderProposedFare || counterModalRide?.estimatedFare || 0);
+                  const step = Math.max(1, Math.round(base * 0.05));
+                  setCounterAmount((a) => Math.round((a + step) * 100) / 100);
+                }}
+                style={{ width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center", backgroundColor: theme.backgroundElevated }}
+              >
+                <Ionicons name="add" size={22} color={theme.text} />
+              </Pressable>
+            </View>
+            <Pressable
+              style={[styles.warnPrimaryBtn, { backgroundColor: "#F59E0B", opacity: counterBidMutation.isPending ? 0.7 : 1 }]}
+              onPress={() => {
+                if (counterModalRide && !counterBidMutation.isPending) {
+                  counterBidMutation.mutate({ rideId: counterModalRide.id, amount: counterAmount });
+                }
+              }}
+              disabled={counterBidMutation.isPending}
+            >
+              <ThemedText style={styles.warnPrimaryText}>
+                {counterBidMutation.isPending ? "Sending..." : "Send counter-offer"}
+              </ThemedText>
+            </Pressable>
+            <Pressable style={styles.warnSecondaryBtn} onPress={() => setCounterModalRide(null)}>
+              <ThemedText style={[styles.warnSecondaryText, { color: theme.textSecondary }]}>
+                Cancel
+              </ThemedText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
 
       {proximityHub && !checkedInHubsThisSession.current.has(proximityHub.id) ? (
         <View style={[styles.proximitySheet, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
@@ -1395,6 +1553,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.xl,
     paddingVertical: Spacing.xs,
     borderRadius: BorderRadius.full,
+  },
+  prayerPauseBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  prayerPauseBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: "600",
   },
   liveBannerText: {
     ...Typography.bodyMedium,

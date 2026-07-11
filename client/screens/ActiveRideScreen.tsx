@@ -25,6 +25,7 @@ import LiteTripView from "@/components/LiteTripView";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
+import { StreamRideButton } from "@/components/RideSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
@@ -57,6 +58,35 @@ interface Ride {
   driverPhone?: string;
   isEvRide?: boolean;
   isShared?: boolean;
+  isNamedFare?: boolean;
+  riderProposedFare?: string | null;
+  offerExpiresAt?: string | null;
+  currency?: string;
+}
+
+interface FareBidItem {
+  id: string;
+  driverId: string;
+  amount: string;
+  currency: string;
+  status: string;
+  driverName: string;
+  driverRating: string;
+  distanceKm: number | null;
+  etaMinutes: number | null;
+}
+
+interface BidsResponse {
+  offer: {
+    proposedFare: string;
+    currency: string;
+    expiresAt: string | null;
+    expired: boolean;
+    rideStatus: string;
+    floor: number;
+    ceiling: number;
+  };
+  bids: FareBidItem[];
 }
 
 interface PoolStatus {
@@ -132,6 +162,57 @@ export default function ActiveRideScreen() {
     refetchInterval: litePollMs(4000, liteMode),
     enabled: !!rideId && !!ride?.isShared && ride?.status === "pending",
   });
+
+  // Name Your Fare: while the offer is pending, poll driver counter-bids so
+  // the rider can accept one or raise their own offer.
+  const { data: bidsData, refetch: refetchBids } = useQuery<BidsResponse>({
+    queryKey: ["/api/rides", rideId, "bids"],
+    refetchInterval: litePollMs(4000, liteMode),
+    enabled: !!rideId && !!ride?.isNamedFare && ride?.status === "pending",
+  });
+
+  const acceptBidMutation = useMutation({
+    mutationFn: async (bidId: string) =>
+      apiRequest(`/api/rides/${rideId}/bids/${bidId}/accept`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: () => refetch(),
+    onError: (error: any) => {
+      Alert.alert("Could not accept", error.message || "This offer may no longer be available");
+      refetchBids();
+    },
+  });
+
+  const raiseOfferMutation = useMutation({
+    mutationFn: async (newAmount: number) =>
+      apiRequest(`/api/rides/${rideId}/offer`, {
+        method: "PATCH",
+        body: JSON.stringify({ proposedFare: newAmount.toFixed(2) }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: () => {
+      refetch();
+      refetchBids();
+    },
+    onError: (error: any) => Alert.alert("Could not raise offer", error.message || "Try again"),
+  });
+
+  // Live countdown for the named-fare offer window.
+  const [offerSecondsLeft, setOfferSecondsLeft] = useState<number | null>(null);
+  useEffect(() => {
+    if (!ride?.isNamedFare || ride?.status !== "pending" || !ride?.offerExpiresAt) {
+      setOfferSecondsLeft(null);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.floor((new Date(ride.offerExpiresAt!).getTime() - Date.now()) / 1000));
+      setOfferSecondsLeft(left);
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [ride?.isNamedFare, ride?.status, ride?.offerExpiresAt]);
 
   const goSoloMutation = useMutation({
     mutationFn: async () =>
@@ -385,6 +466,7 @@ export default function ActiveRideScreen() {
               <ThemedText style={[styles.etaIntelText, { color: theme.textMuted }]}>ETA Intelligence: Active</ThemedText>
             </View>
           ) : null}
+          {rideId ? <StreamRideButton rideId={rideId} rideStatus={ride?.status} /> : null}
         </Card>
       </View>
 
@@ -595,6 +677,79 @@ export default function ActiveRideScreen() {
               <Ionicons name="close-outline" size={16} color="#92400E" />
             </Pressable>
           </Animated.View>
+        ) : null}
+
+        {ride?.status === "pending" && ride?.isNamedFare ? (
+          <View style={[styles.poolBanner, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={styles.poolHeaderRow}>
+              <Ionicons name="pricetag-outline" size={20} color={theme.primary} />
+              <View style={{ flex: 1 }}>
+                <ThemedText style={[styles.poolTitle, { color: theme.text }]}>
+                  Your offer: {ride?.currency || "AED"} {parseFloat(ride?.riderProposedFare || ride?.estimatedFare || "0").toFixed(2)}
+                </ThemedText>
+                <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
+                  {offerSecondsLeft !== null && offerSecondsLeft <= 0
+                    ? "Offer expired — raise it to go live again"
+                    : offerSecondsLeft !== null
+                      ? `Drivers can accept or counter · ${Math.floor(offerSecondsLeft / 60)}:${String(offerSecondsLeft % 60).padStart(2, "0")} left`
+                      : "Drivers can accept or counter"}
+                </ThemedText>
+              </View>
+              <Pressable
+                style={[styles.poolBtnFilled, { backgroundColor: theme.primary, paddingHorizontal: Spacing.md }]}
+                onPress={() => {
+                  const current = parseFloat(ride?.riderProposedFare || ride?.estimatedFare || "0");
+                  const ceiling = bidsData?.offer?.ceiling ?? current * 1.5;
+                  const step = Math.max(1, Math.round(current * 0.05));
+                  const next = Math.min(current + step, ceiling);
+                  if (next <= current) {
+                    Alert.alert("At maximum", "Your offer is already at the highest allowed price.");
+                    return;
+                  }
+                  raiseOfferMutation.mutate(next);
+                }}
+                disabled={raiseOfferMutation.isPending}
+              >
+                <ThemedText style={styles.poolBtnFilledText}>Raise</ThemedText>
+              </Pressable>
+            </View>
+            {(bidsData?.bids || []).filter((b) => b.status === "active").map((bid) => (
+              <View
+                key={bid.id}
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  gap: Spacing.sm,
+                  marginTop: Spacing.sm,
+                  paddingTop: Spacing.sm,
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderTopColor: theme.border,
+                }}
+              >
+                <View style={{ flex: 1 }}>
+                  <ThemedText style={[styles.poolTitle, { color: theme.text, fontSize: 14 }]}>
+                    {bid.driverName} · {parseFloat(bid.driverRating).toFixed(1)}★
+                  </ThemedText>
+                  <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
+                    Offers {bid.currency} {parseFloat(bid.amount).toFixed(2)}
+                    {bid.etaMinutes != null ? ` · ${bid.etaMinutes} min away` : ""}
+                  </ThemedText>
+                </View>
+                <Pressable
+                  style={[styles.poolBtnFilled, { backgroundColor: theme.success, paddingHorizontal: Spacing.md }]}
+                  onPress={() => acceptBidMutation.mutate(bid.id)}
+                  disabled={acceptBidMutation.isPending}
+                >
+                  <ThemedText style={styles.poolBtnFilledText}>Accept</ThemedText>
+                </Pressable>
+              </View>
+            ))}
+            {(bidsData?.bids || []).filter((b) => b.status === "active").length === 0 ? (
+              <ThemedText style={[styles.poolSubtitle, { color: theme.textMuted, marginTop: Spacing.sm }]}>
+                No counter-offers yet — a driver can also accept your price directly.
+              </ThemedText>
+            ) : null}
+          </View>
         ) : null}
 
         {ride?.status === "pending" && ride?.isShared && pool ? (

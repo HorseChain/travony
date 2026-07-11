@@ -13,7 +13,8 @@ import * as Location from "expo-location";
 import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { apiRequest } from "@/lib/query-client";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -79,6 +80,7 @@ export default function HomeScreen() {
   const { liteMode } = useLiteMode();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
+  const queryClient = useQueryClient();
 
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(null);
@@ -135,6 +137,40 @@ export default function HomeScreen() {
     queryKey: [`/api/saved-addresses/${user?.id}`],
     enabled: !!user?.id,
     staleTime: 60000,
+  });
+
+  const { data: scheduledArrivals } = useQuery<
+    { id: string; label: string; status: string; next: { arriveBy: string; dispatchAt: string; skipped: boolean } | null }[]
+  >({
+    queryKey: ["/api/scheduled-arrivals"],
+    enabled: !!user?.id,
+    refetchInterval: litePollMs(60000, liteMode),
+    staleTime: 30000,
+  });
+
+  const nextArrival = (scheduledArrivals || [])
+    .filter((a) => a.status === "active" && a.next && !a.next.skipped)
+    .sort((a, b) => new Date(a.next!.arriveBy).getTime() - new Date(b.next!.arriveBy).getTime())[0];
+
+  const { data: prayerSubs } = useQuery<
+    { id: string; mosqueName: string; status: string; next: { prayerLabel: string; prayerTime: string; pickupAt: string; skipped: boolean; dispatched: boolean } | null }[]
+  >({
+    queryKey: ["/api/prayer-rides"],
+    enabled: !!user?.id,
+    refetchInterval: litePollMs(60000, liteMode),
+    staleTime: 30000,
+  });
+
+  const prayerSub = (prayerSubs || []).find((s) => s.status === "active" && s.next && !s.next.skipped);
+
+  const skipPrayerMutation = useMutation({
+    mutationFn: async (id: string) =>
+      apiRequest(`/api/prayer-rides/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "skip" }),
+      }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/prayer-rides"] }),
   });
 
   useFocusEffect(
@@ -450,6 +486,59 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
+        {nextArrival ? (
+          <Pressable
+            style={[styles.arrivalCard, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
+            onPress={() => navigation.navigate("ScheduledArrivals")}
+          >
+            <Ionicons name="alarm-outline" size={18} color={Colors.travonyGreen} />
+            <View style={styles.arrivalCardText}>
+              <ThemedText style={styles.arrivalCardTitle} numberOfLines={1}>
+                {nextArrival.label} — arrive by{" "}
+                {new Date(nextArrival.next!.arriveBy).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </ThemedText>
+              <ThemedText style={[styles.arrivalCardSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
+                Ride locks in at{" "}
+                {new Date(nextArrival.next!.dispatchAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{" "}
+                — no need to book
+              </ThemedText>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+          </Pressable>
+        ) : null}
+
+        {prayerSub ? (
+          <View
+            style={[styles.arrivalCard, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
+          >
+            <Ionicons name="moon-outline" size={18} color={Colors.travonyGreen} />
+            <Pressable style={styles.arrivalCardText} onPress={() => navigation.navigate("PrayerRides")}>
+              <ThemedText style={styles.arrivalCardTitle} numberOfLines={1}>
+                {prayerSub.next!.prayerLabel} at{" "}
+                {new Date(prayerSub.next!.prayerTime).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}{" "}
+                — {prayerSub.mosqueName}
+              </ThemedText>
+              <ThemedText style={[styles.arrivalCardSubtitle, { color: theme.textMuted }]} numberOfLines={1}>
+                {prayerSub.next!.dispatched
+                  ? "Ride booked — pickup around " +
+                    new Date(prayerSub.next!.pickupAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+                  : "Pickup around " +
+                    new Date(prayerSub.next!.pickupAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) +
+                    " — books itself"}
+              </ThemedText>
+            </Pressable>
+            {prayerSub.next!.dispatched ? null : (
+              <Pressable
+                style={[styles.prayerSkipButton, { borderColor: theme.border }]}
+                onPress={() => skipPrayerMutation.mutate(prayerSub.id)}
+                disabled={skipPrayerMutation.isPending}
+              >
+                <ThemedText style={[styles.prayerSkipText, { color: theme.text }]}>Skip</ThemedText>
+              </Pressable>
+            )}
+          </View>
+        ) : null}
+
         <View style={styles.quickActionsRow}>
           <Pressable
             style={({ pressed }) => [
@@ -482,6 +571,36 @@ export default function HomeScreen() {
               </ThemedText>
             </View>
           ) : null}
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.coffeeButton,
+              {
+                backgroundColor: theme.backgroundElevated,
+                borderColor: theme.border,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+            onPress={() => navigation.navigate("ScheduledArrivals")}
+          >
+            <Ionicons name="alarm-outline" size={18} color={Colors.travonyGreen} />
+            <ThemedText style={[styles.coffeeButtonText, { color: theme.text }]}>On Time</ThemedText>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.coffeeButton,
+              {
+                backgroundColor: theme.backgroundElevated,
+                borderColor: theme.border,
+                opacity: pressed ? 0.85 : 1,
+              },
+            ]}
+            onPress={() => navigation.navigate("PrayerRides")}
+          >
+            <Ionicons name="moon-outline" size={18} color={Colors.travonyGreen} />
+            <ThemedText style={[styles.coffeeButtonText, { color: theme.text }]}>Prayer</ThemedText>
+          </Pressable>
 
           <Pressable
             style={({ pressed }) => [
@@ -648,6 +767,26 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
   },
+  arrivalCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    borderWidth: 1,
+    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm + 2,
+    marginBottom: Spacing.sm,
+  },
+  arrivalCardText: { flex: 1 },
+  arrivalCardTitle: { fontSize: 13, fontWeight: "700" },
+  arrivalCardSubtitle: { fontSize: 11, marginTop: 1 },
+  prayerSkipButton: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  prayerSkipText: { fontSize: 12, fontWeight: "600" },
   quickActionsRow: {
     flexDirection: "row",
     alignItems: "center",

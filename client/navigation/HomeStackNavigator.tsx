@@ -9,6 +9,8 @@ import InvoiceScreen from "@/screens/InvoiceScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
 import CoffeeScreen from "@/screens/CoffeeScreen";
+import ScheduledArrivalsScreen from "@/screens/ScheduledArrivalsScreen";
+import PrayerRidesScreen from "@/screens/PrayerRidesScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type HomeStackParamList = {
@@ -36,6 +38,8 @@ export type HomeStackParamList = {
   OpenClaw: { variant: "rider" };
   HubDetail: { hubId: string; hubName: string };
   Coffee: undefined;
+  ScheduledArrivals: undefined;
+  PrayerRides: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -95,6 +99,16 @@ export default function HomeStackNavigator() {
         name="Coffee"
         component={CoffeeScreen}
         options={{ headerTitle: "Coffee" }}
+      />
+      <Stack.Screen
+        name="ScheduledArrivals"
+        component={ScheduledArrivalsScreen}
+        options={{ headerTitle: "On-Time Arrivals" }}
+      />
+      <Stack.Screen
+        name="PrayerRides"
+        component={PrayerRidesScreen}
+        options={{ headerTitle: "Prayer Rides" }}
       />
     </Stack.Navigator>
   );

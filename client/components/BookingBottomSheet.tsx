@@ -357,6 +357,9 @@ export default function BookingBottomSheet({
   const [detectedRegion, setDetectedRegion] = useState<string>("AE");
   const [evModeSelected, setEvModeSelected] = useState(false);
   const [shareSelected, setShareSelected] = useState(false);
+  // Name Your Fare: rider proposes their own price within server guardrails.
+  const [nameFareSelected, setNameFareSelected] = useState(false);
+  const [namedFareValue, setNamedFareValue] = useState<number | null>(null);
 
   const tabProgress = useRef(new RNAnimated.Value(0)).current;
 
@@ -367,7 +370,7 @@ export default function BookingBottomSheet({
     }
   }, [currentLocation]);
 
-  const { data: regionConfig } = useQuery<{ vehicleTypes?: any[]; currency?: string; surgeCap?: number; platformFeePercent?: number }>({
+  const { data: regionConfig } = useQuery<{ vehicleTypes?: any[]; currency?: string; surgeCap?: number; platformFeePercent?: number; minFare?: number }>({
     queryKey: ["/api/regions", detectedRegion],
     enabled: !!detectedRegion,
   });
@@ -508,6 +511,28 @@ export default function BookingBottomSheet({
     : soloFareValue;
   const shareSavings = Math.round((soloFareValue - effectiveFareValue) * 100) / 100;
 
+  // Name Your Fare guardrails (server re-validates): floor = region minimum
+  // fare, ceiling = surge-capped estimate. Fixed-price modes are excluded.
+  const nameFareEligible =
+    !shareActive && !selectedPmgthDriver && selectedVehicle.type !== "safe_driver";
+  const nameFareActive = nameFareSelected && nameFareEligible;
+  const nameFareFloor = Math.max(regionConfig?.minFare ?? 5, 1);
+  const nameFareCeiling = Math.max(
+    Math.round(soloFareValue * (regionConfig?.surgeCap ?? 1.5) * 100) / 100,
+    nameFareFloor,
+  );
+  const nameFareStep = Math.max(1, Math.round(soloFareValue * 0.05));
+  const nameFareAmount = Math.min(
+    Math.max(namedFareValue ?? Math.round(soloFareValue), nameFareFloor),
+    nameFareCeiling,
+  );
+
+  useEffect(() => {
+    if (!nameFareEligible && nameFareSelected) setNameFareSelected(false);
+  }, [nameFareEligible]);
+
+  const bookingFareValue = nameFareActive ? nameFareAmount : effectiveFareValue;
+
   const bookRideMutation = useMutation({
     mutationFn: async () => {
       if (!pickupLocation || !dropoffLocation) throw new Error("Missing locations");
@@ -538,6 +563,10 @@ export default function BookingBottomSheet({
           // soloFare and only enables sharing for eligible three-wheelers.
           isShared: shareActive,
           soloFare: soloFareValue.toFixed(2),
+          // Name Your Fare: rider-proposed price. Server clamps between the
+          // region minimum fare and the surge-capped estimate.
+          isNamedFare: nameFareActive,
+          proposedFare: nameFareActive ? nameFareAmount.toFixed(2) : undefined,
           regionCode: detectedRegion,
           currency: currencyCode,
         }),
@@ -993,7 +1022,7 @@ export default function BookingBottomSheet({
               </ThemedText>
             ) : null}
             <ThemedText style={[styles.fareTotal, { color: theme.primary }]}>
-              {currencyCode} {(effectiveFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
+              {currencyCode} {(bookingFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
             </ThemedText>
           </View>
         </View>
@@ -1061,6 +1090,96 @@ export default function BookingBottomSheet({
               {shareActive ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
             </View>
           </Pressable>
+        ) : null}
+
+        {nameFareEligible ? (
+          <Pressable
+            onPress={() => {
+              setNameFareSelected((v) => !v);
+              if (namedFareValue === null) setNamedFareValue(Math.round(soloFareValue));
+              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            }}
+            style={[
+              styles.evToggleRow,
+              {
+                backgroundColor: nameFareActive ? theme.primary + "15" : theme.backgroundElevated,
+                borderColor: nameFareActive ? theme.primary : theme.border,
+                marginTop: Spacing.sm,
+              },
+            ]}
+          >
+            <Ionicons name={"pricetag-outline" as keyof typeof Ionicons.glyphMap} size={18} color={nameFareActive ? theme.primary : theme.textMuted} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={{ fontSize: 13, fontWeight: "600", color: nameFareActive ? theme.primary : theme.text }}>
+                Name your fare
+              </ThemedText>
+              <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+                {nameFareActive
+                  ? "Drivers can accept your price or send a counter-offer"
+                  : "Propose your own price — drivers accept or counter"}
+              </ThemedText>
+            </View>
+            <View style={[styles.evToggleCheck, { backgroundColor: nameFareActive ? theme.primary : theme.border }]}>
+              {nameFareActive ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+            </View>
+          </Pressable>
+        ) : null}
+
+        {nameFareActive ? (
+          <View
+            style={[
+              styles.evToggleRow,
+              {
+                backgroundColor: theme.backgroundElevated,
+                borderColor: theme.border,
+                marginTop: Spacing.sm,
+                justifyContent: "space-between",
+              },
+            ]}
+          >
+            <Pressable
+              onPress={() => {
+                setNamedFareValue(Math.max(nameFareAmount - nameFareStep, nameFareFloor));
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              disabled={nameFareAmount <= nameFareFloor}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: nameFareAmount <= nameFareFloor ? theme.border : theme.primary + "20",
+              }}
+            >
+              <Ionicons name="remove" size={20} color={nameFareAmount <= nameFareFloor ? theme.textMuted : theme.primary} />
+            </Pressable>
+            <View style={{ alignItems: "center" }}>
+              <ThemedText style={{ fontSize: 20, fontWeight: "700", color: theme.primary }}>
+                {currencyCode} {nameFareAmount.toFixed(2)}
+              </ThemedText>
+              <ThemedText style={{ fontSize: 10, color: theme.textMuted }}>
+                {currencyCode} {nameFareFloor.toFixed(0)} – {currencyCode} {nameFareCeiling.toFixed(0)}
+              </ThemedText>
+            </View>
+            <Pressable
+              onPress={() => {
+                setNamedFareValue(Math.min(nameFareAmount + nameFareStep, nameFareCeiling));
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              }}
+              disabled={nameFareAmount >= nameFareCeiling}
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                alignItems: "center",
+                justifyContent: "center",
+                backgroundColor: nameFareAmount >= nameFareCeiling ? theme.border : theme.primary + "20",
+              }}
+            >
+              <Ionicons name="add" size={20} color={nameFareAmount >= nameFareCeiling ? theme.textMuted : theme.primary} />
+            </Pressable>
+          </View>
         ) : null}
 
         <View style={[styles.fareDivider, { backgroundColor: theme.border }]} />

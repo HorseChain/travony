@@ -8,6 +8,7 @@ import { sendRideReceiptEmail, sendDriverEarningsEmail, sendDriverRideRequestEma
 import { sendDriverNotification, sendTelegramMessage } from "./telegramBot";
 import { sendSmsMessage } from "./twilioService";
 import { sendWhatsAppMessage } from "./whatsappBot";
+import { getDriverPrayerPauseState, getMosqueHubZones, isMosqueDestination, rideDistanceKm, LONG_TRIP_KM } from "./prayerRides";
 
 // Region-aware platform fee percent for a ride (falls back to 10%). Keeps driver
 // pay/receipt figures consistent with the ride's market (e.g. 5% budget markets).
@@ -392,7 +393,20 @@ export async function notifyOnlineDriversOfNewRide(rideId: string): Promise<void
       `Fare: ${currency} ${fare.toFixed(2)}  ·  your share ${currency} ${fees.driverShare.toFixed(2)}\n\n` +
       `Open your T Driver app to accept.`;
 
+    // Prayer-Pause: drivers within 30 min of a prayer they opted into are not
+    // pinged about long trips (mosque-bound rides still go through).
+    const rideKm = rideDistanceKm(ride);
+    let rideIsLongNonMosque = false;
+    if (rideKm > LONG_TRIP_KM) {
+      const mosqueZones = await getMosqueHubZones().catch(() => []);
+      rideIsLongNonMosque = !isMosqueDestination(ride.dropoffLat, ride.dropoffLng, mosqueZones);
+    }
+
     for (const driver of onlineDrivers) {
+      if (rideIsLongNonMosque && driver.prayerPauseEnabled) {
+        const pause = await getDriverPrayerPauseState(driver).catch(() => ({ active: false }));
+        if (pause.active) continue;
+      }
       const driverUser = await storage.getUser(driver.userId);
       if (!driverUser) continue;
       // Don't notify the rider about their own ride request.

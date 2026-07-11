@@ -2,7 +2,7 @@ import { View, StyleSheet, TextInput, Alert, Platform, TouchableOpacity, Image, 
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import * as ImagePicker from "expo-image-picker";
 import { Feather } from "@expo/vector-icons";
 
@@ -80,6 +80,11 @@ export default function DriverVehicleDetailsScreen() {
   const [missingFields, setMissingFields] = useState<string[]>([]);
   const [actionLabel, setActionLabel] = useState<string>("");
   const [rescan, setRescan] = useState(false);
+
+  // Instant activation: measure the time from "Find my car" to activation so we
+  // can show the driver exactly how fast their car became a business.
+  const scanStartRef = useRef<number | null>(null);
+  const [activation, setActivation] = useState<{ seconds: number; carName: string } | null>(null);
 
   const userRegion = (user as any)?.regionCode || "BD";
 
@@ -175,6 +180,21 @@ export default function DriverVehicleDetailsScreen() {
         setVerificationStatus(data.verificationStatus);
       }
 
+      // Instant activation: the AI scan approved the car AND the driver in one
+      // pass. Show the celebration with the real elapsed time.
+      if (data?.driverActivated) {
+        const elapsedMs = scanStartRef.current ? Date.now() - scanStartRef.current : null;
+        scanStartRef.current = null;
+        const seconds = elapsedMs ? Math.max(1, Math.round(elapsedMs / 1000)) : 0;
+        const detected = data?.aiResult?.detected;
+        const activatedCar = [detected?.year, detected?.color, detected?.make, detected?.model]
+          .filter(Boolean)
+          .join(" ");
+        setActivation({ seconds, carName: activatedCar || "Your car" });
+        return;
+      }
+      scanStartRef.current = null;
+
       const message =
         data?.verificationStatus === "ai_verified"
           ? "Your car was found and verified. You're all set."
@@ -212,6 +232,7 @@ export default function DriverVehicleDetailsScreen() {
   const handleFindMyCar = () => {
     if (!pendingPhoto) return;
     setActionLabel("Finding your car...");
+    scanStartRef.current = Date.now();
     saveMutation.mutate({ photoFront: pendingPhoto, autoVerify: true });
   };
 
@@ -221,6 +242,9 @@ export default function DriverVehicleDetailsScreen() {
       return;
     }
     setActionLabel("Saving your car...");
+    if (pendingPhoto || photoFront) {
+      scanStartRef.current = Date.now();
+    }
     saveMutation.mutate({
       make,
       model,
@@ -407,8 +431,40 @@ export default function DriverVehicleDetailsScreen() {
         ]}
         showsVerticalScrollIndicator={false}
       >
+        {/* ============ INSTANT ACTIVATION CELEBRATION ============ */}
+        {activation ? (
+          <View style={styles.activationWrap}>
+            <View style={[styles.activationIconCircle, { backgroundColor: Colors.travonyGreen + "20" }]}>
+              <Feather name="zap" size={44} color={Colors.travonyGreen} />
+            </View>
+            <ThemedText style={styles.activationTitle}>{activation.carName} is now a business</ThemedText>
+            {activation.seconds > 0 ? (
+              <View style={[styles.activationTimeChip, { backgroundColor: Colors.travonyGreen }]}>
+                <Feather name="clock" size={16} color="#FFFFFF" />
+                <ThemedText style={styles.activationTimeText}>
+                  Activated in {activation.seconds} {activation.seconds === 1 ? "second" : "seconds"}
+                </ThemedText>
+              </View>
+            ) : null}
+            <ThemedText style={[styles.activationSub, { color: theme.textSecondary }]}>
+              Verified by AI and approved to earn. No paperwork, no waiting for review.
+            </ThemedText>
+            <View style={[styles.activationEarnCard, { backgroundColor: theme.backgroundElevated }]}>
+              <ThemedText style={[styles.activationEarnBig, { color: Colors.travonyGreen }]}>
+                It keeps 90%
+              </ThemedText>
+              <ThemedText style={[styles.activationEarnSmall, { color: theme.textSecondary }]}>
+                of everything it earns. Travony takes 10%. That's it.
+              </ThemedText>
+            </View>
+            <Button onPress={() => setActivation(null)} style={styles.saveButton}>
+              Start earning
+            </Button>
+          </View>
+        ) : null}
+
         {/* ============ MANAGE EXISTING VEHICLE ============ */}
-        {hasVehicle && !showManual && !rescan ? (
+        {!activation && hasVehicle && !showManual && !rescan ? (
           <>
             {getVerificationBadge()}
 
@@ -451,7 +507,7 @@ export default function DriverVehicleDetailsScreen() {
         ) : null}
 
         {/* ============ ADD FLOW: STEP 1 — PHOTO ============ */}
-        {(!hasVehicle || rescan) && !pendingPhoto && !showManual ? (
+        {!activation && (!hasVehicle || rescan) && !pendingPhoto && !showManual ? (
           <>
             <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
               <ThemedText style={[styles.infoTitle, { color: Colors.travonyGreen }]}>Add your car in two steps</ThemedText>
@@ -490,7 +546,7 @@ export default function DriverVehicleDetailsScreen() {
         ) : null}
 
         {/* ============ ADD FLOW: STEP 2 — FIND MY CAR ============ */}
-        {(!hasVehicle || rescan) && pendingPhoto && !showManual ? (
+        {!activation && (!hasVehicle || rescan) && pendingPhoto && !showManual ? (
           <>
             <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
               <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
@@ -510,7 +566,7 @@ export default function DriverVehicleDetailsScreen() {
         ) : null}
 
         {/* ============ MANUAL FORM (fallback / edit / missing fields) ============ */}
-        {showManual ? (
+        {!activation && showManual ? (
           <>
             {missingFields.length > 0 ? (
               <View style={[styles.infoCard, { backgroundColor: "#F59E0B20" }]}>
@@ -743,6 +799,58 @@ const styles = StyleSheet.create({
   loadingOverlay: {
     alignItems: "center",
     paddingVertical: Spacing.xl,
+  },
+  activationWrap: {
+    alignItems: "center",
+    paddingTop: Spacing.xl,
+  },
+  activationIconCircle: {
+    width: 96,
+    height: 96,
+    borderRadius: 48,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.lg,
+  },
+  activationTitle: {
+    ...Typography.h2,
+    textAlign: "center",
+    marginBottom: Spacing.md,
+  },
+  activationTimeChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.full,
+    marginBottom: Spacing.md,
+  },
+  activationTimeText: {
+    ...Typography.small,
+    color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  activationSub: {
+    ...Typography.body,
+    textAlign: "center",
+    marginBottom: Spacing.lg,
+    paddingHorizontal: Spacing.md,
+  },
+  activationEarnCard: {
+    alignSelf: "stretch",
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.lg,
+    alignItems: "center",
+    marginBottom: Spacing.lg,
+  },
+  activationEarnBig: {
+    ...Typography.h1,
+  },
+  activationEarnSmall: {
+    ...Typography.small,
+    textAlign: "center",
+    marginTop: 4,
   },
   saveButton: {
     marginTop: Spacing.sm,

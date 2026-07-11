@@ -5,7 +5,7 @@ import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
 import * as ImagePicker from "expo-image-picker";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
@@ -22,20 +22,43 @@ export default function EditProfileScreen() {
   const { user, updateUser } = useAuth();
   const navigation = useNavigation();
 
+  const queryClient = useQueryClient();
+
   const [name, setName] = useState(user?.name || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [avatar, setAvatar] = useState(user?.avatar || "");
+  const [twitchChannel, setTwitchChannel] = useState<string | null>(null);
+  const [twitchTouched, setTwitchTouched] = useState(false);
+
+  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+    queryKey: ["/api/social/counts"],
+  });
+  const savedTwitch = socialQuery.data?.twitchChannel || "";
+  const twitchValue = twitchTouched ? twitchChannel || "" : savedTwitch;
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
-      return apiRequest(`/api/users/${user?.id}`, {
+      const result = await apiRequest(`/api/users/${user?.id}`, {
         method: "PATCH",
         body: JSON.stringify({ name, phone, avatar }),
         headers: { "Content-Type": "application/json" },
       });
+      if (twitchTouched && (twitchChannel || "").trim() !== savedTwitch) {
+        await apiRequest("/api/me/twitch-channel", {
+          method: "PATCH",
+          body: JSON.stringify({ channel: (twitchChannel || "").trim() || null }),
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return result;
     },
     onSuccess: async (data) => {
       await updateUser({ name, phone, avatar });
+      queryClient.invalidateQueries({ queryKey: ["/api/social/counts"] });
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          typeof query.queryKey[0] === "string" && query.queryKey[0].endsWith("/social-context"),
+      });
       Alert.alert("Success", "Profile updated successfully");
       navigation.goBack();
     },
@@ -159,6 +182,33 @@ export default function EditProfileScreen() {
                 keyboardType="phone-pad"
               />
             </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <ThemedText style={styles.label}>Twitch Channel</ThemedText>
+            <View
+              style={[
+                styles.inputContainer,
+                { backgroundColor: theme.backgroundDefault, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons name="videocam-outline" size={20} color={theme.textMuted} />
+              <TextInput
+                style={[styles.input, { color: theme.text }]}
+                placeholder="Your Twitch username (optional)"
+                placeholderTextColor={theme.textMuted}
+                value={twitchValue}
+                onChangeText={(text) => {
+                  setTwitchTouched(true);
+                  setTwitchChannel(text);
+                }}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+            </View>
+            <ThemedText style={[styles.helperText, { color: theme.textMuted }]}>
+              Link your Twitch channel to stream rides live. Leave empty to remove.
+            </ThemedText>
           </View>
         </View>
 

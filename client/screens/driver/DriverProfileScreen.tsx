@@ -27,6 +27,7 @@ interface DriverData {
   rating: string;
   totalTrips: number;
   totalEarnings: string;
+  prayerRideCount?: number;
 }
 
 type NavigationProp = NativeStackNavigationProp<DriverProfileStackParamList>;
@@ -40,6 +41,11 @@ export default function DriverProfileScreen() {
 
   const { data: driverData } = useQuery<DriverData>({
     queryKey: ["/api/drivers/me"],
+    enabled: !!user,
+  });
+
+  const { data: socialData } = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+    queryKey: ["/api/social/counts"],
     enabled: !!user,
   });
 
@@ -189,6 +195,14 @@ export default function DriverProfileScreen() {
             <ThemedText style={[styles.profileEmail, { color: theme.textSecondary }]}>
               {user?.email}
             </ThemedText>
+            {(driverData?.prayerRideCount ?? 0) > 0 ? (
+              <View style={[styles.prayerBadge, { backgroundColor: Colors.travonyGreen + "18" }]}>
+                <Ionicons name="moon-outline" size={13} color={Colors.travonyGreen} />
+                <ThemedText style={[styles.prayerBadgeText, { color: Colors.travonyGreen }]}>
+                  {driverData?.prayerRideCount} Prayer Ride{(driverData?.prayerRideCount ?? 0) === 1 ? "" : "s"} · Volunteer
+                </ThemedText>
+              </View>
+            ) : null}
           </View>
           <View style={styles.ratingBadge}>
             <Ionicons name="star-outline" size={16} color="#FFC107" />
@@ -237,6 +251,39 @@ export default function DriverProfileScreen() {
             </ThemedText>
           </View>
         </View>
+
+        {socialData ? (
+          <View style={[styles.statsCard, { backgroundColor: theme.backgroundElevated }]}>
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
+                {socialData.followers}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Followers
+              </ThemedText>
+            </View>
+            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
+                {socialData.following}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Following
+              </ThemedText>
+            </View>
+            {socialData.twitchChannel ? (
+              <>
+                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+                <View style={styles.statItem}>
+                  <Ionicons name="videocam-outline" size={20} color={Colors.travonyGreen} />
+                  <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]} numberOfLines={1}>
+                    {socialData.twitchChannel}
+                  </ThemedText>
+                </View>
+              </>
+            ) : null}
+          </View>
+        ) : null}
 
         {menuItems.map((section, sectionIndex) => (
           <View
@@ -304,6 +351,20 @@ const styles = StyleSheet.create({
   },
   ratingText: {
     ...Typography.body,
+    fontWeight: "600",
+  },
+  prayerBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    gap: 4,
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 999,
+  },
+  prayerBadgeText: {
+    fontSize: 12,
     fontWeight: "600",
   },
   statsCard: {

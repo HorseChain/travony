@@ -6,6 +6,7 @@ import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
+import { useQuery } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
@@ -56,6 +57,11 @@ export default function ProfileScreen() {
   const { theme } = useTheme();
   const { user, logout } = useAuth();
   const navigation = useNavigation<NavigationProp>();
+
+  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+    queryKey: ["/api/social/counts"],
+    enabled: !!user,
+  });
 
   const handleLogout = async () => {
     if (Platform.OS === "web") {
@@ -115,6 +121,31 @@ export default function ProfileScreen() {
           <Ionicons name="pencil-outline" size={18} color={theme.primary} />
         </Pressable>
       </View>
+
+      {socialQuery.data ? (
+        <View style={styles.socialRow}>
+          <View style={styles.socialStat}>
+            <ThemedText style={styles.socialCount}>{socialQuery.data.followers}</ThemedText>
+            <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]}>Followers</ThemedText>
+          </View>
+          <View style={[styles.socialDivider, { backgroundColor: theme.border }]} />
+          <View style={styles.socialStat}>
+            <ThemedText style={styles.socialCount}>{socialQuery.data.following}</ThemedText>
+            <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]}>Following</ThemedText>
+          </View>
+          {socialQuery.data.twitchChannel ? (
+            <>
+              <View style={[styles.socialDivider, { backgroundColor: theme.border }]} />
+              <View style={styles.socialStat}>
+                <Ionicons name="videocam-outline" size={18} color={theme.primary} />
+                <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {socialQuery.data.twitchChannel}
+                </ThemedText>
+              </View>
+            </>
+          ) : null}
+        </View>
+      ) : null}
 
       <Card style={styles.menuCard}>
         <MenuItem
@@ -225,6 +256,28 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
+  },
+  socialRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-evenly",
+    marginTop: -Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  socialStat: {
+    alignItems: "center",
+    flexShrink: 1,
+  },
+  socialCount: {
+    ...Typography.h4,
+  },
+  socialLabel: {
+    ...Typography.small,
+    marginTop: 2,
+  },
+  socialDivider: {
+    width: 1,
+    height: 28,
   },
   menuCard: {
     marginBottom: Spacing.lg,

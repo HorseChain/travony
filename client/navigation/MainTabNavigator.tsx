@@ -6,6 +6,7 @@ import { Platform, StyleSheet, View, Pressable } from "react-native";
 import HomeStackNavigator from "@/navigation/HomeStackNavigator";
 import BookingsStackNavigator from "@/navigation/BookingsStackNavigator";
 import WalletStackNavigator from "@/navigation/WalletStackNavigator";
+import SocialStackNavigator from "@/navigation/SocialStackNavigator";
 import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Shadows } from "@/constants/theme";
@@ -14,6 +15,7 @@ export type MainTabParamList = {
   HomeTab: undefined;
   BookingsTab: undefined;
   WalletTab: undefined;
+  SocialTab: undefined;
   ProfileTab: undefined;
 };
 
@@ -82,6 +84,16 @@ export default function MainTabNavigator() {
           title: "Wallet",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="wallet-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="SocialTab"
+        component={SocialStackNavigator}
+        options={{
+          title: "Network",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people-outline" size={size} color={color} />
           ),
         }}
       />

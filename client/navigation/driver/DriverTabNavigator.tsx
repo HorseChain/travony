@@ -10,12 +10,14 @@ import { useDriverRideNotifications } from "@/hooks/useDriverRideNotifications";
 import DriverHomeStackNavigator from "./DriverHomeStackNavigator";
 import DriverEarningsStackNavigator from "./DriverEarningsStackNavigator";
 import DriverHistoryStackNavigator from "./DriverHistoryStackNavigator";
+import SocialStackNavigator from "@/navigation/SocialStackNavigator";
 import DriverProfileStackNavigator from "./DriverProfileStackNavigator";
 
 export type DriverTabParamList = {
   DriverHomeTab: undefined;
   DriverEarningsTab: undefined;
   DriverHistoryTab: undefined;
+  DriverSocialTab: undefined;
   DriverProfileTab: undefined;
 };
 
@@ -86,6 +88,16 @@ export default function DriverTabNavigator() {
           title: "History",
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="time-outline" size={size} color={color} />
+          ),
+        }}
+      />
+      <Tab.Screen
+        name="DriverSocialTab"
+        component={SocialStackNavigator}
+        options={{
+          title: "Network",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="people-outline" size={size} color={color} />
           ),
         }}
       />

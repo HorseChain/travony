@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey, unique } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -57,6 +57,8 @@ export const users = pgTable("users", {
   preferredLanguage: text("preferred_language").default("en"),
   telegramChatId: text("telegram_chat_id"),
   whatsappOptIn: boolean("whatsapp_opt_in").default(false),
+  // Twitch channel login for ride streaming (validated against Twitch on save).
+  twitchChannel: text("twitch_channel"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -84,6 +86,8 @@ export const drivers = pgTable("drivers", {
   minRiderRatingEnabled: boolean("min_rider_rating_enabled").default(false),
   evReady: boolean("ev_ready").default(false),
   evReadyAt: timestamp("ev_ready_at"),
+  prayerPauseEnabled: boolean("prayer_pause_enabled").default(false),
+  prayerPausePrayers: text("prayer_pause_prayers"),
   fleetOwnerId: varchar("fleet_owner_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -215,6 +219,18 @@ export const rides = pgTable("rides", {
   poolGroupId: varchar("pool_group_id"),
   soloFare: decimal("solo_fare", { precision: 10, scale: 2 }),
   sharedDiscountPercent: decimal("shared_discount_percent", { precision: 5, scale: 2 }).default("0.00"),
+  // Name Your Fare (rider-proposed pricing). isNamedFare flags a negotiated
+  // booking; riderProposedFare is the rider's current open offer (server-clamped
+  // between region minFare and the surge-capped server estimate); offerExpiresAt
+  // gates driver visibility — expired offers vanish from the driver feed until
+  // the rider raises (which resets the window). Once a bid is accepted the
+  // agreed price is frozen into estimatedFare and flows downstream unchanged.
+  isNamedFare: boolean("is_named_fare").default(false),
+  riderProposedFare: decimal("rider_proposed_fare", { precision: 10, scale: 2 }),
+  offerExpiresAt: timestamp("offer_expires_at"),
+  // Surge-capped server estimate frozen at booking — the immutable upper bound
+  // for offers/counters so repeated raises can't compound the ceiling upward.
+  offerCeiling: decimal("offer_ceiling", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -560,7 +576,7 @@ export const educationModuleStatusEnum = pgEnum("education_module_status", ["not
 export const intakeChannelEnum = pgEnum("intake_channel", ["facebook", "whatsapp", "telegram", "referral", "website", "other"]);
 export const pmgthSessionStatusEnum = pgEnum("pmgth_session_status", ["active", "completed", "expired", "cancelled"]);
 
-export const hubTypeEnum = pgEnum("hub_type", ["station", "park", "coworking", "coffee_shop", "mall", "airport", "university", "hospital", "custom"]);
+export const hubTypeEnum = pgEnum("hub_type", ["station", "park", "coworking", "coffee_shop", "mall", "airport", "university", "hospital", "mosque", "custom"]);
 export const hubStatusEnum = pgEnum("hub_status", ["active", "inactive", "predicted"]);
 export const hubMessageStatusEnum = pgEnum("hub_message_status", ["active", "expired", "moderated"]);
 export const prestigeTierEnum = pgEnum("prestige_tier", ["bronze", "silver", "gold", "platinum", "diamond"]);
@@ -1178,6 +1194,77 @@ export const hubs = pgTable("hubs", {
   availablePorts: integer("available_ports").default(0),
 });
 
+// On-Time Arrivals: "get me there on time" auto-scheduled rides. The engine
+// computes pickup time = arrival deadline − travel ETA − category buffer and
+// auto-creates the ride ~7 minutes before pickup. Works for malls, airports,
+// universities, hotels, or any destination.
+export const scheduledArrivals = pgTable("scheduled_arrivals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  label: text("label").notNull(),
+  category: text("category").notNull().default("other"),
+  hubId: varchar("hub_id").references(() => hubs.id),
+  destAddress: text("dest_address").notNull(),
+  destLat: decimal("dest_lat", { precision: 10, scale: 8 }).notNull(),
+  destLng: decimal("dest_lng", { precision: 11, scale: 8 }).notNull(),
+  pickupAddress: text("pickup_address").notNull(),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }).notNull(),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }).notNull(),
+  mode: text("mode").notNull().default("once"),
+  arriveAtUtc: timestamp("arrive_at_utc"),
+  daysOfWeek: text("days_of_week"),
+  arriveTimeLocal: text("arrive_time_local"),
+  tzOffsetMinutes: integer("tz_offset_minutes").default(0),
+  bufferMinutes: integer("buffer_minutes").notNull().default(10),
+  status: text("status").notNull().default("active"),
+  lastScheduledKey: text("last_scheduled_key"),
+  lastRideId: varchar("last_ride_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type ScheduledArrival = typeof scheduledArrivals.$inferSelect;
+export type InsertScheduledArrival = typeof scheduledArrivals.$inferInsert;
+
+// Prayer Rides: auto-scheduled rides to a mosque hub before each selected
+// prayer. The deadline engine computes pickup = prayer time − ETA − wudu
+// buffer and auto-dispatches ~7 minutes before pickup.
+export const prayerRideSubscriptions = pgTable("prayer_ride_subscriptions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  hubId: varchar("hub_id").references(() => hubs.id).notNull(),
+  mosqueName: text("mosque_name").notNull(),
+  mosqueAddress: text("mosque_address"),
+  mosqueLat: decimal("mosque_lat", { precision: 10, scale: 8 }).notNull(),
+  mosqueLng: decimal("mosque_lng", { precision: 11, scale: 8 }).notNull(),
+  pickupAddress: text("pickup_address").notNull(),
+  pickupLat: decimal("pickup_lat", { precision: 10, scale: 8 }).notNull(),
+  pickupLng: decimal("pickup_lng", { precision: 11, scale: 8 }).notNull(),
+  prayers: text("prayers").notNull(), // csv: fajr,dhuhr,asr,maghrib,isha,jumuah
+  bufferMinutes: integer("buffer_minutes").notNull().default(10), // wudu buffer
+  status: text("status").notNull().default("active"), // active | paused
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// One row per rider/prayer/day — makes dispatch idempotent (re-runs never
+// double-book) and records one-tap skips.
+export const prayerRideDispatches = pgTable("prayer_ride_dispatches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  subscriptionId: varchar("subscription_id").references(() => prayerRideSubscriptions.id, { onDelete: "cascade" }).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  prayer: text("prayer").notNull(),
+  dayKey: text("day_key").notNull(), // local YYYY-MM-DD at the mosque
+  rideId: varchar("ride_id"),
+  status: text("status").notNull().default("dispatched"), // dispatched | skipped
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  unique("prayer_dispatch_once").on(t.subscriptionId, t.prayer, t.dayKey),
+]);
+
+export type PrayerRideSubscription = typeof prayerRideSubscriptions.$inferSelect;
+export type PrayerRideDispatch = typeof prayerRideDispatches.$inferSelect;
+
 export const hotspots = pgTable("hotspots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   hubId: varchar("hub_id").references(() => hubs.id),
@@ -1363,8 +1450,37 @@ export const rideEventTypeEnum = pgEnum("ride_event_type", [
   "cancelled_system", "fare_updated", "route_deviated", "payment_initiated",
   "payment_completed", "payment_failed", "dispute_opened", "dispute_resolved",
   "tip_added", "rating_submitted", "rematch_initiated", "rematch_completed",
-  "blockchain_recorded", "eta_updated"
+  "blockchain_recorded", "eta_updated",
+  "offer_created", "offer_raised", "offer_expired",
+  "bid_placed", "bid_accepted", "bids_closed"
 ]);
+
+// Name Your Fare driver bids. One row per driver counter-offer on an open
+// named-fare ride. status: active (open counter) → accepted (rider picked it,
+// price frozen into the ride) | closed (another driver won / offer ended).
+export const fareBidStatusEnum = pgEnum("fare_bid_status", [
+  "active", "accepted", "closed"
+]);
+
+export const fareBids = pgTable("fare_bids", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rideId: varchar("ride_id").references(() => rides.id).notNull(),
+  driverId: varchar("driver_id").references(() => drivers.id).notNull(),
+  amount: decimal("amount", { precision: 10, scale: 2 }).notNull(),
+  currency: text("currency").default("AED"),
+  status: fareBidStatusEnum("status").default("active").notNull(),
+  // How many counters this driver has sent on this ride (anti-spam cap).
+  counterCount: integer("counter_count").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  // One bid row per driver per ride — counters update the same row. This is
+  // the DB-level guard that makes the API's upsert race-safe.
+  unique("fare_bids_ride_driver_unique").on(table.rideId, table.driverId),
+]);
+
+export type FareBid = typeof fareBids.$inferSelect;
+export type InsertFareBid = typeof fareBids.$inferInsert;
 
 export const rideEventLog = pgTable("ride_event_log", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -1514,3 +1630,43 @@ export const telegramBookingSessions = pgTable("telegram_booking_sessions", {
 
 export type TelegramBookingSession = typeof telegramBookingSessions.$inferSelect;
 export type InsertTelegramBookingSession = typeof telegramBookingSessions.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Social layer: follows between users + published / Twitch-streamed rides.
+// ---------------------------------------------------------------------------
+
+export const userFollows = pgTable("user_follows", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  followerId: varchar("follower_id").references(() => users.id).notNull(),
+  followingId: varchar("following_id").references(() => users.id).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  // One follow edge per pair — makes follow requests idempotent/race-safe.
+  unique("user_follows_pair_unique").on(table.followerId, table.followingId),
+]);
+
+export type UserFollow = typeof userFollows.$inferSelect;
+export type InsertUserFollow = typeof userFollows.$inferInsert;
+
+export const ridePostTypeEnum = pgEnum("ride_post_type", ["published", "stream"]);
+
+// A ride shared to the social feed. type="published" is an after-ride card;
+// type="stream" is a live Twitch broadcast of an in-progress ride. Privacy:
+// only server-derived, coarse fields are stored (city name, distance) — never
+// addresses or coordinates. twitchChannel is snapshotted at post time.
+export const ridePosts = pgTable("ride_posts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rideId: varchar("ride_id").references(() => rides.id).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  type: ridePostTypeEnum("type").notNull(),
+  twitchChannel: text("twitch_channel"),
+  caption: text("caption"),
+  cityName: text("city_name"),
+  distanceKm: decimal("distance_km", { precision: 8, scale: 2 }),
+  isLive: boolean("is_live").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  endedAt: timestamp("ended_at"),
+});
+
+export type RidePost = typeof ridePosts.$inferSelect;
+export type InsertRidePost = typeof ridePosts.$inferInsert;

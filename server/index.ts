@@ -212,6 +212,14 @@ function configureExpoAndLanding(app: express.Application) {
     "fleet-dashboard.html",
   );
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
+  // New main landing page (noderoad.net): the On-Time Arrivals page.
+  // Served to browsers at "/" — Expo Go manifest requests on "/" are untouched.
+  const ontimeLandingPath = path.resolve(
+    process.cwd(), "server", "templates", "ontime-landing.html",
+  );
+  const ontimeLandingTemplate = fs.existsSync(ontimeLandingPath)
+    ? fs.readFileSync(ontimeLandingPath, "utf-8")
+    : null;
   const adminDashboardTemplate = fs.existsSync(adminTemplatePath) 
     ? fs.readFileSync(adminTemplatePath, "utf-8") 
     : null;
@@ -384,12 +392,7 @@ function configureExpoAndLanding(app: express.Application) {
   });
 
   app.get("/delete-account", (_req: Request, res: Response) => {
-    if (fs.existsSync(dataDeletionPath)) {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      res.status(200).sendFile(dataDeletionPath);
-    } else {
-      res.status(404).send("Account Deletion page not found");
-    }
+    res.redirect(301, "/data-deletion");
   });
 
   app.get("/data-deletion", (_req: Request, res: Response) => {
@@ -507,6 +510,11 @@ function configureExpoAndLanding(app: express.Application) {
     }
 
     if (req.path === "/") {
+      if (ontimeLandingTemplate) {
+        res.setHeader("Content-Type", "text/html; charset=utf-8");
+        res.setHeader("Cache-Control", "no-cache, must-revalidate");
+        return res.status(200).send(ontimeLandingTemplate);
+      }
       return serveLandingPage({
         req,
         res,

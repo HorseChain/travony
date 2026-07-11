@@ -10,6 +10,8 @@ import * as WebBrowser from "expo-web-browser";
 
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
+import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { FollowCounterpartButton, PublishRideCard, useRideSocialContext } from "@/components/RideSocial";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 import type { BookingsStackParamList } from "@/navigation/BookingsStackNavigator";
@@ -60,6 +62,8 @@ export default function RideDetailsScreen() {
     invoiceNumber: string;
   }
   
+  const socialContext = useRideSocialContext(rideId);
+
   const { data: invoices, isLoading: invoicesLoading } = useQuery<Invoice[]>({
     queryKey: ["/api/invoices/ride", rideId],
     enabled: ride?.status === "completed",
@@ -112,7 +116,7 @@ export default function RideDetailsScreen() {
   }
 
   return (
-    <ScrollView
+    <KeyboardAwareScrollViewCompat
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
@@ -291,6 +295,21 @@ export default function RideDetailsScreen() {
         </Card>
       )}
 
+      {socialContext.data?.counterpart || ride.status === "completed" ? (
+        <Card style={styles.detailsCard}>
+          <ThemedText style={styles.cardTitle}>Network</ThemedText>
+          {socialContext.data?.counterpart ? (
+            <View style={styles.socialFollowRow}>
+              <ThemedText style={[styles.detailLabel, { color: theme.textSecondary }]}>
+                You rode with {socialContext.data.counterpart.name}
+              </ThemedText>
+              <FollowCounterpartButton rideId={rideId} />
+            </View>
+          ) : null}
+          <PublishRideCard rideId={rideId} rideStatus={ride.status} />
+        </Card>
+      ) : null}
+
       <View style={styles.actionsContainer}>
         <Pressable
           style={({ pressed }) => [
@@ -317,13 +336,20 @@ export default function RideDetailsScreen() {
           </ThemedText>
         </Pressable>
       </View>
-    </ScrollView>
+    </KeyboardAwareScrollViewCompat>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  socialFollowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: Spacing.md,
+    flexWrap: "wrap",
   },
   loadingContainer: {
     flex: 1,

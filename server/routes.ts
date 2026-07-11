@@ -105,11 +105,17 @@ import * as truthFraud from "./truthFraud";
 import * as ghostRideService from "./ghostRideService";
 import { openClawRouter } from "./hubRoutes";
 import { coffeeRouter } from "./coffeeRoutes";
+import { scheduledArrivalsRouter, startScheduledArrivalsEngine } from "./scheduledArrivals";
+import { nameYourFareRouter, computeNamedFareBounds, clampToBounds, closeOpenBidsForRide, isOfferExpired, OFFER_WINDOW_MS } from "./nameYourFare";
+import { recordRideEvent } from "./rideEventService";
 import { fleetDashboardRouter } from "./fleetDashboardRoutes";
 import { evRouter } from "./evRoutes";
-import { initializeHubs, initializeEvHubs } from "./hubSeeder";
+import { initializeHubs, initializeEvHubs, initializeMosqueHubs } from "./hubSeeder";
+import { prayerRidesRouter, startPrayerRidesEngine, getDriverPrayerPauseState, getMosqueHubZones, isMosqueDestination, rideDistanceKm, LONG_TRIP_KM } from "./prayerRides";
 import type { Ride } from "@shared/schema";
-import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs } from "@shared/schema";
+import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs, prayerRideDispatches } from "@shared/schema";
+import { networkStatsRouter } from "./networkStats";
+import { socialRouter } from "./socialRoutes";
 import { db } from "./db";
 import { eq, and, gte, desc, count, like } from "drizzle-orm";
 
@@ -938,6 +944,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         req.body.isShared = false;
         delete req.body.soloFare;
       }
+      // Name Your Fare (rider-proposed pricing). Only for standard solo rides —
+      // shared pools, Safe Driver and PMGTH keep fixed pricing. The proposed
+      // fare is clamped server-side between the region minimum fare and the
+      // surge-capped server estimate, and that ceiling is frozen onto the ride
+      // so later raises/counters can never push it higher.
+      const wantsNamedFare = req.body.isNamedFare === true || req.body.isNamedFare === "true";
+      const namedFareProposed = parseFloat(req.body.proposedFare || "0");
+      delete req.body.proposedFare;
+      // These are server-derived fields — never trust them from the client.
+      delete req.body.riderProposedFare;
+      delete req.body.offerExpiresAt;
+      delete req.body.offerCeiling;
+      req.body.isNamedFare = false;
+      if (wantsNamedFare && !shareEligible && !isSafeDriverRide && namedFareProposed > 0) {
+        // One open offer per rider: a second named-fare booking while one is
+        // still pending would fragment driver attention and enable spam.
+        const [openOffer] = await db.select({ id: rides.id }).from(rides)
+          .where(and(
+            eq(rides.customerId, customerId),
+            eq(rides.status, "pending"),
+            eq(rides.isNamedFare, true),
+          )).limit(1);
+        if (openOffer) {
+          return res.status(409).json({
+            code: "OFFER_ALREADY_OPEN",
+            message: "You already have an open fare offer. Cancel it or wait for it to close before making another.",
+          });
+        }
+        const nfBounds = await computeNamedFareBounds(
+          createRegionCode,
+          originalServiceType,
+          parseFloat(req.body.distance || "0"),
+          parseInt(req.body.duration || "0", 10) || 0,
+          parseFloat(req.body.estimatedFare || "0"),
+        );
+        const clampedOffer = Math.round(clampToBounds(namedFareProposed, nfBounds) * 100) / 100;
+        req.body.isNamedFare = true;
+        req.body.riderProposedFare = clampedOffer.toFixed(2);
+        req.body.estimatedFare = clampedOffer.toFixed(2);
+        req.body.offerCeiling = nfBounds.ceiling.toFixed(2);
+        req.body.offerExpiresAt = new Date(Date.now() + OFFER_WINDOW_MS);
+      }
       // Recompute the fare actually persisted (discounted preview for shared rides).
       const fareToPersist = parseFloat(req.body.estimatedFare || "0");
       const feeBreakdown = calculateFeeBreakdown(fareToPersist, createFeePercent);
@@ -1056,6 +1104,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isSafeDriver: isSafeDriverRide,
         ...intentData,
       });
+
+      if (ride.isNamedFare) {
+        recordRideEvent({
+          rideId: ride.id,
+          eventType: "offer_created",
+          actorId: customerId,
+          actorRole: "rider",
+          payload: {
+            proposedFare: ride.riderProposedFare,
+            ceiling: ride.offerCeiling,
+            expiresAt: ride.offerExpiresAt,
+          },
+        }).catch(console.error);
+      }
 
       // Broadcast the new ride to EVERY approved, online driver across all
       // channels (Telegram, SMS, WhatsApp, email) so it surfaces instantly
@@ -1354,12 +1416,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
               });
             }
           }
+          // Name Your Fare: an expired offer is invisible to drivers — reject a
+          // straggling accept so the rider can raise or rebook cleanly.
+          if (existingRide.isNamedFare && isOfferExpired(existingRide)) {
+            return res.status(409).json({ message: "This fare offer has expired." });
+          }
           const claimed = await storage.claimPendingRide(existingRide.id, driverRecord.id);
           if (!claimed) {
             return res.status(409).json({ message: "This ride was just accepted by another driver." });
           }
           allowedUpdates.driverId = driverRecord.id;
           allowedUpdates.acceptedAt = claimed.acceptedAt ?? new Date();
+
+          // Driver accepted a named-fare offer at the rider's asking price —
+          // close every open counter-bid instantly (losing drivers see
+          // "offer closed" on their next poll).
+          if (existingRide.isNamedFare) {
+            closeOpenBidsForRide(existingRide.id).catch(console.error);
+          }
           
           guaranteeService.fulfillByRide(driverRecord.id, existingRide.id).catch(console.error);
         }
@@ -2629,7 +2703,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const vehicles = await storage.getDriverVehicles(driver.id);
       const vehicle = vehicles.find((v) => v.isActive) || vehicles[0] || null;
-      res.json({ ...driver, vehicle, vehicles });
+      // Completed FREE prayer rides — shown as a badge on the driver profile.
+      let prayerRideCount = 0;
+      try {
+        const [prayerStats] = await db
+          .select({ n: count() })
+          .from(prayerRideDispatches)
+          .innerJoin(rides, eq(rides.id, prayerRideDispatches.rideId))
+          .where(and(eq(rides.driverId, driver.id), eq(rides.status, "completed")));
+        prayerRideCount = Number(prayerStats?.n || 0);
+      } catch {}
+      res.json({ ...driver, vehicle, vehicles, prayerRideCount });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -2800,9 +2884,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // everything, including Safe Driver jobs.
       const pendingVehicles = await storage.getDriverVehicles(driver.id);
       const driverHasActiveVehicle = pendingVehicles.some((v: any) => v.isActive);
-      const driverRides = driverHasActiveVehicle
+      let driverRides = driverHasActiveVehicle
         ? soloRides
         : soloRides.filter((r: any) => r.isSafeDriver);
+
+      // Name Your Fare: expired offers disappear from the driver feed until
+      // the rider raises their offer (which resets the expiry window).
+      driverRides = driverRides.filter((r: any) => !(r.isNamedFare && isOfferExpired(r)));
       
       console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length} solo + ${sharedCards.length} shared`);
       
@@ -2843,6 +2931,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
         
         // Filter to only show compatible rides from driver's assigned rides
         ridesToShow = driverRides.filter(ride => compatibleRideIds.has(ride.id));
+      }
+
+      // Prayer-Pause: within 30 min of a prayer the driver opted into, hide
+      // long trips (they'd overlap prayer time) and float mosque-bound rides
+      // to the top so the driver can still serve worshippers on the way.
+      const prayerPause = await getDriverPrayerPauseState(driver);
+      if (prayerPause.active) {
+        const mosqueZones = await getMosqueHubZones();
+        const isMosqueRide = (r: any) => isMosqueDestination(r.dropoffLat, r.dropoffLng, mosqueZones);
+        ridesToShow = ridesToShow
+          .filter((r: any) => isMosqueRide(r) || rideDistanceKm(r) <= LONG_TRIP_KM)
+          .sort((a: any, b: any) => Number(isMosqueRide(b)) - Number(isMosqueRide(a)));
+        console.log(`[PENDING-RIDES] Prayer-Pause active for driver ${driver.id} (${prayerPause.prayerLabel}) — ${ridesToShow.length} rides after filter`);
       }
       
       // Enrich rides with customer info and PMGTH premium
@@ -2901,6 +3002,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Safe Driver job: the driver goes to the rider and drives the
           // RIDER'S OWN car to the destination (no driver vehicle needed).
           isSafeDriver: !!(ride as any).isSafeDriver,
+          // Name Your Fare: rider proposed this price — driver can accept
+          // as-is or send a counter-offer.
+          isNamedFare: !!(ride as any).isNamedFare,
+          riderProposedFare: (ride as any).riderProposedFare || null,
+          offerExpiresAt: (ride as any).offerExpiresAt || null,
           // PMGTH premium info - driver earns this extra for direction-compatible rides
           isPmgthRide: !!pmgthInfo,
           pmgthPremiumAmount: pmgthInfo?.premiumAmount || 0,
@@ -3891,6 +3997,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Verification-status integrity: "ai_verified" can ONLY be granted by a fresh,
       // successful AI scan. A manual edit that changes any identity field drops a
       // previously verified vehicle back to pending review so it can't be spoofed.
+      const previousVerificationStatus: string = vehicle?.verificationStatus || "pending";
       let verificationStatus: "pending" | "ai_verified" | "admin_verified" | "rejected" =
         (vehicle?.verificationStatus as any) || "pending";
       let downgraded = false;
@@ -3947,9 +4054,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Instant activation: a fresh, successful AI scan is the approval — the
+      // driver goes straight to "approved" and can receive rides immediately,
+      // exactly like the admin-approval path does. No manual review wait.
+      let driverActivated = false;
+      let driverStatus = driver.status;
+      if (ranAi && verificationStatus === "ai_verified" && driver.status === "pending") {
+        await storage.updateDriver(driver.id, { status: "approved" });
+        driverActivated = true;
+        driverStatus = "approved";
+      }
+
+      // Integrity mirror: if this vehicle just LOST verified status (manual
+      // identity edit or a failed re-scan) and the driver has no other verified
+      // vehicle, the driver drops back to pending — activation can't outlive
+      // the verification that granted it.
+      const wasVerified = previousVerificationStatus === "ai_verified" || previousVerificationStatus === "admin_verified";
+      const lostVerification = wasVerified && verificationStatus === "pending";
+      if (lostVerification && driver.status === "approved") {
+        const allVehicles = await storage.getDriverVehicles(driver.id);
+        const hasOtherVerified = allVehicles.some(
+          (v) => v.id !== vehicle!.id && (v.verificationStatus === "ai_verified" || v.verificationStatus === "admin_verified"),
+        );
+        if (!hasOtherVerified) {
+          await storage.updateDriver(driver.id, { status: "pending" });
+          driverStatus = "pending";
+        }
+      }
+
       res.json({ 
         ...vehicle, 
         verificationStatus,
+        driverActivated,
+        driverStatus,
         aiResult: aiResult ? {
           isValid: aiResult.isValid,
           confidence: aiResult.confidence,
@@ -5547,7 +5684,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ============ CITY LAUNCH & ONBOARDING ROUTES ============
 
-  initializeMexicoCityLaunch().then(() => initializeHubs()).then(() => initializeEvHubs()).catch(console.error);
+  initializeMexicoCityLaunch().then(() => initializeHubs()).then(() => initializeEvHubs()).then(() => initializeMosqueHubs()).catch(console.error);
 
   app.get("/api/expansion-cities", async (req, res) => {
     try {
@@ -6273,8 +6410,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile("drive-with-us.html", { root: "./server/templates" });
   });
 
+  app.get("/ontime", (req, res) => {
+    res.redirect(301, "/");
+  });
+
   app.get("/drive-with-us", (req, res) => {
-    res.sendFile("drive-with-us.html", { root: "./server/templates" });
+    res.redirect(301, "/drive");
   });
 
   app.post("/api/driver-interest", async (req, res) => {
@@ -7754,6 +7895,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use(openClawRouter);
   app.use(coffeeRouter);
+  app.use(scheduledArrivalsRouter);
+  startScheduledArrivalsEngine();
+  app.use(prayerRidesRouter);
+  app.use(networkStatsRouter);
+  app.use(socialRouter);
+  startPrayerRidesEngine();
+  app.use(nameYourFareRouter);
   app.use(fleetDashboardRouter);
   app.use(evRouter);
 

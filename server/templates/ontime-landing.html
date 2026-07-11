@@ -1,0 +1,1409 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <title>Travony — On-Time Arrivals</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="Tell Travony when you need to be there. A driver is on the way at exactly the right moment. No booking, no reminders, no stress." />
+  <meta property="og:title" content="Travony — Arrive Exactly On Time" />
+  <meta property="og:description" content="Tell us when you need to be there. We handle the rest. No booking windows, no reminders — just a driver at exactly the right moment." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://travony.app/" />
+  <meta property="og:image" content="https://travony.app/icons/icon-192.png" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Travony — Arrive Exactly On Time" />
+  <meta name="twitter:description" content="Tell us when you need to be there. We handle the rest. No booking windows, no reminders — just a driver at exactly the right moment." />
+  <meta name="twitter:image" content="https://travony.app/icons/icon-192.png" />
+  <meta name="theme-color" content="#000000" />
+  <link rel="canonical" href="https://travony.app/" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "name": "Travony",
+      "url": "https://travony.app/",
+      "logo": "https://travony.app/icons/icon-512.png",
+      "description": "Travony is an intelligent mobility network that connects riders and vehicle owners through AI-powered intent-based matching and dynamic pricing."
+    },
+    {
+      "@type": "WebSite",
+      "name": "Travony",
+      "url": "https://travony.app/"
+    },
+    {
+      "@type": "Service",
+      "name": "Travony On-Time Arrivals",
+      "provider": {
+        "@type": "Organization",
+        "name": "Travony"
+      },
+      "description": "Tell Travony when you need to be there. A driver is dispatched at exactly the right moment so you arrive on time — no booking windows, no reminders, no stress.",
+      "url": "https://travony.app/"
+    }
+  ]
+}
+  </script>
+  <style>
+    :root {
+      --ink: #171a20;
+      --paper: #ffffff;
+      --accent: #12b981;
+      --radius: 4px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; -webkit-font-smoothing: antialiased; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: "Helvetica Neue", "Segoe UI", Arial, sans-serif;
+      color: var(--ink);
+      background: #000;
+      overflow-x: hidden;
+    }
+
+    /* ---------- Nav ---------- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 2rem; height: 56px;
+      transition: background 0.35s ease, box-shadow 0.35s ease;
+    }
+    nav.solid { background: rgba(255,255,255,0.92); backdrop-filter: blur(14px); box-shadow: 0 1px 0 rgba(0,0,0,0.06); }
+    nav.solid .nv, nav.solid .brand { color: var(--ink); }
+    .brand {
+      color: #fff; text-decoration: none; font-weight: 700; letter-spacing: 0.35em;
+      font-size: 0.95rem; text-transform: uppercase; transition: color 0.35s;
+    }
+    .brand span { color: var(--accent); }
+    .nav-links { display: flex; gap: 0.25rem; }
+    .nv {
+      color: #fff; text-decoration: none; font-size: 0.82rem; font-weight: 500;
+      padding: 0.45rem 0.9rem; border-radius: var(--radius); transition: background 0.2s, color 0.35s;
+      background: transparent; border: 0; cursor: pointer; font-family: inherit;
+    }
+    .nv:hover { background: rgba(0,0,0,0.08); }
+    nav.solid .nv:hover { background: rgba(23,26,32,0.06); }
+    .nv.cta { background: rgba(255,255,255,0.16); backdrop-filter: blur(6px); }
+    nav.solid .nv.cta { background: var(--ink); color: #fff; }
+    @media (max-width: 720px) { .nav-links .hide-m { display: none; } nav { padding: 0 1rem; } }
+
+    /* ---------- Full-screen panels ---------- */
+    .panel {
+      position: relative; min-height: 100vh; min-height: 100svh;
+      display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+      background-size: cover; background-position: center;
+      isolation: isolate;
+    }
+    .panel::after {
+      content: ""; position: absolute; inset: 0; z-index: -1;
+      background: linear-gradient(180deg, rgba(0,0,0,0.42) 0%, rgba(0,0,0,0.05) 34%, rgba(0,0,0,0) 55%, rgba(0,0,0,0.5) 100%);
+    }
+    .panel-head { text-align: center; padding: 16vh 1.25rem 0; }
+    .panel h1, .panel h2 {
+      color: #fff; font-weight: 600; letter-spacing: 0.01em;
+      font-size: clamp(2rem, 5.4vw, 3.4rem); line-height: 1.08;
+      text-shadow: 0 2px 24px rgba(0,0,0,0.35);
+    }
+    .panel .sub {
+      color: rgba(255,255,255,0.92); font-size: clamp(0.95rem, 1.6vw, 1.15rem);
+      font-weight: 400; margin-top: 0.65rem; text-shadow: 0 1px 12px rgba(0,0,0,0.4);
+    }
+    .panel-actions {
+      display: flex; gap: 1rem; flex-wrap: wrap; justify-content: center;
+      padding: 0 1.25rem 9vh; width: 100%;
+    }
+    .btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 240px; height: 40px; padding: 0 2rem;
+      border-radius: var(--radius); border: 0; cursor: pointer;
+      font-size: 0.88rem; font-weight: 600; font-family: inherit;
+      text-decoration: none; transition: transform 0.15s ease, background 0.2s ease, opacity 0.2s;
+    }
+    .btn:active { transform: scale(0.985); }
+    .btn-light { background: rgba(244,244,244,0.92); color: var(--ink); backdrop-filter: blur(8px); }
+    .btn-light:hover { background: #fff; }
+    .btn-dark { background: rgba(23,26,32,0.78); color: #fff; backdrop-filter: blur(8px); }
+    .btn-dark:hover { background: rgba(23,26,32,0.92); }
+    @media (max-width: 560px) { .btn { min-width: 82vw; } .panel-actions { gap: 0.7rem; } }
+
+    /* Per-panel reveal */
+    .fx { opacity: 0; transform: translateY(26px); transition: opacity 0.9s ease, transform 0.9s ease; }
+    .fx.in { opacity: 1; transform: none; }
+    .fx.d1 { transition-delay: 0.12s; } .fx.d2 { transition-delay: 0.24s; }
+
+    .tagline {
+      position: absolute; bottom: 3.2vh; left: 0; right: 0; text-align: center;
+      color: rgba(255,255,255,0.75); font-size: 0.74rem; letter-spacing: 0.22em; text-transform: uppercase;
+    }
+
+    /* ---------- Live prayer strip ---------- */
+    .prayer-live { margin: auto 0; padding: 0 1.25rem; width: 100%; max-width: 760px; align-self: center; }
+    .pl-label {
+      text-align: center; color: rgba(255,255,255,0.8); font-size: 0.72rem;
+      letter-spacing: 0.24em; text-transform: uppercase; margin-bottom: 0.9rem;
+    }
+    .pl-label button {
+      background: none; border: 0; color: #fff; font: inherit; letter-spacing: inherit;
+      text-transform: inherit; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; opacity: 0.9;
+    }
+    .pl-label button:hover { opacity: 1; }
+    .pl-row { display: flex; gap: 0.6rem; justify-content: center; flex-wrap: wrap; }
+    .pchip {
+      flex: 1 1 0; min-width: 108px; max-width: 140px;
+      background: rgba(10, 14, 18, 0.55); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.18); border-radius: 10px;
+      padding: 0.85rem 0.5rem 0.8rem; text-align: center; color: #fff;
+      cursor: pointer; font-family: inherit; transition: transform 0.18s ease, border-color 0.25s, box-shadow 0.25s;
+    }
+    .pchip:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.45); }
+    .pchip .pn { font-size: 0.68rem; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.65); margin-bottom: 0.35rem; }
+    .pchip .pt { font-size: 1.05rem; font-weight: 700; }
+    .pchip.next { border-color: var(--accent); box-shadow: 0 0 30px rgba(18,185,129,0.35); }
+    .pchip.next .pn { color: var(--accent); }
+    .pchip.past { opacity: 0.38; cursor: default; }
+    .pchip.past:hover { transform: none; border-color: rgba(255,255,255,0.18); }
+    .pl-count {
+      text-align: center; margin-top: 0.9rem; color: #fff; font-size: 0.88rem;
+      text-shadow: 0 1px 12px rgba(0,0,0,0.5); min-height: 1.2em;
+    }
+    .pl-count b { color: var(--accent); font-weight: 700; }
+    @media (max-width: 560px) { .pchip { min-width: calc(33% - 0.6rem); } }
+
+    /* ---------- How it works (black interlude) ---------- */
+    .how {
+      background: #000; color: #fff; min-height: 100vh; min-height: 100svh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 7rem 1.5rem; text-align: center;
+    }
+    .how h2 { font-size: clamp(1.9rem, 4.6vw, 3rem); font-weight: 600; margin-bottom: 4.5rem; }
+    .how-steps { display: flex; gap: 4rem; flex-wrap: wrap; justify-content: center; max-width: 1100px; }
+    .step { max-width: 280px; }
+    .step .glyph {
+      width: 64px; height: 64px; margin: 0 auto 1.4rem; border-radius: 50%;
+      border: 1px solid rgba(255,255,255,0.25); display: flex; align-items: center; justify-content: center;
+      transition: border-color 0.4s, box-shadow 0.4s;
+    }
+    .step:hover .glyph { border-color: var(--accent); box-shadow: 0 0 34px rgba(18,185,129,0.25); }
+    .step .glyph svg { width: 26px; height: 26px; stroke: #fff; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+    .step h3 { font-size: 1.05rem; font-weight: 600; margin-bottom: 0.55rem; }
+    .step p { color: rgba(255,255,255,0.64); font-size: 0.92rem; line-height: 1.55; }
+
+    /* ---------- Network live dashboard ---------- */
+    .net {
+      background: radial-gradient(1200px 600px at 50% -10%, rgba(18,185,129,0.08), transparent 60%), #05070a;
+      color: #fff; min-height: 100vh; min-height: 100svh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 7rem 1.25rem;
+    }
+    .net-head { text-align: center; margin-bottom: 2.8rem; }
+    .net-head h2 { font-size: clamp(1.9rem, 4.6vw, 3rem); font-weight: 600; margin: 0.9rem 0 0.5rem; }
+    .net-head p { color: rgba(255,255,255,0.6); font-size: 0.95rem; }
+    .live-pill {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      border: 1px solid rgba(18,185,129,0.45); border-radius: 999px; padding: 0.38rem 1rem;
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent);
+    }
+    .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: netPulse 2s ease-in-out infinite; }
+    @keyframes netPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(18,185,129,0.55); } 50% { box-shadow: 0 0 0 7px rgba(18,185,129,0); } }
+    .net-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 0.9rem; width: 100%; max-width: 1020px;
+    }
+    .stat {
+      background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
+      padding: 1.35rem 0.9rem 1.2rem; text-align: center; cursor: pointer; font-family: inherit; color: #fff;
+      transition: transform 0.18s ease, border-color 0.25s, box-shadow 0.25s;
+    }
+    .stat:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.35); }
+    .stat .v { font-size: clamp(1.7rem, 3.6vw, 2.4rem); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+    .stat .k { font-size: 0.68rem; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.55); margin-top: 0.4rem; }
+    .stat.acc .v { color: var(--accent); }
+    .stat.acc { border-color: rgba(18,185,129,0.4); }
+    .stat.acc:hover { box-shadow: 0 0 34px rgba(18,185,129,0.22); }
+    .stat.poly .v { color: #a07bf0; }
+    .stat.poly { border-color: rgba(130,71,229,0.5); }
+    .stat.poly:hover { box-shadow: 0 0 34px rgba(130,71,229,0.28); }
+    .net-tip {
+      width: 100%; max-width: 1020px; text-align: center; color: rgba(255,255,255,0.7);
+      font-size: 0.88rem; margin-top: 1.1rem; min-height: 1.3em;
+    }
+    .net-tip b { color: #fff; }
+    .net-sub {
+      width: 100%; max-width: 1020px; margin-top: 2.6rem;
+      font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.45);
+      text-align: left; margin-bottom: 0.8rem;
+    }
+    .city-row { display: flex; gap: 0.8rem; flex-wrap: wrap; width: 100%; max-width: 1020px; }
+    .ccard {
+      flex: 1 1 150px; max-width: 240px; background: rgba(255,255,255,0.035);
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 0.95rem 1rem;
+      text-align: left; cursor: pointer; color: #fff; font-family: inherit;
+      transition: transform 0.18s ease, border-color 0.25s;
+    }
+    .ccard:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.4); }
+    .ccard.on { border-color: var(--accent); box-shadow: 0 0 26px rgba(18,185,129,0.2); }
+    .ccard .cn { font-size: 0.95rem; font-weight: 600; }
+    .ccard .cs { font-size: 0.78rem; color: rgba(255,255,255,0.6); margin-top: 0.3rem; }
+    .ccard .cs b { color: var(--accent); font-weight: 700; }
+    .net-empty { color: rgba(255,255,255,0.5); font-size: 0.9rem; }
+    .net-stamp { margin-top: 2.4rem; font-size: 0.74rem; color: rgba(255,255,255,0.4); letter-spacing: 0.08em; }
+
+    /* ---------- Live broadcasts ---------- */
+    .live-pill.red { border-color: rgba(233,25,22,0.55); color: #ff7472; }
+    .live-pill.red .live-dot { background: #e91916; animation: bcPulse 2s ease-in-out infinite; }
+    @keyframes bcPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(233,25,22,0.55); } 50% { box-shadow: 0 0 0 7px rgba(233,25,22,0); } }
+    .bc-chips { display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: center; margin-bottom: 2.2rem; }
+    .bc-chip {
+      background: transparent; border: 1px solid rgba(255,255,255,0.22); border-radius: 999px;
+      color: rgba(255,255,255,0.7); padding: 0.45rem 1.1rem; font-family: inherit;
+      font-size: 0.74rem; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+      cursor: pointer; transition: border-color 0.25s, color 0.25s;
+    }
+    .bc-chip:hover { border-color: rgba(255,255,255,0.5); color: #fff; }
+    .bc-chip.on { border-color: rgba(233,25,22,0.75); color: #ff7472; }
+    .bc-groups { width: 100%; max-width: 1020px; }
+    .bc-country { margin-top: 2.2rem; }
+    .bc-country:first-child { margin-top: 0; }
+    .bc-cname {
+      font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase;
+      color: rgba(255,255,255,0.45); text-align: left; margin-bottom: 0.9rem;
+      padding-bottom: 0.55rem; border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    .bc-city { margin-top: 1.1rem; }
+    .bc-cname + .bc-city { margin-top: 0; }
+    .bc-city-name { font-size: 0.86rem; font-weight: 600; color: rgba(255,255,255,0.85); text-align: left; margin-bottom: 0.6rem; }
+    .bc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.9rem; }
+    .bcard {
+      background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
+      padding: 1rem 1.1rem; text-align: left; color: #fff; cursor: pointer; font-family: inherit;
+      transition: transform 0.18s ease, border-color 0.25s, box-shadow 0.25s;
+    }
+    .bcard:hover { transform: translateY(-3px); border-color: rgba(233,25,22,0.6); }
+    .bcard.on { border-color: #e91916; box-shadow: 0 0 26px rgba(233,25,22,0.22); }
+    .bcard .bn { display: flex; align-items: center; gap: 0.55rem; font-size: 0.95rem; font-weight: 600; }
+    .bc-dot { width: 8px; height: 8px; border-radius: 50%; background: #e91916; flex: none; animation: bcPulse 2s ease-in-out infinite; }
+    .bcard .bs { font-size: 0.78rem; color: rgba(255,255,255,0.6); margin-top: 0.35rem; }
+    .bc-player { width: 100%; max-width: 1020px; margin-top: 1.8rem; display: none; }
+    .bc-player.show { display: block; }
+    .bc-frame { position: relative; padding-top: 56.25%; border-radius: 14px; overflow: hidden; border: 1px solid rgba(255,255,255,0.16); background: #000; }
+    .bc-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+    .bc-player-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; margin-top: 0.7rem; flex-wrap: wrap; }
+    .bc-watching { font-size: 0.82rem; color: rgba(255,255,255,0.65); }
+    .bc-watching b { color: #fff; }
+    .bc-close {
+      background: none; border: 1px solid rgba(255,255,255,0.25); border-radius: 999px;
+      color: rgba(255,255,255,0.75); padding: 0.4rem 1rem; font-family: inherit;
+      font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; cursor: pointer;
+      transition: border-color 0.25s, color 0.25s;
+    }
+    .bc-close:hover { border-color: rgba(255,255,255,0.55); color: #fff; }
+
+    /* ---------- Try it (light form section) ---------- */
+    .try {
+      background: linear-gradient(180deg, #f6f7f8 0%, #fff 40%);
+      min-height: 100vh; min-height: 100svh;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 7rem 1.25rem 5rem;
+    }
+    .try-inner { width: 100%; max-width: 560px; }
+    .try h2 { font-size: clamp(1.9rem, 4.6vw, 2.8rem); font-weight: 600; text-align: center; }
+    .try .lead { text-align: center; color: #5c5e62; margin: 0.7rem 0 3rem; font-size: 0.98rem; }
+
+    .fld { margin-bottom: 1.6rem; }
+    .fld label {
+      display: block; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.14em;
+      text-transform: uppercase; color: #5c5e62; margin-bottom: 0.55rem;
+    }
+    .fld input[type="text"], .fld input[type="tel"], .fld input[type="time"], .fld select {
+      width: 100%; height: 48px; padding: 0 1rem; font-size: 1rem; font-family: inherit;
+      color: var(--ink); background: #fff; border: 1px solid #d6d8db; border-radius: var(--radius);
+      outline: none; transition: border-color 0.2s, box-shadow 0.2s; -webkit-appearance: none; appearance: none;
+    }
+    .fld select {
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%23171a20' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: right 1rem center; padding-right: 2.4rem;
+    }
+    .fld input:focus, .fld select:focus { border-color: var(--ink); box-shadow: 0 0 0 3px rgba(23,26,32,0.08); }
+
+    .chips { display: flex; gap: 0.55rem; flex-wrap: wrap; }
+    .chip {
+      flex: 1 1 calc(25% - 0.55rem); min-width: 110px; height: 50px;
+      border: 1px solid #d6d8db; border-radius: var(--radius); background: #fff;
+      font-size: 0.86rem; font-weight: 600; color: var(--ink); cursor: pointer; font-family: inherit;
+      transition: all 0.18s ease;
+    }
+    .chip:hover { border-color: #9a9da1; }
+    .chip.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+    .chip small { display: block; font-weight: 400; font-size: 0.68rem; color: #8a8d91; margin-top: 1px; }
+    .chip.on small { color: rgba(255,255,255,0.65); }
+
+    .seg { display: flex; border: 1px solid #d6d8db; border-radius: var(--radius); overflow: hidden; }
+    .seg button {
+      flex: 1; height: 46px; border: 0; background: #fff; font-family: inherit;
+      font-size: 0.88rem; font-weight: 600; color: var(--ink); cursor: pointer; transition: background 0.18s;
+    }
+    .seg button.on { background: var(--ink); color: #fff; }
+
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    @media (max-width: 560px) { .row2 { grid-template-columns: 1fr; } }
+
+    .geo-note { font-size: 0.82rem; color: #5c5e62; margin-top: 0.5rem; min-height: 1.1em; }
+    .geo-note.ok { color: #0a8f63; }
+    .geo-note.err { color: #b74134; }
+
+    .submit {
+      width: 100%; height: 52px; border: 0; border-radius: var(--radius);
+      background: var(--ink); color: #fff; font-size: 0.95rem; font-weight: 700; font-family: inherit;
+      letter-spacing: 0.02em; cursor: pointer; transition: opacity 0.2s, transform 0.15s; margin-top: 0.6rem;
+    }
+    .submit:hover { opacity: 0.92; }
+    .submit:active { transform: scale(0.99); }
+    .submit:disabled { opacity: 0.55; cursor: wait; }
+    .form-err {
+      display: none; margin-top: 1rem; padding: 0.85rem 1rem; border-radius: var(--radius);
+      background: #fdecea; color: #8f2a20; font-size: 0.88rem;
+    }
+    .form-err.show { display: block; }
+
+    /* ---------- Ticket result ---------- */
+    .ticket-wrap { display: none; }
+    .ticket-wrap.show { display: block; animation: ticketIn 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes ticketIn { from { opacity: 0; transform: translateY(34px) scale(0.97); } to { opacity: 1; transform: none; } }
+    .ticket {
+      background: #101317; border-radius: 14px; overflow: hidden; color: #fff;
+      box-shadow: 0 30px 80px rgba(0,0,0,0.28);
+    }
+    .ticket-top {
+      padding: 1.6rem 1.8rem 1.3rem; display: flex; justify-content: space-between; align-items: center;
+      background: linear-gradient(120deg, #12161b, #0d2a22);
+    }
+    .ticket-top .tt-brand { font-weight: 700; letter-spacing: 0.3em; font-size: 0.78rem; text-transform: uppercase; }
+    .ticket-top .tt-brand span { color: var(--accent); }
+    .stamp {
+      border: 1.5px solid var(--accent); color: var(--accent); border-radius: 3px;
+      font-size: 0.62rem; font-weight: 800; letter-spacing: 0.18em; padding: 0.32rem 0.6rem; text-transform: uppercase;
+      transform: rotate(-3deg);
+    }
+    .ticket-route { padding: 1.7rem 1.8rem 0.4rem; display: flex; align-items: center; gap: 1rem; }
+    .tr-point { flex: 1; min-width: 0; }
+    .tr-point .k { font-size: 0.64rem; letter-spacing: 0.2em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-bottom: 0.35rem; }
+    .tr-point .v { font-size: 1.02rem; font-weight: 600; line-height: 1.3; overflow-wrap: break-word; }
+    .tr-arrow { flex: 0 0 auto; color: var(--accent); }
+    .ticket-times { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(255,255,255,0.07); margin-top: 1.5rem; }
+    .tk-cell { background: #101317; padding: 1.15rem 0.8rem; text-align: center; }
+    .tk-cell .k { font-size: 0.6rem; letter-spacing: 0.18em; text-transform: uppercase; color: rgba(255,255,255,0.45); margin-bottom: 0.4rem; }
+    .tk-cell .v { font-size: 1.25rem; font-weight: 700; }
+    .tk-cell.hi .v { color: var(--accent); }
+    .ticket-foot {
+      padding: 1.15rem 1.8rem; display: flex; justify-content: space-between; align-items: center;
+      border-top: 1px dashed rgba(255,255,255,0.16); font-size: 0.8rem; color: rgba(255,255,255,0.55);
+    }
+    .ticket-foot b { color: #fff; font-weight: 600; }
+    .again {
+      margin-top: 1.4rem; width: 100%; height: 48px; border: 1px solid #d6d8db; background: #fff;
+      border-radius: var(--radius); font-family: inherit; font-size: 0.9rem; font-weight: 600; color: var(--ink);
+      cursor: pointer; transition: border-color 0.2s;
+    }
+    .again:hover { border-color: var(--ink); }
+
+    footer {
+      background: #000; color: rgba(255,255,255,0.45); text-align: center;
+      padding: 2.4rem 1rem; font-size: 0.78rem; letter-spacing: 0.06em;
+    }
+    footer a { color: rgba(255,255,255,0.75); text-decoration: none; margin: 0 0.6rem; }
+    footer a:hover { color: #fff; }
+  </style>
+</head>
+<body>
+
+<nav id="nav">
+  <a class="brand" href="#top">Travony<span>.</span></a>
+  <div class="nav-links">
+    <button class="nv hide-m" data-go="airport">Airport</button>
+    <button class="nv hide-m" data-go="university">University</button>
+    <button class="nv hide-m" data-go="mall">Mall</button>
+    <button class="nv hide-m" data-go="hotel">Hotel</button>
+    <button class="nv hide-m" data-go="prayer">Prayer</button>
+    <button class="nv hide-m" data-go="network">Network</button>
+    <button class="nv hide-m" data-go="live">Live</button>
+    <button class="nv cta" data-go="try">Schedule</button>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="panel" id="top" style="background-image:url('/landing/hero.jpg')">
+  <div class="panel-head">
+    <h1 class="fx">Arrive Exactly On Time</h1>
+    <p class="sub fx d1">Tell us when you need to be there. We handle the rest.</p>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-go="try">Schedule Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">Learn More</button>
+  </div>
+  <div class="tagline">Live on the Travony network</div>
+</section>
+
+<!-- AIRPORT -->
+<section class="panel" id="airport" data-bg="/landing/airport.jpg">
+  <div class="panel-head">
+    <h2 class="fx">Airport</h2>
+    <p class="sub fx d1">Never watch the clock at the gate. The check-in margin is built in for you.</p>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-cat="airport" data-go="try">Schedule Airport Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">How It Works</button>
+  </div>
+</section>
+
+<!-- UNIVERSITY -->
+<section class="panel" id="university" data-bg="/landing/university.jpg">
+  <div class="panel-head">
+    <h2 class="fx">University</h2>
+    <p class="sub fx d1">Walk in before the lecture starts. Every single morning.</p>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-cat="university" data-go="try">Schedule Campus Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">How It Works</button>
+  </div>
+</section>
+
+<!-- MALL -->
+<section class="panel" id="mall" data-bg="/landing/mall.jpg">
+  <div class="panel-head">
+    <h2 class="fx">Mall</h2>
+    <p class="sub fx d1">Be there when the doors open — or exactly when your friends are.</p>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-cat="mall" data-go="try">Schedule Mall Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">How It Works</button>
+  </div>
+</section>
+
+<!-- HOTEL -->
+<section class="panel" id="hotel" data-bg="/landing/hotel.jpg">
+  <div class="panel-head">
+    <h2 class="fx">Hotel</h2>
+    <p class="sub fx d1">Arrive composed. Your car is already part of the plan.</p>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-cat="hotel" data-go="try">Schedule Hotel Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">How It Works</button>
+  </div>
+</section>
+
+<!-- PRAYER -->
+<section class="panel" id="prayer" data-bg="/landing/prayer.jpg">
+  <div class="panel-head">
+    <h2 class="fx">Prayer</h2>
+    <p class="sub fx d1">Scheduled backwards from the adhan — wudu time included.</p>
+  </div>
+  <div class="prayer-live fx d1">
+    <div class="pl-label" id="plLabel">Today in Dubai &middot; <button type="button" id="plGeo">use my location</button></div>
+    <div class="pl-row" id="plRow"></div>
+    <div class="pl-count" id="plCount"></div>
+  </div>
+  <div class="panel-actions">
+    <button class="btn btn-light fx d1" data-cat="mosque" data-go="try">Schedule Mosque Arrival</button>
+    <button class="btn btn-dark fx d2" data-go="how">How It Works</button>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how" id="how">
+  <h2 class="fx">You set the moment.<br />We do everything else.</h2>
+  <div class="how-steps">
+    <div class="step fx">
+      <div class="glyph">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+      </div>
+      <h3>Name the moment</h3>
+      <p>Pick your destination and the exact time you need to walk in the door.</p>
+    </div>
+    <div class="step fx d1">
+      <div class="glyph">
+        <svg viewBox="0 0 24 24"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><circle cx="12" cy="12" r="3.5"/></svg>
+      </div>
+      <h3>The network computes</h3>
+      <p>Travony works backwards from your moment — traffic, distance and a smart safety margin.</p>
+    </div>
+    <div class="step fx d2">
+      <div class="glyph">
+        <svg viewBox="0 0 24 24"><path d="M5 17h14M6.5 17l1-4.5A2 2 0 0 1 9.4 11h5.2a2 2 0 0 1 1.9 1.5l1 4.5M7 20a1.5 1.5 0 1 0 0-3M17 20a1.5 1.5 0 1 0 0-3"/><path d="M9 8l2 2 4-4"/></svg>
+      </div>
+      <h3>A driver appears</h3>
+      <p>At exactly the right minute, a real driver from the network is at your door.</p>
+    </div>
+  </div>
+</section>
+
+<!-- LIVE NETWORK DASHBOARD -->
+<section class="net" id="network">
+  <div class="net-head">
+    <span class="live-pill fx"><span class="live-dot"></span>Live network</span>
+    <h2 class="fx d1">The network, right now.</h2>
+    <p class="fx d1">Real numbers, straight from the Travony network. Tap anything to learn what it means.</p>
+  </div>
+
+  <div class="net-grid fx d1" id="netLive"></div>
+  <div class="net-tip" id="netTip"></div>
+
+  <div class="net-sub fx d2">Since launch</div>
+  <div class="net-grid fx d2" id="netTotals"></div>
+
+  <div class="net-sub fx d2">Live by city</div>
+  <div class="city-row fx d2" id="netCities"><span class="net-empty">Connecting to the network…</span></div>
+
+  <div class="net-stamp" id="netStamp"></div>
+</section>
+
+<!-- LIVE BROADCASTS -->
+<section class="net" id="live">
+  <div class="net-head">
+    <span class="live-pill red fx"><span class="live-dot"></span>Live broadcasts</span>
+    <h2 class="fx d1">Rides, broadcast live.</h2>
+    <p class="fx d1">Riders and drivers streaming their Travony journeys on Twitch right now — grouped by country and city.</p>
+  </div>
+
+  <div class="bc-chips fx d1" id="bcChips"></div>
+  <div class="bc-groups fx d1" id="bcGroups"><span class="net-empty">Checking who is live…</span></div>
+
+  <div class="bc-player" id="bcPlayer">
+    <div class="bc-frame" id="bcFrame"></div>
+    <div class="bc-player-bar">
+      <span class="bc-watching" id="bcWatching"></span>
+      <button type="button" class="bc-close" id="bcClose">Close player</button>
+    </div>
+  </div>
+
+  <div class="net-stamp" id="bcStamp"></div>
+</section>
+
+<!-- TRY IT LIVE -->
+<section class="try" id="try">
+  <div class="try-inner">
+    <div id="formBlock">
+      <h2 class="fx">Try It Live</h2>
+      <p class="lead fx d1">This is not a demo. Your request enters the real Travony network.</p>
+
+      <div class="fld fx">
+        <label for="fName">Your name</label>
+        <input type="text" id="fName" maxlength="60" placeholder="Amina Al Zaabi" autocomplete="name" />
+      </div>
+
+      <div class="fld fx">
+        <label for="fPhone">Phone (with country code)</label>
+        <input type="tel" id="fPhone" placeholder="+971 50 123 4567" autocomplete="tel" />
+      </div>
+
+      <div class="fld fx">
+        <label for="fHub">Where do you need to be?</label>
+        <select id="fHub"><option value="">Loading destinations…</option></select>
+      </div>
+
+      <div class="fld fx">
+        <label>What kind of arrival?</label>
+        <div class="chips" id="cats">
+          <button type="button" class="chip" data-v="airport">Airport<small>widest margin</small></button>
+          <button type="button" class="chip" data-v="university">University<small>tight margin</small></button>
+          <button type="button" class="chip on" data-v="mall">Mall<small>relaxed</small></button>
+          <button type="button" class="chip" data-v="hotel">Hotel<small>composed</small></button>
+          <button type="button" class="chip" data-v="mosque">Mosque<small>wudu time</small></button>
+        </div>
+      </div>
+
+      <div class="fld fx">
+        <label>When must you arrive?</label>
+        <div class="row2">
+          <div class="seg" id="daySeg">
+            <button type="button" class="on" data-d="0">Today</button>
+            <button type="button" data-d="1">Tomorrow</button>
+          </div>
+          <input type="time" id="fTime" />
+        </div>
+      </div>
+
+      <div class="fld fx">
+        <label>Pickup</label>
+        <div class="seg" id="pickSeg">
+          <button type="button" class="on" data-p="geo">Use my location</button>
+          <button type="button" data-p="hub">From another hub</button>
+        </div>
+        <div id="geoRow"><div class="geo-note" id="geoNote">We only use your location to plan the pickup.</div></div>
+        <div id="hubRow" style="display:none; margin-top:0.8rem;">
+          <select id="fPickupHub"><option value="">Choose a pickup hub…</option></select>
+        </div>
+      </div>
+
+      <button class="submit fx" id="go">Enter the Network</button>
+      <div class="form-err" id="err"></div>
+    </div>
+
+    <div class="ticket-wrap" id="ticketWrap">
+      <div class="ticket">
+        <div class="ticket-top">
+          <div class="tt-brand">Travony<span>.</span></div>
+          <div class="stamp">On the network</div>
+        </div>
+        <div class="ticket-route">
+          <div class="tr-point">
+            <div class="k">Pickup</div>
+            <div class="v" id="tFrom">—</div>
+          </div>
+          <div class="tr-arrow">
+            <svg width="34" height="14" viewBox="0 0 34 14" fill="none"><path d="M0 7h30M25 1.5L31.5 7 25 12.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </div>
+          <div class="tr-point" style="text-align:right;">
+            <div class="k">Destination</div>
+            <div class="v" id="tTo">—</div>
+          </div>
+        </div>
+        <div class="ticket-times">
+          <div class="tk-cell"><div class="k">Driver moves</div><div class="v" id="tDispatch">—</div></div>
+          <div class="tk-cell"><div class="k">Pickup</div><div class="v" id="tPickup">—</div></div>
+          <div class="tk-cell hi"><div class="k">You arrive</div><div class="v" id="tArrive">—</div></div>
+        </div>
+        <div class="ticket-foot">
+          <div>Passenger&nbsp; <b id="tName">—</b></div>
+          <div id="tWhen">—</div>
+        </div>
+      </div>
+      <button class="again" id="again">Schedule Another Arrival</button>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div>
+    <a href="/drive">Drive with Travony</a>
+    <a href="/privacy">Privacy</a>
+    <a href="/terms">Terms</a>
+    <a href="/support">Support</a>
+  </div>
+  <div style="margin-top:0.9rem;">Travony — the intelligent mobility network</div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var $ = function (id) { return document.getElementById(id); };
+
+  /* ---------- Nav: solid over the light form section ---------- */
+  var nav = $("nav");
+  var trySection = document.querySelector(".try");
+  function navTint() {
+    var r = trySection.getBoundingClientRect();
+    nav.classList.toggle("solid", r.top < 56 && r.bottom > 0);
+  }
+  window.addEventListener("scroll", navTint, { passive: true });
+  navTint();
+
+  /* ---------- Category selection (shared by section buttons + chips) ---------- */
+  function selectCat(v) {
+    document.querySelectorAll("#cats .chip").forEach(function (c) {
+      c.classList.toggle("on", c.getAttribute("data-v") === v);
+    });
+  }
+  document.querySelectorAll("#cats .chip").forEach(function (c) {
+    c.addEventListener("click", function () { selectCat(c.getAttribute("data-v")); });
+  });
+
+  /* ---------- Smooth scroll for every [data-go] ---------- */
+  document.querySelectorAll("[data-go]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      var cat = el.getAttribute("data-cat");
+      if (cat) selectCat(cat);
+      var target = document.getElementById(el.getAttribute("data-go"));
+      if (target) target.scrollIntoView({ behavior: "smooth" });
+    });
+  });
+
+  /* ---------- Reveal on scroll (skipped if motion is reduced) ---------- */
+  var noMotion = /(^|[?&])static=1/.test(location.search) ||
+    (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  if (noMotion) {
+    document.documentElement.style.scrollBehavior = "auto";
+    document.querySelectorAll(".fx").forEach(function (el) { el.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { threshold: 0.2 });
+    document.querySelectorAll(".fx").forEach(function (el) { io.observe(el); });
+  }
+
+  /* ---------- Load hubs ---------- */
+  var hubs = [];
+  var countryNames = { AE: "United Arab Emirates", SA: "Saudi Arabia", KW: "Kuwait", BH: "Bahrain" };
+  function fillSelect(sel, placeholder) {
+    sel.innerHTML = "";
+    var p = document.createElement("option");
+    p.value = ""; p.textContent = placeholder;
+    sel.appendChild(p);
+    var groups = {};
+    hubs.forEach(function (h) {
+      var key = (countryNames[h.country] || h.country || "Other") + " — " + (h.city || "Other");
+      (groups[key] = groups[key] || []).push(h);
+    });
+    Object.keys(groups).sort().forEach(function (key) {
+      var og = document.createElement("optgroup");
+      og.label = key;
+      groups[key].sort(function (a, b) { return a.name.localeCompare(b.name); }).forEach(function (h) {
+        var o = document.createElement("option");
+        o.value = h.id; o.textContent = h.name;
+        og.appendChild(o);
+      });
+      sel.appendChild(og);
+    });
+  }
+  fetch("/api/ontime/hubs")
+    .then(function (r) { return r.json(); })
+    .then(function (data) {
+      hubs = Array.isArray(data) ? data : [];
+      fillSelect($("fHub"), "Choose your destination…");
+      fillSelect($("fPickupHub"), "Choose a pickup hub…");
+    })
+    .catch(function () {
+      $("fHub").innerHTML = "<option value=''>Could not load destinations — refresh the page</option>";
+    });
+
+  /* ---------- Live prayer times ---------- */
+  var PRAYER_ORDER = ["fajr", "dhuhr", "asr", "maghrib", "isha"];
+  var PRAYER_LABELS = { fajr: "Fajr", dhuhr: "Dhuhr", asr: "Asr", maghrib: "Maghrib", isha: "Isha", jumuah: "Jumu'ah" };
+  var prayerTz = "Asia/Dubai";
+  var prayerData = null;
+  var prayerTick = null;
+
+  function fmtPrayer(iso) {
+    var opts = { hour: "numeric", minute: "2-digit" };
+    if (prayerTz) opts.timeZone = prayerTz;
+    return new Date(iso).toLocaleTimeString([], opts);
+  }
+
+  function renderPrayerStrip() {
+    if (!prayerData) return;
+    var row = $("plRow");
+    row.innerHTML = "";
+    var now = Date.now();
+    var cutoff = now + 20 * 60 * 1000;
+    var nextKey = null;
+    PRAYER_ORDER.forEach(function (p) {
+      var iso = prayerData.times[p];
+      if (!iso) return;
+      if (!nextKey && new Date(iso).getTime() > now) nextKey = p;
+    });
+    var nextClickable = nextKey ? new Date(prayerData.times[nextKey]).getTime() >= cutoff : false;
+    PRAYER_ORDER.forEach(function (p) {
+      var iso = prayerData.times[p];
+      if (!iso) return;
+      var t = new Date(iso).getTime();
+      var label = (p === "dhuhr" && prayerData.isFriday) ? PRAYER_LABELS.jumuah : PRAYER_LABELS[p];
+      var chip = document.createElement("button");
+      chip.type = "button";
+      chip.className = "pchip" + (t < cutoff ? " past" : "") + (p === nextKey && nextClickable ? " next" : "");
+      chip.innerHTML = '<div class="pn"></div><div class="pt"></div>';
+      chip.querySelector(".pn").textContent = label;
+      chip.querySelector(".pt").textContent = fmtPrayer(iso);
+      if (t >= cutoff) {
+        chip.addEventListener("click", function () {
+          var d = new Date(iso);
+          var today = new Date();
+          var isTomorrow =
+            d.getFullYear() !== today.getFullYear() ||
+            d.getMonth() !== today.getMonth() ||
+            d.getDate() !== today.getDate();
+          dayOffset = isTomorrow ? 1 : 0;
+          $("daySeg").querySelectorAll("button").forEach(function (x) {
+            x.classList.toggle("on", x.getAttribute("data-d") === String(dayOffset));
+          });
+          $("fTime").value =
+            String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+          selectCat("mosque");
+          document.getElementById("try").scrollIntoView({ behavior: noMotion ? "auto" : "smooth" });
+        });
+      }
+      row.appendChild(chip);
+    });
+    var count = $("plCount");
+    if (nextKey) {
+      var mins = Math.max(1, Math.round((new Date(prayerData.times[nextKey]).getTime() - now) / 60000));
+      var h = Math.floor(mins / 60), m = mins % 60;
+      var label = (nextKey === "dhuhr" && prayerData.isFriday) ? PRAYER_LABELS.jumuah : PRAYER_LABELS[nextKey];
+      count.innerHTML = "";
+      var b = document.createElement("b");
+      b.textContent = label;
+      count.appendChild(b);
+      var tail = nextClickable
+        ? "m. Tap a prayer to schedule your arrival."
+        : "m.";
+      count.appendChild(document.createTextNode(" is next — in " + (h > 0 ? h + "h " : "") + m + tail));
+    } else {
+      count.textContent = "Today's prayers are complete. Fajr returns tomorrow.";
+    }
+  }
+
+  function loadPrayerTimes(lat, lng) {
+    fetch("/api/prayer-rides/times?lat=" + lat + "&lng=" + lng)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.times) throw new Error("bad");
+        prayerData = data;
+        renderPrayerStrip();
+        if (prayerTick) clearInterval(prayerTick);
+        prayerTick = setInterval(renderPrayerStrip, 30000);
+      })
+      .catch(function () {
+        $("plCount").textContent = "Prayer times are catching their breath — refresh to try again.";
+      });
+  }
+  loadPrayerTimes(25.2048, 55.2708);
+
+  function requestPrayerGeo() {
+    if (!navigator.geolocation) return;
+    var lbl = $("plLabel");
+    lbl.textContent = "Finding your location…";
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        prayerTz = null; /* visitor's own timezone */
+        lbl.textContent = "Today at your location";
+        loadPrayerTimes(pos.coords.latitude, pos.coords.longitude);
+      },
+      function () {
+        lbl.innerHTML = 'Today in Dubai &middot; <button type="button">use my location</button>';
+        lbl.querySelector("button").addEventListener("click", requestPrayerGeo);
+        $("plCount").textContent = "We couldn't read your location — showing Dubai times.";
+      },
+      { enableHighAccuracy: false, timeout: 10000, maximumAge: 300000 }
+    );
+  }
+  $("plGeo").addEventListener("click", requestPrayerGeo);
+
+  /* ---------- Day segment ---------- */
+  var dayOffset = 0;
+  $("daySeg").querySelectorAll("button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      dayOffset = parseInt(b.getAttribute("data-d"), 10);
+      $("daySeg").querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+    });
+  });
+
+  /* ---------- Pickup segment + geolocation ---------- */
+  var pickMode = "geo";
+  var geo = null;
+  var geoNote = $("geoNote");
+  function requestGeo() {
+    if (!navigator.geolocation) {
+      geoNote.textContent = "Location is not available in this browser — choose a pickup hub instead.";
+      geoNote.className = "geo-note err";
+      return;
+    }
+    geoNote.textContent = "Finding your location…";
+    geoNote.className = "geo-note";
+    navigator.geolocation.getCurrentPosition(
+      function (pos) {
+        geo = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        geoNote.textContent = "Location locked in. Your driver will come to you.";
+        geoNote.className = "geo-note ok";
+      },
+      function () {
+        geo = null;
+        geoNote.textContent = "We couldn't access your location — allow it, or choose a pickup hub instead.";
+        geoNote.className = "geo-note err";
+      },
+      { enableHighAccuracy: false, timeout: 12000, maximumAge: 120000 }
+    );
+  }
+  $("pickSeg").querySelectorAll("button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      pickMode = b.getAttribute("data-p");
+      $("pickSeg").querySelectorAll("button").forEach(function (x) { x.classList.toggle("on", x === b); });
+      $("geoRow").style.display = pickMode === "geo" ? "block" : "none";
+      $("hubRow").style.display = pickMode === "hub" ? "block" : "none";
+      if (pickMode === "geo" && !geo) requestGeo();
+    });
+  });
+
+  /* Ask for location the first time the visitor reaches the form */
+  var askedGeo = false;
+  new IntersectionObserver(function (entries, obs) {
+    entries.forEach(function (e) {
+      if (e.isIntersecting && !askedGeo) {
+        askedGeo = true;
+        if (pickMode === "geo") requestGeo();
+        obs.disconnect();
+      }
+    });
+  }, { threshold: 0.3 }).observe(document.getElementById("try"));
+
+  /* ---------- Helpers ---------- */
+  function fmtTime(iso) {
+    return new Date(iso).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+  function fmtDay(iso) {
+    var d = new Date(iso);
+    var today = new Date();
+    var tomorrow = new Date(today.getTime() + 86400000);
+    function same(a, b) { return a.toDateString() === b.toDateString(); }
+    if (same(d, today)) return "Today";
+    if (same(d, tomorrow)) return "Tomorrow";
+    return d.toLocaleDateString([], { weekday: "long" });
+  }
+  function showErr(msg) {
+    var e = $("err");
+    e.textContent = msg;
+    e.classList.add("show");
+  }
+  function clearErr() { $("err").classList.remove("show"); }
+
+  /* ---------- Submit ---------- */
+  $("go").addEventListener("click", function () {
+    clearErr();
+    var name = $("fName").value.trim();
+    if (!name) return showErr("Please enter your name.");
+    var phone = $("fPhone").value.trim();
+    var digits = phone.replace(/[^0-9]/g, "");
+    if (digits.length < 8 || digits.length > 15) return showErr("Please enter a valid phone number with your country code.");
+    var hubId = $("fHub").value;
+    if (!hubId) return showErr("Please choose where you need to be.");
+    var catBtn = document.querySelector("#cats .chip.on");
+    var category = catBtn ? catBtn.getAttribute("data-v") : "mall";
+    var t = $("fTime").value;
+    if (!t) return showErr("Please choose your arrival time.");
+    var parts = t.split(":");
+    var when = new Date();
+    when.setDate(when.getDate() + dayOffset);
+    when.setHours(parseInt(parts[0], 10), parseInt(parts[1], 10), 0, 0);
+    if (when.getTime() < Date.now() + 20 * 60 * 1000) {
+      return showErr(dayOffset === 0
+        ? "That time is too soon — pick a time at least 20 minutes from now, or switch to Tomorrow."
+        : "Please pick a valid time.");
+    }
+
+    var body = {
+      name: name,
+      phone: phone,
+      hubId: hubId,
+      category: category,
+      arriveAtUtc: when.toISOString(),
+    };
+    if (pickMode === "hub") {
+      var ph = $("fPickupHub").value;
+      if (!ph) return showErr("Please choose a pickup hub.");
+      if (ph === hubId) return showErr("Pickup and destination can't be the same hub.");
+      body.pickupHubId = ph;
+    } else {
+      if (!geo) {
+        requestGeo();
+        return showErr("We need your location for pickup — allow it, or switch to \u201CFrom another hub\u201D.");
+      }
+      body.pickupLat = geo.lat;
+      body.pickupLng = geo.lng;
+    }
+
+    var btn = $("go");
+    btn.disabled = true;
+    btn.textContent = "Entering the network…";
+    fetch("/api/ontime/try", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (res) {
+        btn.disabled = false;
+        btn.textContent = "Enter the Network";
+        if (!res.ok) return showErr(res.j && res.j.error ? res.j.error : "Something went wrong — please try again.");
+        var d = res.j;
+        var destHub = hubs.find(function (h) { return h.id === hubId; });
+        $("tTo").textContent = destHub ? destHub.name : "Your destination";
+        if (pickMode === "hub") {
+          var pHub = hubs.find(function (h) { return h.id === body.pickupHubId; });
+          $("tFrom").textContent = pHub ? pHub.name : "Pickup hub";
+        } else {
+          $("tFrom").textContent = "Your location";
+        }
+        var nx = d.next || {};
+        $("tDispatch").textContent = nx.dispatchAt ? fmtTime(nx.dispatchAt) : "—";
+        $("tPickup").textContent = nx.pickupAt ? fmtTime(nx.pickupAt) : "—";
+        $("tArrive").textContent = nx.arriveBy ? fmtTime(nx.arriveBy) : fmtTime(when.toISOString());
+        $("tName").textContent = name;
+        $("tWhen").textContent = fmtDay(nx.arriveBy || when.toISOString());
+        $("formBlock").style.display = "none";
+        $("ticketWrap").classList.add("show");
+        document.getElementById("try").scrollIntoView({ behavior: "smooth" });
+      })
+      .catch(function () {
+        btn.disabled = false;
+        btn.textContent = "Enter the Network";
+        showErr("Network error — please try again.");
+      });
+  });
+
+  /* Enter key submits from any text field */
+  $("formBlock").addEventListener("keydown", function (e) {
+    if (e.key === "Enter" && e.target && /^(INPUT|SELECT)$/.test(e.target.tagName)) {
+      e.preventDefault();
+      $("go").click();
+    }
+  });
+
+  $("again").addEventListener("click", function () {
+    $("ticketWrap").classList.remove("show");
+    $("formBlock").style.display = "block";
+    clearErr();
+  });
+
+  /* ---------- Live network dashboard ---------- */
+  var NET_LIVE = [
+    ["nsDrivers", "Drivers online", "acc", "Drivers signed in and ready to take rides at this very moment."],
+    ["nsRiders", "Riders connected", "", "Riders with an active session on the network right now."],
+    ["nsTrips", "Rides in progress", "", "Trips happening somewhere on the network at this second."],
+    ["nsLiveCities", "Cities live now", "", "Cities with at least one driver or rider online right now."]
+  ];
+  var NET_TOTALS = [
+    ["nsDone", "Rides completed", "", "Every trip the network has completed since launch."],
+    ["nsPrayer", "Free prayer rides", "acc", "Completed prayer rides — every single one is 100% free. Drivers volunteer these trips."],
+    ["nsPoly", "Polygon transactions", "poly", "Ride records sealed on the Polygon blockchain — permanent and tamper-proof."],
+    ["nsOntime", "On-time arrivals", "", "Rides scheduled backwards from a moment — walk in exactly on time."],
+    ["nsCoffee", "Coffee orders", "", "Coffee ordered, picked up or gifted through Travony."],
+    ["nsHubs", "Community hubs", "", "Gathering points across the network — malls, airports, universities and more."],
+    ["nsMosques", "Mosque hubs", "", "Mosques on the network serving free prayer rides."],
+    ["nsEv", "EV hubs", "", "Hubs with charging ports for electric drivers."],
+    ["nsCities", "Cities ready", "", "Cities where Travony is ready to operate today."]
+  ];
+
+  function mkStats(wrapId, defs) {
+    var wrap = $(wrapId);
+    wrap.innerHTML = "";
+    defs.forEach(function (d) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "stat" + (d[2] ? " " + d[2] : "");
+      b.innerHTML = '<div class="v" id="' + d[0] + '">—</div><div class="k">' + d[1] + "</div>";
+      b.addEventListener("click", function () {
+        $("netTip").innerHTML = "<b>" + d[1] + ":</b> " + d[3];
+      });
+      wrap.appendChild(b);
+    });
+  }
+  mkStats("netLive", NET_LIVE);
+  mkStats("netTotals", NET_TOTALS);
+
+  var netPrev = {};
+  function setNum(id, val) {
+    var el = $(id);
+    if (!el) return;
+    val = Number(val) || 0;
+    var from = netPrev[id];
+    netPrev[id] = val;
+    if (noMotion || from === undefined || from === val) {
+      el.textContent = val.toLocaleString();
+      return;
+    }
+    var start = null, dur = 700;
+    function tick(ts) {
+      if (start === null) start = ts;
+      var p = Math.min(1, (ts - start) / dur);
+      p = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (val - from) * p).toLocaleString();
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
+  }
+
+  function renderCities(list) {
+    var wrap = $("netCities");
+    wrap.innerHTML = "";
+    if (!list.length) {
+      var s = document.createElement("span");
+      s.className = "net-empty";
+      s.textContent = "A quiet moment — no drivers or riders are online right now.";
+      wrap.appendChild(s);
+      return;
+    }
+    list.forEach(function (c) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "ccard";
+      var stat = "<b>" + c.drivers + "</b> driver" + (c.drivers === 1 ? "" : "s") + " online" +
+        (c.riders > 0 ? " · <b>" + c.riders + "</b> rider" + (c.riders === 1 ? "" : "s") : "");
+      b.innerHTML = '<div class="cn">' + c.name + '</div><div class="cs">' + stat + "</div>";
+      b.addEventListener("click", function () {
+        var was = b.classList.contains("on");
+        wrap.querySelectorAll(".ccard.on").forEach(function (x) { x.classList.remove("on"); });
+        if (!was) {
+          b.classList.add("on");
+          $("netTip").innerHTML = "<b>" + c.name + ":</b> " + c.drivers +
+            " driver" + (c.drivers === 1 ? "" : "s") + " online right now" +
+            (c.riders > 0 ? " and " + c.riders + " rider" + (c.riders === 1 ? "" : "s") + " connected" : "") + ".";
+        }
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function loadNetStats() {
+    fetch("/api/network/stats")
+      .then(function (r) { if (!r.ok) throw new Error("bad"); return r.json(); })
+      .then(function (d) {
+        setNum("nsDrivers", d.live.driversOnline);
+        setNum("nsRiders", d.live.ridersConnected);
+        setNum("nsTrips", d.live.ridesInProgress);
+        setNum("nsLiveCities", d.cities.active.length);
+        setNum("nsDone", d.network.ridesCompleted);
+        setNum("nsPrayer", d.prayer.freeRidesCompleted);
+        setNum("nsPoly", d.blockchain.transactions);
+        setNum("nsOntime", d.network.onTimeArrivalsScheduled);
+        setNum("nsCoffee", d.network.coffeeOrders);
+        setNum("nsHubs", d.network.hubs);
+        setNum("nsMosques", d.network.mosques);
+        setNum("nsEv", d.network.evHubs);
+        setNum("nsCities", d.cities.total);
+        renderCities(d.cities.active);
+        var t = new Date();
+        $("netStamp").textContent = "Updated " + t.toLocaleTimeString() + " · refreshes automatically · aggregate numbers only, never personal data";
+      })
+      .catch(function () {
+        $("netStamp").textContent = "Reconnecting to the network…";
+      });
+  }
+
+  var netTimer = null;
+  function startNetPolling() {
+    if (netTimer) return;
+    loadNetStats();
+    netTimer = setInterval(function () {
+      if (!document.hidden) loadNetStats();
+    }, 25000);
+  }
+  if ("IntersectionObserver" in window && !noMotion) {
+    new IntersectionObserver(function (entries, obs) {
+      if (entries[0].isIntersecting) {
+        startNetPolling();
+        obs.disconnect();
+      }
+    }, { rootMargin: "300px" }).observe(document.getElementById("network"));
+  } else {
+    startNetPolling();
+  }
+})();
+</script>
+
+<script>
+/* ---------- Live broadcasts (public Twitch streams) ---------- */
+(function () {
+  function $(id) { return document.getElementById(id); }
+
+  var COUNTRY_NAMES = {
+    AE: "United Arab Emirates", SA: "Saudi Arabia", KW: "Kuwait", BH: "Bahrain",
+    QA: "Qatar", OM: "Oman", BD: "Bangladesh", EG: "Egypt", JO: "Jordan",
+    PK: "Pakistan", IN: "India", TR: "Turkey", US: "United States", GB: "United Kingdom"
+  };
+  function countryName(code) {
+    if (!code) return "Other";
+    return COUNTRY_NAMES[code] || code;
+  }
+
+  var bcStreams = [];
+  var bcFilter = "ALL";
+  var bcOpen = null; /* twitch channel currently playing */
+
+  function renderChips() {
+    var wrap = $("bcChips");
+    wrap.innerHTML = "";
+    if (!bcStreams.length) return;
+    var codes = [];
+    bcStreams.forEach(function (s) {
+      var c = s.country || "";
+      if (codes.indexOf(c) === -1) codes.push(c);
+    });
+    if (codes.length < 2) { bcFilter = "ALL"; return; }
+    if (bcFilter !== "ALL" && codes.indexOf(bcFilter) === -1) bcFilter = "ALL";
+    ["ALL"].concat(codes).forEach(function (code) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "bc-chip" + (bcFilter === code ? " on" : "");
+      b.textContent = code === "ALL" ? "All countries" : countryName(code);
+      b.addEventListener("click", function () {
+        bcFilter = code;
+        renderChips();
+        renderGroups();
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function closePlayer() {
+    bcOpen = null;
+    $("bcFrame").innerHTML = "";
+    $("bcPlayer").classList.remove("show");
+    document.querySelectorAll("#bcGroups .bcard.on").forEach(function (x) { x.classList.remove("on"); });
+  }
+
+  function openPlayer(stream) {
+    bcOpen = stream.twitchChannel;
+    var frame = $("bcFrame");
+    frame.innerHTML = "";
+    var iframe = document.createElement("iframe");
+    iframe.src = "https://player.twitch.tv/?channel=" + encodeURIComponent(stream.twitchChannel) +
+      "&parent=" + encodeURIComponent(location.hostname) + "&muted=true";
+    iframe.allowFullscreen = true;
+    iframe.setAttribute("allow", "autoplay; fullscreen");
+    frame.appendChild(iframe);
+    var w = $("bcWatching");
+    w.innerHTML = "";
+    var b = document.createElement("b");
+    b.textContent = stream.name || stream.twitchChannel;
+    w.appendChild(document.createTextNode("Watching "));
+    w.appendChild(b);
+    var place = [stream.city, countryName(stream.country)].filter(function (x) { return x && x !== "Other"; }).join(", ");
+    if (place) w.appendChild(document.createTextNode(" — live from " + place));
+    $("bcPlayer").classList.add("show");
+    $("bcPlayer").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  function renderGroups() {
+    var wrap = $("bcGroups");
+    wrap.innerHTML = "";
+    var list = bcStreams.filter(function (s) {
+      return bcFilter === "ALL" || (s.country || "") === bcFilter;
+    });
+    if (!list.length) {
+      var s = document.createElement("span");
+      s.className = "net-empty";
+      s.textContent = "No live broadcasts right now — the moment someone streams a Travony ride, it appears here.";
+      wrap.appendChild(s);
+      return;
+    }
+
+    /* Group: country -> city -> streams */
+    var byCountry = {};
+    var countryOrder = [];
+    list.forEach(function (s) {
+      var c = s.country || "";
+      if (!byCountry[c]) { byCountry[c] = {}; countryOrder.push(c); }
+      var city = s.city || "On the road";
+      if (!byCountry[c][city]) byCountry[c][city] = [];
+      byCountry[c][city].push(s);
+    });
+    countryOrder.sort(function (a, b) { return countryName(a).localeCompare(countryName(b)); });
+
+    countryOrder.forEach(function (code) {
+      var cWrap = document.createElement("div");
+      cWrap.className = "bc-country";
+      var cName = document.createElement("div");
+      cName.className = "bc-cname";
+      cName.textContent = countryName(code);
+      cWrap.appendChild(cName);
+
+      Object.keys(byCountry[code]).sort().forEach(function (city) {
+        var cityWrap = document.createElement("div");
+        cityWrap.className = "bc-city";
+        var cityName = document.createElement("div");
+        cityName.className = "bc-city-name";
+        cityName.textContent = city;
+        cityWrap.appendChild(cityName);
+
+        var cards = document.createElement("div");
+        cards.className = "bc-cards";
+        byCountry[code][city].forEach(function (stream) {
+          var card = document.createElement("button");
+          card.type = "button";
+          card.className = "bcard" + (bcOpen === stream.twitchChannel ? " on" : "");
+          var bn = document.createElement("div");
+          bn.className = "bn";
+          var dot = document.createElement("span");
+          dot.className = "bc-dot";
+          bn.appendChild(dot);
+          bn.appendChild(document.createTextNode(stream.name || stream.twitchChannel));
+          var bs = document.createElement("div");
+          bs.className = "bs";
+          bs.textContent = "Live on Twitch · tap to watch";
+          card.appendChild(bn);
+          card.appendChild(bs);
+          card.addEventListener("click", function () {
+            if (bcOpen === stream.twitchChannel) {
+              closePlayer();
+              return;
+            }
+            document.querySelectorAll("#bcGroups .bcard.on").forEach(function (x) { x.classList.remove("on"); });
+            card.classList.add("on");
+            openPlayer(stream);
+          });
+          cards.appendChild(card);
+        });
+        cityWrap.appendChild(cards);
+        cWrap.appendChild(cityWrap);
+      });
+      wrap.appendChild(cWrap);
+    });
+  }
+
+  function loadLiveStreams() {
+    fetch("/api/network/live-streams")
+      .then(function (r) { if (!r.ok) throw new Error("bad"); return r.json(); })
+      .then(function (d) {
+        bcStreams = (d && d.streams) || [];
+        /* If the stream being watched ended, close the player. */
+        if (bcOpen && !bcStreams.some(function (s) { return s.twitchChannel === bcOpen; })) {
+          closePlayer();
+        }
+        renderChips();
+        renderGroups();
+        var t = new Date();
+        $("bcStamp").textContent = "Updated " + t.toLocaleTimeString() + " · refreshes automatically · streams play on Twitch";
+      })
+      .catch(function () {
+        $("bcStamp").textContent = "Reconnecting to the network…";
+      });
+  }
+
+  $("bcClose").addEventListener("click", closePlayer);
+
+  var bcTimer = null;
+  function startBcPolling() {
+    if (bcTimer) return;
+    loadLiveStreams();
+    bcTimer = setInterval(function () {
+      if (!document.hidden) loadLiveStreams();
+    }, 25000);
+  }
+  if ("IntersectionObserver" in window) {
+    new IntersectionObserver(function (entries, obs) {
+      if (entries[0].isIntersecting) {
+        startBcPolling();
+        obs.disconnect();
+      }
+    }, { rootMargin: "300px" }).observe(document.getElementById("live"));
+  } else {
+    startBcPolling();
+  }
+})();
+</script>
+
+<script>
+(function () {
+  var panels = document.querySelectorAll('.panel[data-bg]');
+  if (!panels.length) return;
+  if (!('IntersectionObserver' in window)) {
+    panels.forEach(function (el) {
+      el.style.backgroundImage = "url('" + el.getAttribute('data-bg') + "')";
+    });
+    return;
+  }
+  var obs = new IntersectionObserver(function (entries, observer) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        var el = entry.target;
+        el.style.backgroundImage = "url('" + el.getAttribute('data-bg') + "')";
+        observer.unobserve(el);
+      }
+    });
+  }, { rootMargin: '200px 0px' });
+  panels.forEach(function (el) { obs.observe(el); });
+})();
+</script>
+
+</body>
+</html>
