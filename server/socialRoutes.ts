@@ -91,6 +91,13 @@ async function deriveCityName(lat: number, lng: number): Promise<string | null> 
   return cityNameForCoords(rows as CityRow[], lat, lng);
 }
 
+// Round a coordinate to ~1km precision so a memory map shows an anonymized,
+// approximate route — never the exact pickup/dropoff (i.e. someone's home).
+function coarsenCoord(v: number): number | null {
+  if (isNaN(v)) return null;
+  return Math.round(v * 100) / 100;
+}
+
 function publicUser(u: { id: string; name: string; avatar: string | null; twitchChannel: string | null }) {
   return { id: u.id, name: u.name, avatar: u.avatar, twitchChannel: u.twitchChannel };
 }
@@ -181,6 +188,7 @@ async function computeBadges(userIds: string[]): Promise<Map<string, Badge[]>> {
   }
 
   const TIER_LABEL: Record<string, string> = {
+    bronze: "Bronze",
     silver: "Silver",
     gold: "Gold",
     platinum: "Platinum",
@@ -733,10 +741,11 @@ socialRouter.get("/api/social/live", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Ride Memories — the owner's private timeline of their own completed rides.
-// Because these are the viewer's OWN rides, the full pickup/dropoff (so the
-// route can be drawn back to them) is fine; the counterpart is limited to
-// name/avatar. Fares are shown honestly per role: a rider sees what they paid,
-// a driver sees what they earned. Nothing here is public.
+// Location stays privacy-safe like public posts: only a coarse city label and
+// an anonymized (~1km-rounded) route are exposed — never exact coordinates or
+// addresses — so a one-tap share can never leak an exact location. The
+// counterpart is limited to name/avatar. Fares are shown honestly per role: a
+// rider sees what they paid, a driver sees what they earned. Nothing is public.
 // ---------------------------------------------------------------------------
 
 socialRouter.get("/api/social/memories", async (req, res) => {
@@ -760,10 +769,8 @@ socialRouter.get("/api/social/memories", async (req, res) => {
         driverId: rides.driverId,
         pickupLat: rides.pickupLat,
         pickupLng: rides.pickupLng,
-        pickupAddress: rides.pickupAddress,
         dropoffLat: rides.dropoffLat,
         dropoffLng: rides.dropoffLng,
-        dropoffAddress: rides.dropoffAddress,
         distance: rides.distance,
         actualFare: rides.actualFare,
         estimatedFare: rides.estimatedFare,
@@ -850,15 +857,14 @@ socialRouter.get("/api/social/memories", async (req, res) => {
         fare: fare != null && !isNaN(fare) ? fare : null,
         currency: r.currency,
         counterpart: cp ? { name: cp.name, avatar: cp.avatar } : null,
+        // Anonymized, ~1km-rounded route only — no exact coordinates/addresses.
         pickup: {
-          lat: parseFloat(String(r.pickupLat)),
-          lng: parseFloat(String(r.pickupLng)),
-          address: r.pickupAddress,
+          lat: coarsenCoord(parseFloat(String(r.pickupLat))),
+          lng: coarsenCoord(parseFloat(String(r.pickupLng))),
         },
         dropoff: {
-          lat: parseFloat(String(r.dropoffLat)),
-          lng: parseFloat(String(r.dropoffLng)),
-          address: r.dropoffAddress,
+          lat: coarsenCoord(parseFloat(String(r.dropoffLat))),
+          lng: coarsenCoord(parseFloat(String(r.dropoffLng))),
         },
         isEvRide: !!r.isEvRide,
         isPmgthRide: !!r.isPmgthRide,

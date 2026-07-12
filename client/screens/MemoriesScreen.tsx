@@ -37,8 +37,8 @@ interface Memory {
   fare: number | null;
   currency: string;
   counterpart: { name: string; avatar: string | null } | null;
-  pickup: { lat: number; lng: number; address: string };
-  dropoff: { lat: number; lng: number; address: string };
+  pickup: { lat: number | null; lng: number | null };
+  dropoff: { lat: number | null; lng: number | null };
   isEvRide: boolean;
   isPmgthRide: boolean;
   hasPosted: boolean;
@@ -159,6 +159,13 @@ function MemoryCard({ memory, onShare }: { memory: Memory; onShare: (m: Memory) 
     .filter(Boolean)
     .join(" · ");
 
+  const cityLabel = memory.cityName || "This ride";
+  const hasCoords =
+    memory.pickup.lat != null &&
+    memory.pickup.lng != null &&
+    memory.dropoff.lat != null &&
+    memory.dropoff.lng != null;
+
   return (
     <Card style={styles.memoryCard}>
       <View style={styles.memoryTop}>
@@ -176,17 +183,17 @@ function MemoryCard({ memory, onShare }: { memory: Memory; onShare: (m: Memory) 
       </View>
 
       <View style={styles.mapWrap}>
-        {liteMode ? (
+        {liteMode || !hasCoords ? (
           <LiteTripView
-            pickupAddress={memory.pickup.address}
-            dropoffAddress={memory.dropoff.address}
+            pickupAddress={cityLabel}
+            dropoffAddress={cityLabel}
             distance={memory.distanceKm}
             height={140}
           />
         ) : (
           <RideMap
-            pickupLocation={{ lat: memory.pickup.lat, lng: memory.pickup.lng, address: memory.pickup.address }}
-            dropoffLocation={{ lat: memory.dropoff.lat, lng: memory.dropoff.lng, address: memory.dropoff.address }}
+            pickupLocation={{ lat: memory.pickup.lat as number, lng: memory.pickup.lng as number }}
+            dropoffLocation={{ lat: memory.dropoff.lat as number, lng: memory.dropoff.lng as number }}
             showRoute
             interactive={false}
             height={140}
