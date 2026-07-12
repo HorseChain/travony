@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
 
@@ -128,7 +129,12 @@ export function FollowCounterpartButton({ rideId }: { rideId: string }) {
 export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideStatus?: string }) {
   const { theme } = useTheme();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { data } = useRideSocialContext(rideId);
+  const linkChannelHint =
+    user?.role === "driver"
+      ? "Link your Twitch channel first: open the Profile tab, tap Personal Information, enter your Twitch username, and save. Then you can stream your rides live from here."
+      : "Link your Twitch channel first: open the Profile tab, tap Edit Profile, enter your Twitch username, and save. Then you can stream your rides live from here.";
 
   const streamMutation = useMutation({
     mutationFn: async (action: "start" | "stop") => {
@@ -160,12 +166,7 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
             opacity: pressed ? 0.7 : 1,
           },
         ]}
-        onPress={() =>
-          notify(
-            "Go Live on Twitch",
-            "Link your Twitch channel first: open the Profile tab, tap Edit Profile, enter your Twitch username, and save. Then you can stream your rides live from here.",
-          )
-        }
+        onPress={() => notify("Go Live on Twitch", linkChannelHint)}
       >
         <Ionicons name="videocam-outline" size={16} color={theme.textMuted} />
         <ThemedText style={[styles.streamButtonText, { color: theme.textSecondary }]}>

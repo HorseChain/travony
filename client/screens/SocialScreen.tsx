@@ -146,17 +146,37 @@ function FeedCard({ post, onWatch }: { post: SocialPost; onWatch: () => void }) 
         <ThemedText style={styles.feedCaption}>{post.caption}</ThemedText>
       ) : null}
 
-      {isStream && post.isLive && post.twitchChannel ? (
-        <Pressable
-          style={({ pressed }) => [
-            styles.watchButton,
-            { backgroundColor: theme.primary, opacity: pressed ? 0.9 : 1 },
-          ]}
-          onPress={onWatch}
-        >
-          <Ionicons name="play" size={14} color="#FFFFFF" />
-          <ThemedText style={styles.watchButtonText}>Watch live</ThemedText>
-        </Pressable>
+      {isStream && post.twitchChannel ? (
+        post.isLive ? (
+          <Pressable
+            style={({ pressed }) => [
+              styles.watchButton,
+              { backgroundColor: theme.primary, opacity: pressed ? 0.9 : 1 },
+            ]}
+            onPress={onWatch}
+          >
+            <Ionicons name="play" size={14} color="#FFFFFF" />
+            <ThemedText style={styles.watchButtonText}>Watch live</ThemedText>
+          </Pressable>
+        ) : (
+          <Pressable
+            style={({ pressed }) => [
+              styles.watchButton,
+              {
+                backgroundColor: theme.backgroundSecondary,
+                borderWidth: 1,
+                borderColor: theme.border,
+                opacity: pressed ? 0.8 : 1,
+              },
+            ]}
+            onPress={onWatch}
+          >
+            <Ionicons name="logo-twitch" size={14} color={theme.primary} />
+            <ThemedText style={[styles.watchButtonText, { color: theme.text }]}>
+              View on Twitch
+            </ThemedText>
+          </Pressable>
+        )
       ) : null}
     </Card>
   );

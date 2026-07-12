@@ -30,12 +30,21 @@ export default function DriverPersonalInfoScreen() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [twitch, setTwitch] = useState("");
+  const [twitchTouched, setTwitchTouched] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
   const { data: driverData, isLoading } = useQuery<DriverData>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
   });
+
+  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+    queryKey: ["/api/social/counts"],
+    enabled: !!user,
+  });
+  const savedTwitch = socialQuery.data?.twitchChannel || "";
+  const twitchValue = twitchTouched ? twitch : savedTwitch;
 
   useEffect(() => {
     if (user) {
@@ -54,33 +63,42 @@ export default function DriverPersonalInfoScreen() {
   }, [driverData]);
 
   const updateMutation = useMutation({
-    mutationFn: async (data: { name?: string; phone?: string }) => {
-      return apiRequest("/api/users/me", {
+    mutationFn: async () => {
+      await apiRequest("/api/users/me", {
         method: "PATCH",
-        body: JSON.stringify(data),
+        body: JSON.stringify({ name, phone }),
         headers: { "Content-Type": "application/json" },
       });
+      if (twitchTouched && twitch.trim() !== savedTwitch) {
+        await apiRequest("/api/me/twitch-channel", {
+          method: "PATCH",
+          body: JSON.stringify({ channel: twitch.trim() || null }),
+          headers: { "Content-Type": "application/json" },
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/me"] });
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/social/counts"] });
       if (Platform.OS === "web") {
         alert("Personal information updated successfully!");
       } else {
         Alert.alert("Success", "Personal information updated successfully!");
       }
     },
-    onError: () => {
+    onError: (error: any) => {
+      const msg = error?.message || "Failed to update personal information. Please try again.";
       if (Platform.OS === "web") {
-        alert("Failed to update personal information. Please try again.");
+        alert(msg);
       } else {
-        Alert.alert("Error", "Failed to update personal information. Please try again.");
+        Alert.alert("Error", msg);
       }
     },
   });
 
   const handleSave = () => {
-    updateMutation.mutate({ name, phone });
+    updateMutation.mutate();
   };
 
   return (
@@ -176,6 +194,34 @@ export default function DriverPersonalInfoScreen() {
           />
           <ThemedText style={[styles.hint, { color: theme.textMuted }]}>
             Contact support to update license details
+          </ThemedText>
+        </View>
+
+        <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
+          <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>
+            Twitch Channel
+          </ThemedText>
+          <TextInput
+            style={[
+              styles.input,
+              {
+                backgroundColor: theme.backgroundRoot,
+                color: theme.text,
+                borderColor: theme.border,
+              },
+            ]}
+            value={twitchValue}
+            onChangeText={(t) => {
+              setTwitchTouched(true);
+              setTwitch(t);
+            }}
+            placeholder="Your Twitch username (optional)"
+            placeholderTextColor={theme.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <ThemedText style={[styles.hint, { color: theme.textMuted }]}>
+            Link your Twitch channel to stream your rides live. Leave empty to remove.
           </ThemedText>
         </View>
 
