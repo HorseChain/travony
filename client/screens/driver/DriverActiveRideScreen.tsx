@@ -1,6 +1,7 @@
 import { useState, useRef } from "react";
 import { View, StyleSheet, Pressable, Alert, Linking, Platform, ScrollView } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -153,6 +154,7 @@ const progressStyles = StyleSheet.create({
 
 export default function DriverActiveRideScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
@@ -457,7 +459,7 @@ export default function DriverActiveRideScreen() {
 
       <ScrollView
         style={[styles.bottomPanel, { backgroundColor: theme.backgroundRoot }]}
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, Spacing.lg) }}
+        contentContainerStyle={{ paddingBottom: tabBarHeight + Spacing.lg }}
       >
         <StatusProgressStrip status={ride?.status ?? "accepted"} />
 

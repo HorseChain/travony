@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -130,6 +131,7 @@ interface TelemetryData {
 
 export default function ActiveRideScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
@@ -468,7 +470,6 @@ export default function ActiveRideScreen() {
           ) : null}
           {rideId ? <StreamRideButton rideId={rideId} rideStatus={ride?.status} /> : null}
         </Card>
-      </View>
 
       {showShareBanner ? (
         <Animated.View
@@ -476,7 +477,7 @@ export default function ActiveRideScreen() {
             styles.shareBanner,
             {
               backgroundColor: theme.card,
-              top: insets.top + 210,
+              marginTop: Spacing.md,
               opacity: shareBannerAnim,
               transform: [{ translateY: shareBannerAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
             },
@@ -579,8 +580,9 @@ export default function ActiveRideScreen() {
           </View>
         </View>
       ) : null}
+      </View>
 
-      <View style={[styles.sideButtons, { bottom: insets.bottom + 200 }]}>
+      <View style={[styles.sideButtons, { bottom: tabBarHeight + 200 }]}>
         <Pressable
           style={[styles.shareButton, { backgroundColor: theme.primary }]}
           onPress={handleShareRide}
@@ -609,7 +611,7 @@ export default function ActiveRideScreen() {
       <View
         style={[
           styles.bottomSheet,
-          { backgroundColor: theme.card, paddingBottom: insets.bottom + Spacing.lg },
+          { backgroundColor: theme.card, paddingBottom: tabBarHeight + Spacing.lg },
         ]}
       >
         <View style={styles.rideDetails}>
@@ -901,9 +903,6 @@ const styles = StyleSheet.create({
     fontWeight: "500",
   },
   shareBanner: {
-    position: "absolute",
-    left: Spacing.lg,
-    right: Spacing.lg,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
     ...Shadows.card,
@@ -939,10 +938,7 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   driverCard: {
-    position: "absolute",
-    top: 220,
-    left: Spacing.lg,
-    right: Spacing.lg,
+    marginTop: Spacing.md,
     flexDirection: "row",
     alignItems: "center",
     padding: Spacing.lg,

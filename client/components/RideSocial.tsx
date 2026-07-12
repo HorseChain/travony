@@ -149,7 +149,30 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
   if (!data || !streamable) return null;
 
   if (!data.myTwitchChannel) {
-    return null;
+    return (
+      <Pressable
+        style={({ pressed }) => [
+          styles.streamButton,
+          {
+            backgroundColor: theme.backgroundSecondary,
+            borderWidth: 1,
+            borderColor: theme.border,
+            opacity: pressed ? 0.7 : 1,
+          },
+        ]}
+        onPress={() =>
+          notify(
+            "Go Live on Twitch",
+            "Link your Twitch channel first: open the Profile tab, tap Edit Profile, enter your Twitch username, and save. Then you can stream your rides live from here.",
+          )
+        }
+      >
+        <Ionicons name="videocam-outline" size={16} color={theme.textMuted} />
+        <ThemedText style={[styles.streamButtonText, { color: theme.textSecondary }]}>
+          Go Live on Twitch · Link your channel
+        </ThemedText>
+      </Pressable>
+    );
   }
 
   if (data.isStreaming) {
