@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
+import { StatusBadges, type StatusBadge } from "@/components/StatusBadges";
 import { LiteModeSetting } from "@/components/LiteModeSetting";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
@@ -63,6 +64,11 @@ export default function ProfileScreen() {
     enabled: !!user,
   });
 
+  const badgesQuery = useQuery<{ badges: StatusBadge[] }>({
+    queryKey: ["/api/social/badges", user?.id],
+    enabled: !!user?.id,
+  });
+
   const handleLogout = async () => {
     if (Platform.OS === "web") {
       const confirmed = window.confirm("Are you sure you want to sign out?");
@@ -110,6 +116,7 @@ export default function ProfileScreen() {
           <ThemedText style={[styles.profileEmail, { color: theme.textSecondary }]}>
             {user?.email || "No email"}
           </ThemedText>
+          <StatusBadges badges={badgesQuery.data?.badges} size="md" />
         </View>
         <Pressable
           style={({ pressed }) => [

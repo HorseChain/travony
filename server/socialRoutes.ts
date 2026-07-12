@@ -1,8 +1,20 @@
 import { Router } from "express";
 import { storage } from "./storage";
 import { db } from "./db";
-import { users, drivers, rides, cities, userFollows, ridePosts } from "@shared/schema";
-import { eq, and, desc, inArray, isNull, count } from "drizzle-orm";
+import {
+  users,
+  drivers,
+  rides,
+  cities,
+  userFollows,
+  ridePosts,
+  ridePostReactions,
+  ridePostComments,
+  driverTags,
+  communityPrestige,
+  prayerRideDispatches,
+} from "@shared/schema";
+import { eq, and, or, desc, inArray, isNull, count } from "drizzle-orm";
 import { verifyTwitchChannel, getLiveChannels } from "./twitchClient";
 
 // Social layer: follows between users + rides published or live-streamed to
@@ -47,12 +59,15 @@ async function getRideParticipants(ride: { customerId: string; driverId: string 
   return { customerId: ride.customerId, driverUserId };
 }
 
-async function deriveCityName(lat: number, lng: number): Promise<string | null> {
+// Coarse city label for a coordinate against a preloaded city list — never
+// exposes the coordinate itself. Kept pure so the memories endpoint can load
+// the (small) cities table once and label many rides without N+1 queries.
+type CityRow = { name: string; centerLat: unknown; centerLng: unknown; radiusKm: unknown };
+function cityNameForCoords(cityRows: CityRow[], lat: number, lng: number): string | null {
   if (isNaN(lat) || isNaN(lng)) return null;
-  const rows = await db.select().from(cities);
   let best: string | null = null;
   let bestDist = Infinity;
-  for (const c of rows) {
+  for (const c of cityRows) {
     const cLat = parseFloat(String(c.centerLat));
     const cLng = parseFloat(String(c.centerLng));
     const radius = parseFloat(String(c.radiusKm)) || 30;
@@ -70,8 +85,195 @@ async function deriveCityName(lat: number, lng: number): Promise<string | null> 
   return best;
 }
 
+async function deriveCityName(lat: number, lng: number): Promise<string | null> {
+  if (isNaN(lat) || isNaN(lng)) return null;
+  const rows = await db.select().from(cities);
+  return cityNameForCoords(rows as CityRow[], lat, lng);
+}
+
 function publicUser(u: { id: string; name: string; avatar: string | null; twitchChannel: string | null }) {
   return { id: u.id, name: u.name, avatar: u.avatar, twitchChannel: u.twitchChannel };
+}
+
+// ---------------------------------------------------------------------------
+// Status badges. These only SURFACE existing trust/reputation state — we never
+// mint new badge types here. Everything is server-derived and batched by the
+// set of author user ids. Only drivers carry driver-scoped badges; riders get
+// none (expected). label carries display text (e.g. rating value / tier name).
+// ---------------------------------------------------------------------------
+
+type Badge = { kind: string; label: string };
+
+async function computeBadges(userIds: string[]): Promise<Map<string, Badge[]>> {
+  const result = new Map<string, Badge[]>();
+  const uniq = Array.from(new Set(userIds.filter(Boolean)));
+  if (uniq.length === 0) return result;
+
+  const add = (userId: string, badge: Badge) => {
+    const arr = result.get(userId) || [];
+    arr.push(badge);
+    result.set(userId, arr);
+  };
+
+  // Only drivers carry the driver-scoped badges.
+  const driverRows = await db
+    .select({
+      id: drivers.id,
+      userId: drivers.userId,
+      status: drivers.status,
+      rating: drivers.rating,
+      totalTrips: drivers.totalTrips,
+    })
+    .from(drivers)
+    .where(inArray(drivers.userId, uniq));
+
+  if (driverRows.length === 0) return result;
+
+  const userByDriver = new Map<string, string>();
+  for (const d of driverRows) userByDriver.set(d.id, d.userId);
+  const driverIds = driverRows.map((d) => d.id);
+
+  // verified + rating + top-rated (approved drivers only).
+  for (const d of driverRows) {
+    if (d.status !== "approved") continue;
+    add(d.userId, { kind: "verified", label: "Verified" });
+    const rating = parseFloat(String(d.rating ?? "0"));
+    const trips = d.totalTrips ?? 0;
+    if (!isNaN(rating) && rating > 0 && trips > 0) {
+      add(d.userId, { kind: "rating", label: rating.toFixed(1) });
+      if (rating >= 4.8 && trips >= 20) {
+        add(d.userId, { kind: "top_rated", label: "Top Rated" });
+      }
+    }
+  }
+
+  const now = new Date();
+  const [tagRows, prestigeRows, prayerRows] = await Promise.all([
+    db
+      .select({ driverId: driverTags.driverId, tag: driverTags.tag, expiresAt: driverTags.expiresAt })
+      .from(driverTags)
+      .where(
+        and(
+          inArray(driverTags.driverId, driverIds),
+          inArray(driverTags.tag, ["founding_driver", "city_champion"]),
+        ),
+      ),
+    db
+      .select({ userId: communityPrestige.userId, tier: communityPrestige.tier })
+      .from(communityPrestige)
+      .where(inArray(communityPrestige.userId, uniq)),
+    // Prayer rides have no "completed" dispatch status — count the linked rides
+    // that actually completed (mirrors /api/drivers/me).
+    db
+      .select({ driverId: rides.driverId, n: count() })
+      .from(prayerRideDispatches)
+      .innerJoin(rides, eq(rides.id, prayerRideDispatches.rideId))
+      .where(and(inArray(rides.driverId, driverIds), eq(rides.status, "completed")))
+      .groupBy(rides.driverId),
+  ]);
+
+  for (const t of tagRows) {
+    if (t.expiresAt && new Date(t.expiresAt) < now) continue;
+    const uid = userByDriver.get(t.driverId);
+    if (!uid) continue;
+    if (t.tag === "founding_driver") add(uid, { kind: "founding_driver", label: "Founding Driver" });
+    else if (t.tag === "city_champion") add(uid, { kind: "city_champion", label: "City Champion" });
+  }
+
+  const TIER_LABEL: Record<string, string> = {
+    silver: "Silver",
+    gold: "Gold",
+    platinum: "Platinum",
+    diamond: "Diamond",
+  };
+  for (const p of prestigeRows) {
+    const label = TIER_LABEL[String(p.tier || "")];
+    if (label) add(p.userId, { kind: "prestige", label });
+  }
+
+  for (const pr of prayerRows) {
+    if (!pr.driverId) continue;
+    const uid = userByDriver.get(pr.driverId);
+    const n = Number(pr.n);
+    if (uid && n > 0) {
+      add(uid, { kind: "prayer_volunteer", label: n === 1 ? "Prayer Volunteer" : `Prayer Volunteer · ${n}` });
+    }
+  }
+
+  return result;
+}
+
+const REACTION_TYPES = ["like", "love", "fire", "celebrate"];
+const COMMENT_MAX = 280;
+const MEMORY_LIMIT = 40;
+const PHOTO_MAX_CHARS = 700000; // ~500KB image once base64-encoded
+
+async function reactionSummary(postId: string, viewerId: string) {
+  const [rows, [mine]] = await Promise.all([
+    db
+      .select({ type: ridePostReactions.type, n: count() })
+      .from(ridePostReactions)
+      .where(eq(ridePostReactions.postId, postId))
+      .groupBy(ridePostReactions.type),
+    db
+      .select({ type: ridePostReactions.type })
+      .from(ridePostReactions)
+      .where(and(eq(ridePostReactions.postId, postId), eq(ridePostReactions.userId, viewerId))),
+  ]);
+  const counts: Record<string, number> = {};
+  let total = 0;
+  for (const r of rows) {
+    counts[r.type] = Number(r.n);
+    total += Number(r.n);
+  }
+  return { reactions: counts, reactionCount: total, myReaction: mine?.type || null };
+}
+
+// Batch the reaction/comment counts, the viewer's own reaction, and author
+// badges onto a page of feed posts (no per-post queries).
+async function attachSocialMeta<T extends { id: string; authorId: string }>(posts: T[], viewerId: string) {
+  if (posts.length === 0) return posts as any[];
+  const postIds = posts.map((p) => p.id);
+  const authorIds = posts.map((p) => p.authorId);
+  const [reactionRows, myRows, commentRows, badgeMap] = await Promise.all([
+    db
+      .select({ postId: ridePostReactions.postId, type: ridePostReactions.type, n: count() })
+      .from(ridePostReactions)
+      .where(inArray(ridePostReactions.postId, postIds))
+      .groupBy(ridePostReactions.postId, ridePostReactions.type),
+    db
+      .select({ postId: ridePostReactions.postId, type: ridePostReactions.type })
+      .from(ridePostReactions)
+      .where(and(inArray(ridePostReactions.postId, postIds), eq(ridePostReactions.userId, viewerId))),
+    db
+      .select({ postId: ridePostComments.postId, n: count() })
+      .from(ridePostComments)
+      .where(inArray(ridePostComments.postId, postIds))
+      .groupBy(ridePostComments.postId),
+    computeBadges(authorIds),
+  ]);
+
+  const reactionsByPost = new Map<string, Record<string, number>>();
+  const totalByPost = new Map<string, number>();
+  for (const r of reactionRows) {
+    const m = reactionsByPost.get(r.postId) || {};
+    m[r.type] = Number(r.n);
+    reactionsByPost.set(r.postId, m);
+    totalByPost.set(r.postId, (totalByPost.get(r.postId) || 0) + Number(r.n));
+  }
+  const myByPost = new Map<string, string>();
+  for (const r of myRows) myByPost.set(r.postId, r.type);
+  const commentByPost = new Map<string, number>();
+  for (const c of commentRows) commentByPost.set(c.postId, Number(c.n));
+
+  return posts.map((p) => ({
+    ...p,
+    reactions: reactionsByPost.get(p.id) || {},
+    reactionCount: totalByPost.get(p.id) || 0,
+    myReaction: myByPost.get(p.id) || null,
+    commentCount: commentByPost.get(p.id) || 0,
+    badges: badgeMap.get(p.authorId) || [],
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +548,22 @@ socialRouter.post("/api/rides/:id/publish", async (req, res) => {
     if (existing) return res.status(409).json({ error: "You already published this ride" });
 
     const caption = String(req.body?.caption || "").slice(0, CAPTION_MAX).trim() || null;
+
+    // Optional memory photo, sent inline as a compressed data URL. Validate the
+    // prefix and cap the size so a bad/huge payload can't bloat the feed.
+    let photoUrl: string | null = null;
+    const rawPhoto = req.body?.photoUrl;
+    if (rawPhoto) {
+      const s = String(rawPhoto);
+      if (!s.startsWith("data:image/")) {
+        return res.status(400).json({ error: "Invalid photo format" });
+      }
+      if (s.length > PHOTO_MAX_CHARS) {
+        return res.status(400).json({ error: "Photo is too large. Try again." });
+      }
+      photoUrl = s;
+    }
+
     const cityName = await deriveCityName(parseFloat(String(ride.pickupLat)), parseFloat(String(ride.pickupLng)));
     const [post] = await db
       .insert(ridePosts)
@@ -354,6 +572,7 @@ socialRouter.post("/api/rides/:id/publish", async (req, res) => {
         userId: user.id,
         type: "published",
         caption,
+        photoUrl,
         cityName,
         distanceKm: ride.distance ?? null,
         isLive: false,
@@ -374,6 +593,7 @@ const POST_FIELDS = {
   type: ridePosts.type,
   twitchChannel: ridePosts.twitchChannel,
   caption: ridePosts.caption,
+  photoUrl: ridePosts.photoUrl,
   cityName: ridePosts.cityName,
   distanceKm: ridePosts.distanceKm,
   isLive: ridePosts.isLive,
@@ -429,7 +649,8 @@ socialRouter.get("/api/social/feed", async (req, res) => {
       .orderBy(desc(ridePosts.createdAt))
       .limit(50);
 
-    res.json({ posts: await withLiveStatus(posts as any) });
+    const withLive = await withLiveStatus(posts as any);
+    res.json({ posts: await attachSocialMeta(withLive as any, session.userId) });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -505,6 +726,306 @@ socialRouter.get("/api/social/live", async (req, res) => {
 
     const refreshed = await withLiveStatus(posts as any);
     res.json({ streams: refreshed.filter((p: any) => p.isLive) });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Ride Memories — the owner's private timeline of their own completed rides.
+// Because these are the viewer's OWN rides, the full pickup/dropoff (so the
+// route can be drawn back to them) is fine; the counterpart is limited to
+// name/avatar. Fares are shown honestly per role: a rider sees what they paid,
+// a driver sees what they earned. Nothing here is public.
+// ---------------------------------------------------------------------------
+
+socialRouter.get("/api/social/memories", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const [myDriver] = await db
+      .select({ id: drivers.id })
+      .from(drivers)
+      .where(eq(drivers.userId, session.userId));
+
+    const ownership = myDriver
+      ? or(eq(rides.customerId, session.userId), eq(rides.driverId, myDriver.id))
+      : eq(rides.customerId, session.userId);
+
+    const rideRows = await db
+      .select({
+        id: rides.id,
+        customerId: rides.customerId,
+        driverId: rides.driverId,
+        pickupLat: rides.pickupLat,
+        pickupLng: rides.pickupLng,
+        pickupAddress: rides.pickupAddress,
+        dropoffLat: rides.dropoffLat,
+        dropoffLng: rides.dropoffLng,
+        dropoffAddress: rides.dropoffAddress,
+        distance: rides.distance,
+        actualFare: rides.actualFare,
+        estimatedFare: rides.estimatedFare,
+        driverEarnings: rides.driverEarnings,
+        currency: rides.currency,
+        completedAt: rides.completedAt,
+        createdAt: rides.createdAt,
+        isEvRide: rides.isEvRide,
+        isPmgthRide: rides.isPmgthRide,
+      })
+      .from(rides)
+      .where(and(eq(rides.status, "completed"), ownership))
+      .orderBy(desc(rides.completedAt))
+      .limit(MEMORY_LIMIT);
+
+    // Batch: cities (once), counterpart users, and which rides I've published.
+    const rideIds = rideRows.map((r) => r.id);
+    const counterpartDriverIds = Array.from(
+      new Set(rideRows.filter((r) => r.customerId === session.userId && r.driverId).map((r) => r.driverId as string)),
+    );
+    const counterpartUserIds = new Set(
+      rideRows.filter((r) => r.customerId !== session.userId).map((r) => r.customerId),
+    );
+
+    const [cityRows, counterpartDrivers, publishedRows] = await Promise.all([
+      db.select().from(cities),
+      counterpartDriverIds.length
+        ? db
+            .select({ id: drivers.id, userId: drivers.userId })
+            .from(drivers)
+            .where(inArray(drivers.id, counterpartDriverIds))
+        : Promise.resolve([] as { id: string; userId: string }[]),
+      rideIds.length
+        ? db
+            .select({ rideId: ridePosts.rideId })
+            .from(ridePosts)
+            .where(
+              and(
+                inArray(ridePosts.rideId, rideIds),
+                eq(ridePosts.userId, session.userId),
+                eq(ridePosts.type, "published"),
+              ),
+            )
+        : Promise.resolve([] as { rideId: string }[]),
+    ]);
+
+    // driver.id -> users.id for rider-role counterparts.
+    const driverUserById = new Map<string, string>();
+    for (const d of counterpartDrivers) {
+      driverUserById.set(d.id, d.userId);
+      counterpartUserIds.add(d.userId);
+    }
+
+    const userRows = counterpartUserIds.size
+      ? await db
+          .select({ id: users.id, name: users.name, avatar: users.avatar })
+          .from(users)
+          .where(inArray(users.id, Array.from(counterpartUserIds)))
+      : [];
+    const userById = new Map(userRows.map((u) => [u.id, u]));
+    const publishedSet = new Set(publishedRows.map((p) => p.rideId));
+
+    const memories = rideRows.map((r) => {
+      const role: "rider" | "driver" = r.customerId === session.userId ? "rider" : "driver";
+      const counterpartUserId =
+        role === "rider" ? (r.driverId ? driverUserById.get(r.driverId) : null) : r.customerId;
+      const cp = counterpartUserId ? userById.get(counterpartUserId) : null;
+
+      const fareRaw =
+        role === "driver" ? r.driverEarnings : (r.actualFare ?? r.estimatedFare);
+      const fare = fareRaw != null ? parseFloat(String(fareRaw)) : null;
+      const distanceKm = r.distance != null ? parseFloat(String(r.distance)) : null;
+
+      return {
+        rideId: r.id,
+        role,
+        date: r.completedAt || r.createdAt,
+        cityName: cityNameForCoords(
+          cityRows as CityRow[],
+          parseFloat(String(r.pickupLat)),
+          parseFloat(String(r.pickupLng)),
+        ),
+        distanceKm,
+        fare: fare != null && !isNaN(fare) ? fare : null,
+        currency: r.currency,
+        counterpart: cp ? { name: cp.name, avatar: cp.avatar } : null,
+        pickup: {
+          lat: parseFloat(String(r.pickupLat)),
+          lng: parseFloat(String(r.pickupLng)),
+          address: r.pickupAddress,
+        },
+        dropoff: {
+          lat: parseFloat(String(r.dropoffLat)),
+          lng: parseFloat(String(r.dropoffLng)),
+          address: r.dropoffAddress,
+        },
+        isEvRide: !!r.isEvRide,
+        isPmgthRide: !!r.isPmgthRide,
+        hasPosted: publishedSet.has(r.id),
+      };
+    });
+
+    // Resurfacing. Money is only summed within a single currency (the viewer's
+    // most recent ride currency) so a mixed-currency total is never invented.
+    const currency = memories[0]?.currency || "AED";
+    const now = new Date();
+    let monthly: { rides: number; distanceKm: number; amount: number } | null = null;
+    let monthCount = 0;
+    let monthDistance = 0;
+    let monthAmount = 0;
+    let onThisDay: {
+      rideId: string;
+      date: Date | string;
+      cityName: string | null;
+      distanceKm: number | null;
+      yearsAgo: number;
+    } | null = null;
+
+    for (const m of memories) {
+      const d = m.date ? new Date(m.date) : null;
+      if (!d) continue;
+      if (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()) {
+        monthCount += 1;
+        if (m.distanceKm) monthDistance += m.distanceKm;
+        if (m.fare != null && m.currency === currency) monthAmount += m.fare;
+      }
+      if (
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate() &&
+        d.getFullYear() < now.getFullYear()
+      ) {
+        const yearsAgo = now.getFullYear() - d.getFullYear();
+        if (!onThisDay || yearsAgo < onThisDay.yearsAgo) {
+          onThisDay = {
+            rideId: m.rideId,
+            date: m.date,
+            cityName: m.cityName,
+            distanceKm: m.distanceKm,
+            yearsAgo,
+          };
+        }
+      }
+    }
+    if (monthCount > 0) {
+      monthly = {
+        rides: monthCount,
+        distanceKm: Math.round(monthDistance * 10) / 10,
+        amount: Math.round(monthAmount * 100) / 100,
+      };
+    }
+
+    res.json({ currency, highlight: { monthly, onThisDay }, memories });
+  } catch (error: any) {
+    console.error("[Social] memories error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Reactions + comments on feed posts.
+// ---------------------------------------------------------------------------
+
+socialRouter.post("/api/social/posts/:id/react", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const type = String(req.body?.type || "");
+    if (!REACTION_TYPES.includes(type)) {
+      return res.status(400).json({ error: "Unknown reaction" });
+    }
+    const [post] = await db.select({ id: ridePosts.id }).from(ridePosts).where(eq(ridePosts.id, req.params.id));
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    // Pure upsert — the client owns the toggle. Same (post,user) row is replaced.
+    await db
+      .insert(ridePostReactions)
+      .values({ postId: post.id, userId: user.id, type })
+      .onConflictDoUpdate({
+        target: [ridePostReactions.postId, ridePostReactions.userId],
+        set: { type },
+      });
+    res.json(await reactionSummary(post.id, user.id));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+socialRouter.delete("/api/social/posts/:id/react", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    await db
+      .delete(ridePostReactions)
+      .where(and(eq(ridePostReactions.postId, req.params.id), eq(ridePostReactions.userId, user.id)));
+    res.json(await reactionSummary(req.params.id, user.id));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+socialRouter.get("/api/social/posts/:id/comments", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const rows = await db
+      .select({
+        id: ridePostComments.id,
+        body: ridePostComments.body,
+        createdAt: ridePostComments.createdAt,
+        authorId: users.id,
+        authorName: users.name,
+        authorAvatar: users.avatar,
+      })
+      .from(ridePostComments)
+      .innerJoin(users, eq(users.id, ridePostComments.userId))
+      .where(eq(ridePostComments.postId, req.params.id))
+      .orderBy(ridePostComments.createdAt)
+      .limit(200);
+    res.json({ comments: rows });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+socialRouter.post("/api/social/posts/:id/comments", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const body = String(req.body?.body || "").trim().slice(0, COMMENT_MAX);
+    if (!body) return res.status(400).json({ error: "Comment cannot be empty" });
+    const [post] = await db.select({ id: ridePosts.id }).from(ridePosts).where(eq(ridePosts.id, req.params.id));
+    if (!post) return res.status(404).json({ error: "Post not found" });
+
+    const [created] = await db
+      .insert(ridePostComments)
+      .values({ postId: post.id, userId: user.id, body })
+      .returning();
+    res.json({
+      comment: {
+        id: created.id,
+        body: created.body,
+        createdAt: created.createdAt,
+        authorId: user.id,
+        authorName: user.name,
+        authorAvatar: user.avatar,
+      },
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Status badges for a single user (profiles). Surfaces existing trust state.
+// ---------------------------------------------------------------------------
+
+socialRouter.get("/api/social/badges/:userId", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const map = await computeBadges([req.params.userId]);
+    res.json({ badges: map.get(req.params.userId) || [] });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

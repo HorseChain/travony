@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
+import { StatusBadges, type StatusBadge } from "@/components/StatusBadges";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
@@ -47,6 +48,11 @@ export default function DriverProfileScreen() {
   const { data: socialData } = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
     queryKey: ["/api/social/counts"],
     enabled: !!user,
+  });
+
+  const { data: badgesData } = useQuery<{ badges: StatusBadge[] }>({
+    queryKey: ["/api/social/badges", user?.id],
+    enabled: !!user?.id,
   });
 
   const handleLogout = async () => {
@@ -203,6 +209,7 @@ export default function DriverProfileScreen() {
                 </ThemedText>
               </View>
             ) : null}
+            <StatusBadges badges={badgesData?.badges} size="md" />
           </View>
           <View style={styles.ratingBadge}>
             <Ionicons name="star-outline" size={16} color="#FFC107" />

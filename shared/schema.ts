@@ -1661,6 +1661,9 @@ export const ridePosts = pgTable("ride_posts", {
   type: ridePostTypeEnum("type").notNull(),
   twitchChannel: text("twitch_channel"),
   caption: text("caption"),
+  // Optional rider photo attached when sharing a ride memory to the feed.
+  // Stored inline as a compressed data URL (validated + size-capped server-side).
+  photoUrl: text("photo_url"),
   cityName: text("city_name"),
   distanceKm: decimal("distance_km", { precision: 8, scale: 2 }),
   isLive: boolean("is_live").default(false).notNull(),
@@ -1670,3 +1673,31 @@ export const ridePosts = pgTable("ride_posts", {
 
 export type RidePost = typeof ridePosts.$inferSelect;
 export type InsertRidePost = typeof ridePosts.$inferInsert;
+
+// A reaction on a feed post. One reaction per (post, user) — changing your
+// reaction replaces the row (upsert), removing it deletes the row.
+export const ridePostReactions = pgTable("ride_post_reactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "cascade" }).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  type: text("type").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("ride_post_reactions_user_unique").on(table.postId, table.userId),
+]);
+
+export type RidePostReaction = typeof ridePostReactions.$inferSelect;
+export type InsertRidePostReaction = typeof ridePostReactions.$inferInsert;
+
+// A comment on a feed post. Kept short (server-capped) and only ever exposes
+// the author's public fields (id / name / avatar).
+export const ridePostComments = pgTable("ride_post_comments", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "cascade" }).notNull(),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  body: text("body").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type RidePostComment = typeof ridePostComments.$inferSelect;
+export type InsertRidePostComment = typeof ridePostComments.$inferInsert;
