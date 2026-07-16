@@ -186,7 +186,7 @@ export default function DriverProfileScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + Spacing["5xl"] + Spacing["4xl"] + Spacing.md },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -212,7 +212,7 @@ export default function DriverProfileScreen() {
             <StatusBadges badges={badgesData?.badges} size="md" />
           </View>
           <View style={styles.ratingBadge}>
-            <Ionicons name="star-outline" size={16} color="#FFC107" />
+            <Ionicons name="star-outline" size={16} color={theme.star} />
             <ThemedText style={styles.ratingText}>
               {driverData?.rating || "5.0"}
             </ThemedText>
@@ -304,7 +304,7 @@ export default function DriverProfileScreen() {
         ))}
 
         <ThemedText style={[styles.version, { color: theme.textMuted }]}>
-          T Driver v4.3.0
+          T Driver v5.6.0
         </ThemedText>
       </ScrollView>
     </ThemedView>
@@ -333,7 +333,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarText: {
-    fontSize: 28,
+    ...Typography.h1,
     fontWeight: "700",
   },
   profileInfo: {
@@ -351,14 +351,13 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.xs,
-    backgroundColor: "#FFC10720",
+    backgroundColor: Colors.amber + "20",
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.lg,
   },
   ratingText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   prayerBadge: {
     flexDirection: "row",
@@ -371,8 +370,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   prayerBadgeText: {
-    fontSize: 12,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   statsCard: {
     flexDirection: "row",
@@ -389,8 +387,7 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.lg,
   },
   statValue: {
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.xxlHeavy,
     marginBottom: Spacing.xs,
   },
   statLabel: {
@@ -421,8 +418,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuLabel: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   menuSubtitle: {
     ...Typography.small,

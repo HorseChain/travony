@@ -4,7 +4,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, Colors } from "@/constants/theme";
+import { Typography, Spacing, Colors } from "@/constants/theme";
 
 export default function AboutNetworkScreen() {
   const headerHeight = useHeaderHeight();
@@ -35,7 +35,7 @@ export default function AboutNetworkScreen() {
             <ThemedText style={[styles.metricLabel, { color: theme.textMuted }]}>Network Members</ThemedText>
           </View>
           <View style={styles.metricItem}>
-            <ThemedText style={[styles.metricValue, { color: Colors.travonyGreen }]}>4.3</ThemedText>
+            <ThemedText style={[styles.metricValue, { color: Colors.travonyGreen }]}>5.6</ThemedText>
             <ThemedText style={[styles.metricLabel, { color: theme.textMuted }]}>Version</ThemedText>
           </View>
         </View>
@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   statement: {
-    fontSize: 17,
+    ...Typography.bodyLarge,
     fontWeight: "300",
     lineHeight: 28,
     textAlign: "center",
@@ -74,12 +74,10 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   metricValue: {
-    fontSize: 20,
-    fontWeight: "600",
+    ...Typography.xlBold,
   },
   metricLabel: {
-    fontSize: 10,
-    fontWeight: "400",
+    ...Typography.micro,
     letterSpacing: 1,
     textTransform: "uppercase",
   },

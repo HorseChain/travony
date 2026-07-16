@@ -34,7 +34,7 @@ function MenuItem({ icon, title, onPress, showArrow = true, danger = false }: Me
     <Pressable
       style={({ pressed }) => [
         styles.menuItem,
-        { opacity: pressed ? 0.7 : 1 },
+        { opacity: pressed ? 0.8 : 1 },
       ]}
       onPress={onPress}
     >
@@ -121,7 +121,7 @@ export default function ProfileScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.editButton,
-            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.7 : 1 },
+            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={() => navigation.navigate("EditProfile")}
         >
@@ -219,7 +219,7 @@ export default function ProfileScreen() {
       </Card>
 
       <ThemedText style={[styles.version, { color: theme.textMuted }]}>
-        Travony v4.3.0
+        Travony v5.6.0
       </ThemedText>
     </ScrollView>
   );
