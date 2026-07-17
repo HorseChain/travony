@@ -4,6 +4,8 @@ import SocialScreen from "@/screens/SocialScreen";
 import StreamViewerScreen from "@/screens/StreamViewerScreen";
 import MemoriesScreen from "@/screens/MemoriesScreen";
 import PostCommentsScreen from "@/screens/PostCommentsScreen";
+import DiscoverScreen from "@/screens/DiscoverScreen";
+import HubDetailScreen from "@/screens/HubDetailScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type SocialStackParamList = {
@@ -11,6 +13,8 @@ export type SocialStackParamList = {
   StreamViewer: { channel: string; name: string };
   Memories: undefined;
   PostComments: { postId: string };
+  Discover: undefined;
+  HubDetail: { hubId: string; hubName: string };
 };
 
 const Stack = createNativeStackNavigator<SocialStackParamList>();
@@ -39,6 +43,16 @@ export default function SocialStackNavigator() {
         name="PostComments"
         component={PostCommentsScreen}
         options={{ headerTitle: "Comments" }}
+      />
+      <Stack.Screen
+        name="Discover"
+        component={DiscoverScreen}
+        options={{ headerTitle: "Discover" }}
+      />
+      <Stack.Screen
+        name="HubDetail"
+        component={HubDetailScreen}
+        options={({ route }) => ({ headerTitle: route.params.hubName })}
       />
     </Stack.Navigator>
   );

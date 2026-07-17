@@ -273,9 +273,14 @@ export default function SocialScreen() {
   useLayoutEffect(() => {
     navigation.setOptions({
       headerRight: () => (
-        <HeaderButton onPress={() => navigation.navigate("Memories")}>
-          <Ionicons name="images-outline" size={22} color={theme.primary} />
-        </HeaderButton>
+        <View style={{ flexDirection: "row" }}>
+          <HeaderButton onPress={() => navigation.navigate("Discover")}>
+            <Ionicons name="search-outline" size={22} color={theme.primary} />
+          </HeaderButton>
+          <HeaderButton onPress={() => navigation.navigate("Memories")}>
+            <Ionicons name="images-outline" size={22} color={theme.primary} />
+          </HeaderButton>
+        </View>
       ),
     });
   }, [navigation, theme.primary]);

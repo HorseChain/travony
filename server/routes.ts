@@ -136,6 +136,7 @@ import type { Ride } from "@shared/schema";
 import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs, prayerRideDispatches } from "@shared/schema";
 import { networkStatsRouter } from "./networkStats";
 import { socialRouter } from "./socialRoutes";
+import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRoutes";
 import { db } from "./db";
 import { eq, and, gte, desc, count, like } from "drizzle-orm";
 
@@ -1564,6 +1565,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ride.status === "completed" &&
         existingRide.status !== "completed"
       ) {
+        // Travony Live: feed the trending engine (fire-and-forget, idempotent).
+        logRouteActivity(ride).catch((err) =>
+          console.error("[discovery] route activity log failed:", err),
+        );
+
         const fare = parseFloat(ride.actualFare || ride.estimatedFare || "0");
         const user = await storage.getUser(ride.customerId);
         
@@ -8201,6 +8207,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(nameYourFareRouter);
   app.use(fleetDashboardRouter);
   app.use(evRouter);
+  app.use(discoveryRouter);
+  initDiscovery();
 
   const httpServer = createServer(app);
 

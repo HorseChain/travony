@@ -8,12 +8,10 @@ import {
   ActivityIndicator,
   Image,
   Linking,
-  ScrollView,
   Modal,
   FlatList,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Location from "expo-location";
 import * as Haptics from "expo-haptics";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
@@ -23,7 +21,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import { useQuery } from "@tanstack/react-query";
-import { APP_VARIANT, getAppDisplayName } from "@/lib/appVariant";
+import { APP_VARIANT } from "@/lib/appVariant";
 
 interface PhoneCode {
   code: string;
@@ -31,7 +29,7 @@ interface PhoneCode {
   name: string;
 }
 
-type OnboardingStep = "perspective" | "role" | "location" | "phone" | "otp" | "name";
+type OnboardingStep = "perspective" | "phone" | "otp" | "name";
 type UserRole = "customer" | "driver";
 
 export default function OnboardingScreen() {
@@ -55,7 +53,6 @@ export default function OnboardingScreen() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [name, setName] = useState("");
   const [sessionToken, setSessionToken] = useState("");
-  const [locationPermission, setLocationPermission] = useState<Location.PermissionStatus | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<PhoneCode>({ code: "AE", phoneCode: "+971", name: "United Arab Emirates" });
   const [showCountryPicker, setShowCountryPicker] = useState(false);
   const [countrySearch, setCountrySearch] = useState("");
@@ -72,21 +69,13 @@ export default function OnboardingScreen() {
       c.phoneCode.includes(countrySearch)
   );
 
-  const handleLocationPermission = async () => {
-    setIsLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      setLocationPermission(status);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      setStep("phone");
-    } catch (error) {
-      Alert.alert("Error", "Failed to request location permission");
-    } finally {
-      setIsLoading(false);
-    }
+  // Typing a full international number ("+9715...") just works — the picker
+  // is only needed when the user types a local number.
+  const getFullPhoneNumber = () => {
+    const cleaned = phone.replace(/[\s-]/g, "");
+    if (cleaned.startsWith("+")) return cleaned;
+    return `${selectedCountry.phoneCode}${cleaned}`;
   };
-
-  const getFullPhoneNumber = () => `${selectedCountry.phoneCode}${phone}`;
 
   const handleSendOTP = async () => {
     if (!phone || phone.length < 6) {
@@ -114,11 +103,29 @@ export default function OnboardingScreen() {
   };
 
   const handleOtpChange = (value: string, index: number) => {
+    // Pasting or auto-filling the whole code into one box fills all six.
+    const digits = value.replace(/\D/g, "");
+    if (digits.length > 1) {
+      const newOtp = ["", "", "", "", "", ""];
+      for (let i = 0; i < 6 && i < digits.length; i++) {
+        newOtp[i] = digits[i];
+      }
+      setOtp(newOtp);
+      const nextEmpty = newOtp.findIndex((d) => d === "");
+      if (nextEmpty === -1) {
+        otpRefs.current[5]?.blur();
+        handleVerifyOTP(newOtp.join(""));
+      } else {
+        otpRefs.current[nextEmpty]?.focus();
+      }
+      return;
+    }
+
     const newOtp = [...otp];
-    newOtp[index] = value;
+    newOtp[index] = digits;
     setOtp(newOtp);
 
-    if (value && index < 5) {
+    if (digits && index < 5) {
       otpRefs.current[index + 1]?.focus();
     }
 
@@ -200,7 +207,7 @@ export default function OnboardingScreen() {
 
   const handleBack = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const stepOrder: OnboardingStep[] = ["perspective", "location", "phone", "otp", "name"];
+    const stepOrder: OnboardingStep[] = ["perspective", "phone", "otp", "name"];
     const currentIndex = stepOrder.indexOf(step);
     if (currentIndex > 0) {
       setStep(stepOrder[currentIndex - 1]);
@@ -211,16 +218,12 @@ export default function OnboardingScreen() {
     return step !== "perspective" && !isLoading;
   };
 
+  // One tap → straight to the phone number. Location permission is asked
+  // quietly on the home screen, where it's actually needed.
   const handlePerspectiveSelect = (role: UserRole) => {
     setUserRole(role);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    setStep("location");
-  };
-
-  const handleRoleSelect = (role: UserRole) => {
-    setUserRole(role);
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setStep("location");
+    setStep("phone");
   };
 
   const getPerspectiveHeadline = () => {
@@ -276,75 +279,6 @@ export default function OnboardingScreen() {
           </Pressable>
         ) : null}
       </View>
-    </View>
-  );
-
-  const renderRoleStep = () => (
-    <View style={styles.stepContainer}>
-      <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
-        <Ionicons name="car" size={64} color={Colors.travonyGreen} />
-      </View>
-      <ThemedText style={styles.stepTitle}>Welcome to {getAppDisplayName()}</ThemedText>
-      <ThemedText style={[styles.stepDescription, { color: theme.textSecondary }]}>
-        How would you like to use {getAppDisplayName()}?
-      </ThemedText>
-      <View style={styles.roleButtonsContainer}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.roleButton,
-            { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
-          ]}
-          onPress={() => handleRoleSelect("customer")}
-        >
-          <Ionicons name="person" size={32} color={Colors.light.textOnPrimary} style={{ marginBottom: 8 }} />
-          <ThemedText style={styles.roleButtonTitle}>Access the Network</ThemedText>
-          <ThemedText style={styles.roleButtonSubtitle}>Intelligent mobility</ThemedText>
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [
-            styles.roleButton,
-            { backgroundColor: theme.backgroundElevated, borderWidth: 2, borderColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
-          ]}
-          onPress={() => handleRoleSelect("driver")}
-        >
-          <Ionicons name="car-sport" size={32} color={Colors.travonyGreen} style={{ marginBottom: 8 }} />
-          <ThemedText style={[styles.roleButtonTitle, { color: theme.text }]}>Activate Your Vehicle</ThemedText>
-          <ThemedText style={[styles.roleButtonSubtitle, { color: theme.textSecondary }]}>Vehicle as asset</ThemedText>
-        </Pressable>
-      </View>
-    </View>
-  );
-
-  const renderLocationStep = () => (
-    <View style={styles.stepContainer}>
-      <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen + "20" }]}>
-        <Ionicons name="location" size={64} color={Colors.travonyGreen} />
-      </View>
-      <ThemedText style={styles.stepTitle}>Enable Location</ThemedText>
-      <ThemedText style={[styles.stepDescription, { color: theme.textSecondary }]}>
-        Location access enables intelligent vehicle matching and network optimization
-      </ThemedText>
-      <Pressable
-        style={({ pressed }) => [
-          styles.primaryButton,
-          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
-        ]}
-        onPress={handleLocationPermission}
-        disabled={isLoading}
-      >
-        {isLoading ? (
-          <ActivityIndicator color={Colors.light.textOnPrimary} />
-        ) : (
-          <ThemedText style={styles.primaryButtonText}>Enable Location</ThemedText>
-        )}
-      </Pressable>
-      <Pressable
-        style={styles.skipButton}
-        onPress={() => setStep("phone")}
-        disabled={isLoading}
-      >
-        <ThemedText style={[styles.skipText, { color: theme.textMuted }]}>Skip for now</ThemedText>
-      </Pressable>
     </View>
   );
 
@@ -573,8 +507,6 @@ export default function OnboardingScreen() {
 
         <View style={styles.stepContent}>
           {step === "perspective" && renderPerspectiveStep()}
-          {step === "role" && renderRoleStep()}
-          {step === "location" && renderLocationStep()}
           {step === "phone" && renderPhoneStep()}
           {step === "otp" && renderOtpStep()}
           {step === "name" && renderNameStep()}
@@ -582,14 +514,14 @@ export default function OnboardingScreen() {
 
         {step !== "perspective" ? (
           <View style={styles.progressContainer}>
-            {["location", "phone", "otp", "name"].map((s, index) => (
+            {["phone", "otp", "name"].map((s, index) => (
               <View
                 key={s}
                 style={[
                   styles.progressDot,
                   {
                     backgroundColor:
-                      ["location", "phone", "otp", "name"].indexOf(step) >= index
+                      ["phone", "otp", "name"].indexOf(step) >= index
                         ? Colors.travonyGreen
                         : theme.border,
                   },

@@ -8,8 +8,17 @@ import {
   KeyboardAvoidingView,
   Keyboard,
   Platform,
-  ActivityIndicator,
 } from "react-native";
+import Animated, {
+  FadeInDown,
+  FadeInUp,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Location from "expo-location";
 import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
@@ -54,6 +63,43 @@ const nextId = () => `m${Date.now()}-${msgSeq++}`;
 function timeParams() {
   const now = new Date();
   return { hour: now.getHours(), dow: now.getDay(), tzOffset: -now.getTimezoneOffset() };
+}
+
+function TypingDot({ delay, color }: { delay: number; color: string }) {
+  const lift = useSharedValue(0);
+
+  useEffect(() => {
+    lift.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(-5, { duration: 280 }),
+          withTiming(0, { duration: 280 })
+        ),
+        -1
+      )
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const style = useAnimatedStyle(() => ({
+    transform: [{ translateY: lift.value }],
+  }));
+
+  return <Animated.View style={[styles.typingDot, { backgroundColor: color }, style]} />;
+}
+
+function TypingIndicator({ background, color }: { background: string; color: string }) {
+  return (
+    <Animated.View
+      entering={FadeInUp.duration(200)}
+      style={[styles.typingBubble, { backgroundColor: background }]}
+    >
+      <TypingDot delay={0} color={color} />
+      <TypingDot delay={140} color={color} />
+      <TypingDot delay={280} color={color} />
+    </Animated.View>
+  );
 }
 
 export default function AssistantHomeScreen() {
@@ -275,37 +321,81 @@ export default function AssistantHomeScreen() {
         >
           {!conversationStarted ? (
             <View style={styles.emptyState}>
-              <ThemedText style={styles.greeting}>{greeting}</ThemedText>
-              <ThemedText style={[styles.subline, { color: theme.textSecondary }]}>
-                {subline}
-              </ThemedText>
+              <Animated.View entering={FadeInDown.duration(400)}>
+                <View style={[styles.heroOrb, { backgroundColor: theme.primary + "18" }]}>
+                  <View style={[styles.heroOrbInner, { backgroundColor: theme.primary }]} />
+                </View>
+              </Animated.View>
+              <Animated.View entering={FadeInDown.duration(400).delay(80)}>
+                <ThemedText style={styles.greeting}>{greeting}</ThemedText>
+              </Animated.View>
+              <Animated.View entering={FadeInDown.duration(400).delay(160)}>
+                <ThemedText style={[styles.subline, { color: theme.textSecondary }]}>
+                  {subline}
+                </ThemedText>
+              </Animated.View>
+              {chips.length > 0 ? (
+                <Animated.View
+                  entering={FadeInDown.duration(400).delay(240)}
+                  style={styles.starterGrid}
+                >
+                  {chips.slice(0, 4).map((chip) => (
+                    <Pressable
+                      key={chip.id}
+                      onPress={() => handleChip(chip)}
+                      disabled={thinking}
+                      style={({ pressed }) => [
+                        styles.starterCard,
+                        {
+                          backgroundColor: theme.backgroundDefault,
+                          opacity: pressed || thinking ? 0.7 : 1,
+                        },
+                      ]}
+                    >
+                      <Ionicons name={chip.icon as any} size={18} color={theme.primary} />
+                      <ThemedText style={styles.starterCardText} numberOfLines={2}>
+                        {chip.label}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </Animated.View>
+              ) : null}
             </View>
           ) : (
             messages.map((m) =>
               m.role === "user" ? (
-                <View key={m.id} style={[styles.userBubble, { backgroundColor: theme.primary }]}>
+                <Animated.View
+                  key={m.id}
+                  entering={FadeInDown.duration(250)}
+                  style={[styles.userBubble, { backgroundColor: theme.primary }]}
+                >
                   <ThemedText style={styles.userBubbleText}>{m.text}</ThemedText>
-                </View>
+                </Animated.View>
               ) : (
-                <View key={m.id} style={styles.assistantBlock}>
+                <Animated.View
+                  key={m.id}
+                  entering={FadeInUp.duration(250)}
+                  style={styles.assistantBlock}
+                >
+                  <View style={styles.assistantRow}>
+                    <View style={[styles.assistantDot, { backgroundColor: theme.primary }]} />
+                    <ThemedText style={[styles.assistantLabel, { color: theme.textMuted }]}>
+                      Travony
+                    </ThemedText>
+                  </View>
                   {m.text ? <ThemedText style={styles.assistantText}>{m.text}</ThemedText> : null}
                   {m.card ? <AssistantCard card={m.card} handlers={handlers} /> : null}
-                </View>
+                </Animated.View>
               )
             )
           )}
           {thinking ? (
-            <View style={styles.thinkingRow}>
-              <ActivityIndicator size="small" color={theme.primary} />
-              <ThemedText style={[styles.thinkingText, { color: theme.textMuted }]}>
-                Thinking…
-              </ThemedText>
-            </View>
+            <TypingIndicator background={theme.backgroundDefault} color={theme.textMuted} />
           ) : null}
         </ScrollView>
 
         {/* Adaptive chips */}
-        {chips.length > 0 ? (
+        {conversationStarted && chips.length > 0 ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -424,6 +514,19 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
     paddingBottom: Spacing["4xl"],
   },
+  heroOrb: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.md,
+  },
+  heroOrbInner: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+  },
   greeting: {
     ...Typography.h1,
     textAlign: "center",
@@ -431,6 +534,27 @@ const styles = StyleSheet.create({
   subline: {
     ...Typography.body,
     textAlign: "center",
+  },
+  starterGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.xl,
+    paddingHorizontal: Spacing.sm,
+  },
+  starterCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    width: "47%",
+  },
+  starterCardText: {
+    ...Typography.smallMedium,
+    flex: 1,
   },
   userBubble: {
     alignSelf: "flex-end",
@@ -448,17 +572,39 @@ const styles = StyleSheet.create({
     alignSelf: "stretch",
     maxWidth: "100%",
   },
+  assistantRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 4,
+  },
+  assistantDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  assistantLabel: {
+    ...Typography.captionBold,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+  },
   assistantText: {
     ...Typography.body,
   },
-  thinkingRow: {
+  typingBubble: {
     flexDirection: "row",
     alignItems: "center",
-    gap: Spacing.sm,
-    paddingVertical: Spacing.sm,
+    gap: 5,
+    alignSelf: "flex-start",
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.lg,
+    borderBottomLeftRadius: BorderRadius.xs,
   },
-  thinkingText: {
-    ...Typography.small,
+  typingDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
   },
   chipsScroll: {
     flexGrow: 0,

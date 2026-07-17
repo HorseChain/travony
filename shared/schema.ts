@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey, unique, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1810,3 +1810,79 @@ export const assistantInteractions = pgTable("assistant_interactions", {
 
 export type AssistantInteraction = typeof assistantInteractions.$inferSelect;
 export type InsertAssistantInteraction = typeof assistantInteractions.$inferInsert;
+
+// ===================== Travony Live: Trending & Search =====================
+// route_activity is the raw signal: one row per completed ride, keyed by
+// coarse zone names (never exact addresses/coords beyond rounded centroids).
+// trending_cache holds pre-computed scores refreshed every ~5 minutes so the
+// hot read path (GET /api/trending) never touches raw tables.
+// search_queries logs every search to power "Trending Searches".
+
+export const routeActivity = pgTable("route_activity", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Unique per ride — makes logging idempotent (safe to call twice).
+  rideId: varchar("ride_id").references(() => rides.id).unique(),
+  originZone: text("origin_zone").notNull(),
+  destinationZone: text("destination_zone").notNull(),
+  // Normalized "origin → destination" key used for grouping.
+  routeKey: text("route_key").notNull(),
+  // Rounded to ~1km precision — coarse centroids only, never exact coords.
+  originLat: decimal("origin_lat", { precision: 6, scale: 2 }),
+  originLng: decimal("origin_lng", { precision: 6, scale: 2 }),
+  destLat: decimal("dest_lat", { precision: 6, scale: 2 }),
+  destLng: decimal("dest_lng", { precision: 6, scale: 2 }),
+  regionCode: text("region_code"),
+  city: text("city"),
+  hourBucket: integer("hour_bucket").notNull(), // 0-23 local-ish (server hour)
+  dayOfWeek: integer("day_of_week").notNull(), // 0-6 (Sun=0)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("route_activity_route_key_idx").on(table.routeKey, table.createdAt),
+  index("route_activity_created_idx").on(table.createdAt),
+]);
+
+export type RouteActivity = typeof routeActivity.$inferSelect;
+export type InsertRouteActivity = typeof routeActivity.$inferInsert;
+
+export const trendingCache = pgTable("trending_cache", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  type: text("type").notNull(), // route | post | search_term
+  referenceId: text("reference_id").notNull(), // routeKey / post id / term
+  label: text("label").notNull(),
+  score1h: decimal("score_1h", { precision: 12, scale: 2 }).default("0").notNull(),
+  score6h: decimal("score_6h", { precision: 12, scale: 2 }).default("0").notNull(),
+  score24h: decimal("score_24h", { precision: 12, scale: 2 }).default("0").notNull(),
+  // score1h delta vs the previous refresh — rising trends surface first.
+  trendVelocity: decimal("trend_velocity", { precision: 12, scale: 2 }).default("0").notNull(),
+  city: text("city"),
+  regionCode: text("region_code"),
+  peakHour: integer("peak_hour"),
+  driverCount: integer("driver_count").default(0),
+  requestCount: integer("request_count").default(0),
+  meta: text("meta"), // small JSON blob for type-specific extras
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("trending_cache_type_ref_unique").on(table.type, table.referenceId),
+  index("trending_cache_type_idx").on(table.type),
+]);
+
+export type TrendingCacheRow = typeof trendingCache.$inferSelect;
+export type InsertTrendingCacheRow = typeof trendingCache.$inferInsert;
+
+export const searchQueries = pgTable("search_queries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  queryText: text("query_text").notNull(),
+  queryType: text("query_type").default("global").notNull(), // global | route | driver | post | hub
+  resultCount: integer("result_count").default(0),
+  clickedResultId: text("clicked_result_id"),
+  clickedResultType: text("clicked_result_type"), // driver | route | post | hub
+  city: text("city"),
+  regionCode: text("region_code"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("search_queries_created_idx").on(table.createdAt),
+]);
+
+export type SearchQuery = typeof searchQueries.$inferSelect;
+export type InsertSearchQuery = typeof searchQueries.$inferInsert;
