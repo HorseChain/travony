@@ -234,8 +234,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   supportLabel: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   supportSubtitle: {
     ...Typography.small,
@@ -257,8 +256,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   faqQuestion: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     flex: 1,
     paddingRight: Spacing.md,
   },

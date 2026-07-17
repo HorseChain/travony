@@ -712,17 +712,17 @@ export default function GhostModeScreen() {
                 styles.requestButton,
                 {
                   backgroundColor: Colors.travonyGreen,
-                  opacity: requestRideMutation.isPending ? 0.7 : 1,
+                  opacity: requestRideMutation.isPending ? 0.5 : 1,
                 },
               ]}
               onPress={handleRequestRide}
               disabled={requestRideMutation.isPending}
             >
               {requestRideMutation.isPending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
               ) : (
                 <>
-                  <Ionicons name="flash-outline" size={20} color="#FFFFFF" />
+                  <Ionicons name="flash-outline" size={20} color={Colors.light.textOnPrimary} />
                   <ThemedText style={styles.requestButtonText}>
                     Request Ghost Ride
                   </ThemedText>
@@ -847,17 +847,17 @@ export default function GhostModeScreen() {
               styles.syncButton,
               {
                 backgroundColor: theme.primary,
-                opacity: syncMutation.isPending ? 0.7 : 1,
+                opacity: syncMutation.isPending ? 0.5 : 1,
               },
             ]}
             onPress={() => syncMutation.mutate()}
             disabled={syncMutation.isPending}
           >
             {syncMutation.isPending ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
             ) : (
               <>
-                <Ionicons name="cloud-upload-outline" size={20} color="#FFFFFF" />
+                <Ionicons name="cloud-upload-outline" size={20} color={Colors.light.textOnPrimary} />
                 <ThemedText style={styles.syncButtonText}>Sync Now</ThemedText>
               </>
             )}
@@ -1032,8 +1032,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   cityBadgeText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   locationDivider: {
     borderLeftWidth: 2,
@@ -1050,9 +1049,8 @@ const styles = StyleSheet.create({
     ...Typography.body,
   },
   inputLabel: {
-    ...Typography.small,
+    ...Typography.smallBold,
     marginBottom: Spacing.sm,
-    fontWeight: "600",
   },
   vehicleGrid: {
     flexDirection: "row",
@@ -1071,8 +1069,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   vehicleCardText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   farePreview: {
     marginTop: Spacing.md,
@@ -1097,9 +1094,8 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   offlineBadgeText: {
-    ...Typography.caption,
-    fontWeight: "600",
-    fontSize: 10,
+    ...Typography.captionBold,
+    ...Typography.micro,
   },
   fareAmount: {
     fontSize: 32,
@@ -1133,8 +1129,7 @@ const styles = StyleSheet.create({
     ...Typography.small,
   },
   fareBreakdownValue: {
-    ...Typography.small,
-    fontWeight: "500",
+    ...Typography.smallMedium,
   },
   requestButton: {
     flexDirection: "row",
@@ -1146,7 +1141,7 @@ const styles = StyleSheet.create({
   },
   requestButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   hintCard: {
     flexDirection: "row",
@@ -1192,8 +1187,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   activeStatusText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   activeRideDetails: {
     gap: Spacing.sm,
@@ -1245,7 +1239,7 @@ const styles = StyleSheet.create({
   },
   syncButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   rideItem: {
     flexDirection: "row",
@@ -1268,8 +1262,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   rideStatusText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
     textTransform: "capitalize",
   },
   rideDate: {

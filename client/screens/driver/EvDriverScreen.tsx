@@ -21,8 +21,10 @@ import { ThemedText } from "@/components/ThemedText";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import RideMap from "@/components/RideMap";
 import { useTheme } from "@/hooks/useTheme";
-import { Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
+
+type Theme = ReturnType<typeof useTheme>["theme"];
 
 interface EvConnection {
   connected: boolean;
@@ -70,20 +72,20 @@ function timeAgo(iso: string | null): string {
   return `${Math.floor(hrs / 24)} d ago`;
 }
 
-function sourceLabel(source: string): { text: string; color: string } {
+function sourceLabel(source: string, theme: Theme): { text: string; color: string } {
   switch (source) {
     case "live":
       return { text: "Live from your car", color: Colors.travonyGreen };
     case "simulated":
-      return { text: "Simulated (demo data)", color: "#F59E0B" };
+      return { text: "Simulated (demo data)", color: theme.warning };
     case "stale":
-      return { text: "Last known reading", color: "#F59E0B" };
+      return { text: "Last known reading", color: theme.warning };
     case "manual":
-      return { text: "Manually entered", color: "#2196F3" };
+      return { text: "Manually entered", color: theme.info };
     case "cache":
       return { text: "Recently cached", color: Colors.travonyGreen };
     default:
-      return { text: "No data", color: "#9CA3AF" };
+      return { text: "No data", color: theme.textMuted };
   }
 }
 
@@ -182,12 +184,12 @@ export default function EvDriverScreen() {
 
   const isConnected = conn?.status === "connected";
   const hasBattery = conn?.batteryPercent != null;
-  const src = sourceLabel(conn?.source ?? "none");
+  const src = sourceLabel(conn?.source ?? "none", theme);
   const battColor =
     (conn?.batteryPercent ?? 100) <= 20
-      ? "#EF4444"
+      ? theme.error
       : (conn?.batteryPercent ?? 100) <= 40
-      ? "#F59E0B"
+      ? theme.warning
       : Colors.travonyGreen;
 
   const chargerMarkers = (chargers?.chargers ?? []).map((c) => ({
@@ -254,8 +256,8 @@ export default function EvDriverScreen() {
                         ) : null}
                         {conn?.isCharging ? (
                           <View style={styles.row}>
-                            <Ionicons name="flash" size={12} color="#2196F3" />
-                            <ThemedText style={[styles.metaText, { color: "#2196F3" }]}>Charging</ThemedText>
+                            <Ionicons name="flash" size={12} color={theme.info} />
+                            <ThemedText style={[styles.metaText, { color: theme.info }]}>Charging</ThemedText>
                           </View>
                         ) : null}
                       </View>
@@ -263,9 +265,9 @@ export default function EvDriverScreen() {
                   </View>
 
                   {conn?.isCharging && conn?.timeToReadyMinutes != null ? (
-                    <View style={[styles.readyBanner, { backgroundColor: "#2196F315" }]}>
-                      <Ionicons name="time-outline" size={16} color="#2196F3" />
-                      <ThemedText style={[styles.metaText, { color: "#2196F3" }]}>
+                    <View style={[styles.readyBanner, { backgroundColor: theme.info + "15" }]}>
+                      <Ionicons name="time-outline" size={16} color={theme.info} />
+                      <ThemedText style={[styles.metaText, { color: theme.info }]}>
                         {conn.timeToReadyMinutes === 0
                           ? `Charged to ${conn.targetChargePercent}% target`
                           : `~${conn.timeToReadyMinutes} min to ${conn.targetChargePercent}%`}
@@ -296,10 +298,10 @@ export default function EvDriverScreen() {
                       onPress={() => refreshMutation.mutate()}
                     >
                       {refreshMutation.isPending ? (
-                        <ActivityIndicator size="small" color="#FFF" />
+                        <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
                       ) : (
                         <>
-                          <Ionicons name="refresh" size={16} color="#FFF" />
+                          <Ionicons name="refresh" size={16} color={Colors.light.textOnPrimary} />
                           <ThemedText style={styles.btnText}>Refresh</ThemedText>
                         </>
                       )}
@@ -319,10 +321,10 @@ export default function EvDriverScreen() {
                     onPress={() => connectMutation.mutate()}
                   >
                     {connectMutation.isPending ? (
-                      <ActivityIndicator size="small" color="#FFF" />
+                      <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
                     ) : (
                       <>
-                        <Ionicons name="link" size={16} color="#FFF" />
+                        <Ionicons name="link" size={16} color={Colors.light.textOnPrimary} />
                         <ThemedText style={styles.btnText}>
                           {conn?.liveDataAvailable ? "Connect my car" : "Connect (demo)"}
                         </ThemedText>
@@ -357,7 +359,7 @@ export default function EvDriverScreen() {
                     onPress={submitManual}
                   >
                     {manualMutation.isPending ? (
-                      <ActivityIndicator size="small" color="#FFF" />
+                      <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
                     ) : (
                       <ThemedText style={styles.btnText}>Save</ThemedText>
                     )}
@@ -434,13 +436,13 @@ export default function EvDriverScreen() {
                     <View
                       style={[
                         styles.chargerIcon,
-                        { backgroundColor: (c.isOperational ? "#0EA5A4" : "#9CA3AF") + "20" },
+                        { backgroundColor: (c.isOperational ? theme.evGreen : theme.textMuted) + "20" },
                       ]}
                     >
                       <Ionicons
                         name="battery-charging"
                         size={16}
-                        color={c.isOperational ? "#0EA5A4" : "#9CA3AF"}
+                        color={c.isOperational ? theme.evGreen : theme.textMuted}
                       />
                     </View>
                     <View style={{ flex: 1 }}>
@@ -483,8 +485,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
   },
-  cardTitle: { fontSize: 16, fontWeight: "700" },
-  bodyText: { fontSize: 13, lineHeight: 19, marginTop: Spacing.sm },
+  cardTitle: { ...Typography.h4Heavy },
+  bodyText: { ...Typography.labelLight, lineHeight: 19, marginTop: Spacing.sm },
   sourcePill: {
     flexDirection: "row",
     alignItems: "center",
@@ -494,11 +496,11 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   sourceDot: { width: 6, height: 6, borderRadius: 3 },
-  sourcePillText: { fontSize: 11, fontWeight: "600" },
+  sourcePillText: { ...Typography.captionBold },
   batteryRow: { flexDirection: "row", alignItems: "center", marginTop: Spacing.md },
   batteryPct: { fontSize: 34, fontWeight: "800" },
   battTrack: { height: 8, borderRadius: 4, overflow: "hidden" },
-  metaText: { fontSize: 12, fontWeight: "500" },
+  metaText: { ...Typography.smallMedium },
   readyBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -507,7 +509,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     marginTop: Spacing.md,
   },
-  updatedText: { fontSize: 11, marginTop: Spacing.sm },
+  updatedText: { ...Typography.caption, marginTop: Spacing.sm },
   btn: {
     flexDirection: "row",
     alignItems: "center",
@@ -518,7 +520,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     minWidth: 90,
   },
-  btnText: { color: "#FFFFFF", fontSize: 13, fontWeight: "700" },
+  btnText: { color: Colors.light.textOnPrimary, ...Typography.labelHeavy },
   btnOutline: {
     flexDirection: "row",
     alignItems: "center",
@@ -528,7 +530,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     borderWidth: 1,
   },
-  btnOutlineText: { fontSize: 13, fontWeight: "600" },
+  btnOutlineText: { ...Typography.labelBold },
   manualRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: Spacing.md },
   manualInput: {
     flex: 1,
@@ -536,7 +538,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: 10,
-    fontSize: 15,
+    ...Typography.bodySmall,
   },
   infoNote: {
     flexDirection: "row",
@@ -546,9 +548,9 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     marginTop: Spacing.md,
   },
-  infoNoteText: { fontSize: 11, lineHeight: 16, flex: 1 },
-  featTitle: { fontSize: 14, fontWeight: "600" },
-  featDesc: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+  infoNoteText: { ...Typography.caption, lineHeight: 16, flex: 1 },
+  featTitle: { ...Typography.bodyBold },
+  featDesc: { ...Typography.small, lineHeight: 17, marginTop: 2 },
   mapWrap: {
     height: 180,
     borderRadius: BorderRadius.md,
@@ -570,5 +572,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  chargerName: { fontSize: 14, fontWeight: "600" },
+  chargerName: { ...Typography.bodyBold },
 });

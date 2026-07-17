@@ -13,7 +13,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Fonts } from "@/constants/theme";
+import { Typography, Colors, Spacing, BorderRadius, Fonts } from "@/constants/theme";
 
 export type ErrorFallbackProps = {
   error: Error;
@@ -73,7 +73,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
             styles.button,
             {
               backgroundColor: theme.link,
-              opacity: pressed ? 0.9 : 1,
+              opacity: pressed ? 0.8 : 1,
               transform: [{ scale: pressed ? 0.98 : 1 }],
             },
           ]}
@@ -104,7 +104,7 @@ export function ErrorFallback({ error, resetError }: ErrorFallbackProps) {
                   onPress={() => setIsModalVisible(false)}
                   style={({ pressed }) => [
                     styles.closeButton,
-                    { opacity: pressed ? 0.6 : 1 },
+                    { opacity: pressed ? 0.8 : 1 },
                   ]}
                 >
                   <Ionicons name="close-outline" size={24} color={theme.text} />
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     minWidth: 200,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
@@ -198,9 +198,8 @@ const styles = StyleSheet.create({
     }),
   },
   buttonText: {
-    fontWeight: "600",
+    ...Typography.h4,
     textAlign: "center",
-    fontSize: 16,
   },
   modalOverlay: {
     flex: 1,
@@ -242,7 +241,7 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   errorText: {
-    fontSize: 12,
+    ...Typography.small,
     lineHeight: 18,
     width: "100%",
   },

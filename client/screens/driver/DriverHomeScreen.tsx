@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { View, StyleSheet, Pressable, Alert, Platform, Modal } from "react-native";
+import { View, StyleSheet, Pressable, Alert, Platform, Modal, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -78,6 +78,35 @@ interface Hub {
   availablePorts?: number;
 }
 
+interface GoHereRecommendation {
+  kind: "hub" | "hotspot" | "zone";
+  hubId: string | null;
+  title: string;
+  lat: number;
+  lng: number;
+  distanceKm: number;
+  etaMinutes: number;
+  yieldPerHour: number | null;
+  currency: string;
+  demandLevel: string;
+  reason: string;
+  confidence: number;
+}
+
+interface GoHereResponse {
+  recommendation: GoHereRecommendation | null;
+  currency: string;
+  emptyReason?: string;
+}
+
+function goHereIconName(kind: GoHereRecommendation["kind"]): keyof typeof Ionicons.glyphMap {
+  switch (kind) {
+    case "hotspot": return "flame";
+    case "zone": return "trending-up";
+    default: return "location";
+  }
+}
+
 function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -96,9 +125,10 @@ const RING_BORDER = 6;
 
 function CountdownRing({ seconds, total, onGreenBg = false }: { seconds: number; total: number; onGreenBg?: boolean }) {
   const progress = seconds / total; // 1→0 as time runs out
+  const { theme } = useTheme();
   const ringColor = onGreenBg
-    ? seconds <= 5 ? "#FFB3B3" : "rgba(255,255,255,0.9)"
-    : seconds <= 5 ? "#E53935" : seconds <= 10 ? "#FF8C00" : Colors.travonyGreen;
+    ? seconds <= 5 ? theme.error + "80" : "rgba(255,255,255,0.9)"
+    : seconds <= 5 ? theme.error : seconds <= 10 ? theme.warning : Colors.travonyGreen;
   const trackColor = onGreenBg ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.12)";
   // Two-half technique: rotate left half and right half independently
   const halfProgress = Math.min(progress * 2, 1); // 0→1 for first half
@@ -197,7 +227,7 @@ function AnimatedToggle({
     backgroundColor: interpolateColor(
       animProgress.value,
       [0, 1],
-      ["#9E9E9E", Colors.travonyGreen]
+      [theme.textMuted, Colors.travonyGreen]
     ),
     width: 76 + animProgress.value * 8,
   }));
@@ -302,7 +332,7 @@ function EvHoldControl({
         accessibilityLabel="You are live as an EV driver. Tap to go offline."
         style={({ pressed }) => [
           styles.evHoldBar,
-          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.9 : 1 },
+          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
         ]}
       >
         <Animated.View style={[styles.evLiveDot, dotStyle]} />
@@ -310,7 +340,7 @@ function EvHoldControl({
           <ThemedText style={styles.evHoldTitle}>Live as EV · Ready</ThemedText>
           <ThemedText style={styles.evHoldSub}>Tap to go offline</ThemedText>
         </View>
-        <Ionicons name="flash" size={20} color="#fff" />
+        <Ionicons name="flash" size={20} color={Colors.light.textOnPrimary} />
       </Pressable>
     );
   }
@@ -351,8 +381,7 @@ export default function DriverHomeScreen() {
   const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [showActivationMoment, setShowActivationMoment] = useState(false);
-  const [hubCooldowns, setHubCooldowns] = useState<Record<string, number>>({});
-  const [proactiveHub, setProactiveHub] = useState<(Hub & { distanceKm: number }) | null>(null);
+  const [dismissedGoHereKey, setDismissedGoHereKey] = useState<string | null>(null);
   const [lowBatteryWarning, setLowBatteryWarning] = useState<{
     message: string;
     batteryPercent: number | null;
@@ -446,6 +475,28 @@ export default function DriverHomeScreen() {
     refetchInterval: litePollMs(60000, liteMode),
     select: (d) => (Array.isArray(d?.hubs) ? d.hubs : []),
   });
+
+  // "Go here next" — one combined nudge for idle online drivers. The rounded
+  // coords in the key make it refetch as the driver moves (~100m), and the
+  // interval refetches it as demand shifts. Hidden while a request is showing.
+  const goHereLatKey = currentLocation ? Math.round(currentLocation.lat * 1000) / 1000 : null;
+  const goHereLngKey = currentLocation ? Math.round(currentLocation.lng * 1000) / 1000 : null;
+
+  const { data: goHereData } = useQuery<GoHereResponse>({
+    queryKey: ["/api/openclaw/go-here-next", goHereLatKey, goHereLngKey],
+    queryFn: async () => {
+      if (!currentLocation) return { recommendation: null, currency: "AED" };
+      return apiRequest(
+        `/api/openclaw/go-here-next?lat=${currentLocation.lat}&lng=${currentLocation.lng}`,
+      );
+    },
+    enabled: isOnline && !!currentLocation && !incomingRequest,
+    refetchInterval: litePollMs(45000, liteMode),
+  });
+
+  const goHere = goHereData?.recommendation ?? null;
+  const goHereKey = goHere ? `${goHere.kind}:${goHere.lat.toFixed(4)},${goHere.lng.toFixed(4)}` : null;
+  const showGoHere = !!goHere && !incomingRequest && dismissedGoHereKey !== goHereKey;
 
   const toggleOnlineMutation = useMutation({
     mutationFn: async ({ online, evReady: ready }: { online: boolean; evReady?: boolean }) => {
@@ -600,34 +651,28 @@ export default function DriverHomeScreen() {
     };
   }, [incomingRequest?.id]);
 
+  // Track the driver's location while online so the "Go here next" nudge
+  // refreshes as they move. Not available on web (falls back to the last
+  // fetched position).
   useEffect(() => {
-    if (!isOnline || !currentLocation || !hubsData) return;
-    const now = Date.now();
-    const allHubs: Hub[] = [
-      ...(hubsData || []),
-      ...(evHubsData || []),
-    ];
-    const uniqueHubs = Array.from(new Map(allHubs.map((h) => [h.id, h])).values());
-
-    for (const hub of uniqueHubs) {
-      const dist = distanceKm(
-        currentLocation.lat,
-        currentLocation.lng,
-        Number(hub.lat),
-        Number(hub.lng)
+    if (!isOnline || Platform.OS === "web") return;
+    let sub: Location.LocationSubscription | null = null;
+    let cancelled = false;
+    (async () => {
+      const { status } = await Location.getForegroundPermissionsAsync();
+      if (status !== "granted" || cancelled) return;
+      sub = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.Balanced, distanceInterval: 100, timeInterval: 20000 },
+        (pos) => {
+          setCurrentLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        },
       );
-      if (dist > 8) continue;
-      const demandOk = (hub.demandScore ?? 0) > 0.6;
-      const evOk = hub.isEvHub && (hub.availablePorts ?? 0) > 0;
-      if (!demandOk && !evOk) continue;
-      const lastShown = hubCooldowns[hub.id] ?? 0;
-      if (now - lastShown < 30 * 60 * 1000) continue;
-      setProactiveHub({ ...hub, distanceKm: Math.round(dist * 10) / 10 });
-      hubSlideIn.value = withSpring(0, { damping: 18 });
-      hubOpacity.value = withTiming(1, { duration: 300 });
-      break;
-    }
-  }, [isOnline, currentLocation, hubsData, evHubsData]);
+    })();
+    return () => {
+      cancelled = true;
+      if (sub) sub.remove();
+    };
+  }, [isOnline]);
 
   useEffect(() => {
     if (!isOnline || !currentLocation || !hubsData) return;
@@ -654,12 +699,35 @@ export default function DriverHomeScreen() {
     opacity: hubOpacity.value,
   }));
 
-  const dismissHub = useCallback((hubId: string) => {
-    setHubCooldowns((prev) => ({ ...prev, [hubId]: Date.now() }));
+  // Slide the card in whenever a new recommendation appears.
+  useEffect(() => {
+    if (showGoHere) {
+      hubSwipeX.value = 0;
+      hubSlideIn.value = withSpring(0, { damping: 18 });
+      hubOpacity.value = withTiming(1, { duration: 300 });
+    }
+  }, [showGoHere, goHereKey]);
+
+  const dismissGoHere = useCallback(() => {
+    if (goHereKey) setDismissedGoHereKey(goHereKey);
     hubSlideIn.value = withSpring(-100);
     hubOpacity.value = withTiming(0);
-    setTimeout(() => setProactiveHub(null), 400);
-  }, [hubSlideIn, hubOpacity]);
+  }, [goHereKey, hubSlideIn, hubOpacity]);
+
+  // Tap → open turn-by-turn navigation to the spot. Works on iOS Maps,
+  // Android Google navigation, and Google Maps directions on web.
+  const handleGoHere = useCallback(() => {
+    if (!goHere) return;
+    if (Platform.OS !== "web") {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    }
+    const url = Platform.select({
+      ios: `maps:?daddr=${goHere.lat},${goHere.lng}`,
+      android: `google.navigation:q=${goHere.lat},${goHere.lng}`,
+      default: `https://www.google.com/maps/dir/?api=1&destination=${goHere.lat},${goHere.lng}`,
+    });
+    if (url) Linking.openURL(url).catch(() => {});
+  }, [goHere]);
 
   const hubSwipeGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
@@ -673,9 +741,7 @@ export default function DriverHomeScreen() {
         const direction = e.translationX > 0 ? 400 : -400;
         hubSwipeX.value = withTiming(direction, { duration: 200 });
         hubOpacity.value = withTiming(0, { duration: 200 });
-        if (proactiveHub) {
-          runOnJS(dismissHub)(proactiveHub.id);
-        }
+        runOnJS(dismissGoHere)();
       } else {
         hubSwipeX.value = withSpring(0);
         hubOpacity.value = withSpring(1);
@@ -981,32 +1047,33 @@ export default function DriverHomeScreen() {
       </View>
 
       <View style={[styles.quickActionsRow, { top: insets.top + Spacing.md + 106 }]}>
-        {proactiveHub ? (
+        {showGoHere && goHere ? (
           <GestureDetector gesture={hubSwipeGesture}>
             <Animated.View style={[styles.hubCard, { backgroundColor: theme.backgroundRoot }, hubCardStyle]}>
               <View style={styles.hubCardContent}>
-                {proactiveHub.isEvHub ? (
-                  <Ionicons name="flash" size={18} color="#2196F3" />
-                ) : (
-                  <Ionicons name="location" size={18} color={Colors.travonyGreen} />
-                )}
-                <View style={{ flex: 1 }}>
-                  <ThemedText style={styles.hubCardTitle} numberOfLines={1}>
-                    {proactiveHub.name}
-                  </ThemedText>
-                  <ThemedText style={[styles.hubCardSub, { color: theme.textMuted }]}>
-                    {proactiveHub.isEvHub && (proactiveHub.availablePorts ?? 0) > 0
-                      ? `${proactiveHub.availablePorts} charging ports open`
-                      : `${proactiveHub.distanceKm} km away · Good demand now`}
-                  </ThemedText>
-                </View>
+                <Pressable style={styles.goHereTapZone} onPress={handleGoHere}>
+                  <View style={[styles.goHereIcon, { backgroundColor: Colors.travonyGreen + "1A" }]}>
+                    <Ionicons name={goHereIconName(goHere.kind)} size={18} color={Colors.travonyGreen} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <ThemedText style={[styles.goHereLabel, { color: theme.textMuted }]}>
+                      Go here next
+                    </ThemedText>
+                    <ThemedText style={styles.hubCardTitle} numberOfLines={1}>
+                      {goHere.title}
+                    </ThemedText>
+                    <ThemedText style={[styles.hubCardSub, { color: theme.textMuted }]} numberOfLines={2}>
+                      {goHere.reason}
+                    </ThemedText>
+                  </View>
+                </Pressable>
                 <Pressable
                   style={[styles.hubHeadButton, { backgroundColor: Colors.travonyGreen }]}
-                  onPress={() => navigation.navigate("HubDetail", { hubId: proactiveHub.id.toString(), hubName: proactiveHub.name })}
+                  onPress={handleGoHere}
                 >
-                  <ThemedText style={styles.hubHeadButtonText}>Head There</ThemedText>
+                  <ThemedText style={styles.hubHeadButtonText}>Go</ThemedText>
                 </Pressable>
-                <Pressable onPress={() => dismissHub(proactiveHub.id)} style={styles.hubDismiss}>
+                <Pressable onPress={dismissGoHere} style={styles.hubDismiss} hitSlop={8}>
                   <Ionicons name="close" size={16} color={theme.textMuted} />
                 </Pressable>
               </View>
@@ -1020,7 +1087,7 @@ export default function DriverHomeScreen() {
                 {
                   backgroundColor: theme.backgroundElevated,
                   borderColor: theme.border,
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: pressed ? 0.8 : 1,
                 },
               ]}
               onPress={() => navigation.navigate("OpenClaw", { variant: "driver" })}
@@ -1041,7 +1108,7 @@ export default function DriverHomeScreen() {
                 {
                   backgroundColor: theme.backgroundElevated,
                   borderColor: theme.border,
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: pressed ? 0.8 : 1,
                 },
               ]}
               onPress={() => navigation.navigate("EvDriver")}
@@ -1055,12 +1122,12 @@ export default function DriverHomeScreen() {
                 {
                   backgroundColor: theme.backgroundElevated,
                   borderColor: theme.border,
-                  opacity: pressed ? 0.85 : 1,
+                  opacity: pressed ? 0.8 : 1,
                 },
               ]}
               onPress={() => navigation.navigate("DriverCoffeeOrders")}
             >
-              <Ionicons name="cafe" size={22} color="#8B4513" />
+              <Ionicons name="cafe" size={22} color={theme.warning} />
             </Pressable>
           </>
         )}
@@ -1092,15 +1159,15 @@ export default function DriverHomeScreen() {
                   </View>
                 ) : null}
                 {incomingRequest.isEvRide ? (
-                  <View style={[styles.evBadge, { backgroundColor: "#2196F320" }]}>
-                    <Ionicons name="flash" size={12} color="#2196F3" />
-                    <ThemedText style={[styles.evBadgeText, { color: "#2196F3" }]}>EV Requested</ThemedText>
+                  <View style={[styles.evBadge, { backgroundColor: theme.evGreen + "20" }]}>
+                    <Ionicons name="flash" size={12} color={theme.evGreen} />
+                    <ThemedText style={[styles.evBadgeText, { color: theme.evGreen }]}>EV Requested</ThemedText>
                   </View>
                 ) : null}
                 {incomingRequest.isSafeDriver ? (
-                  <View style={[styles.evBadge, { backgroundColor: "#7C3AED20" }]}>
-                    <Ionicons name="shield-checkmark" size={12} color="#7C3AED" />
-                    <ThemedText style={[styles.evBadgeText, { color: "#7C3AED" }]}>
+                  <View style={[styles.evBadge, { backgroundColor: theme.blockchain + "20" }]}>
+                    <Ionicons name="shield-checkmark" size={12} color={theme.blockchain} />
+                    <ThemedText style={[styles.evBadgeText, { color: theme.blockchain }]}>
                       Safe Driver · You drive THEIR car
                     </ThemedText>
                   </View>
@@ -1114,9 +1181,9 @@ export default function DriverHomeScreen() {
                   </View>
                 ) : null}
                 {incomingRequest.isNamedFare ? (
-                  <View style={[styles.evBadge, { backgroundColor: "#F59E0B20" }]}>
-                    <Ionicons name="pricetag" size={12} color="#F59E0B" />
-                    <ThemedText style={[styles.evBadgeText, { color: "#F59E0B" }]}>
+                  <View style={[styles.evBadge, { backgroundColor: theme.warning + "20" }]}>
+                    <Ionicons name="pricetag" size={12} color={theme.warning} />
+                    <ThemedText style={[styles.evBadgeText, { color: theme.warning }]}>
                       Rider offers {incomingRequest.currency || "AED"} {Number(incomingRequest.riderProposedFare || incomingRequest.estimatedFare).toFixed(2)}
                     </ThemedText>
                   </View>
@@ -1150,7 +1217,7 @@ export default function DriverHomeScreen() {
               </ThemedText>
               {incomingRequest.customerRating ? (
                 <View style={styles.ratingBadge}>
-                  <Ionicons name="star" size={12} color="#FFB800" />
+                  <Ionicons name="star" size={12} color={theme.star} />
                   <ThemedText style={[styles.ratingText, { color: theme.textPrimary }]}>
                     {Number(incomingRequest.customerRating).toFixed(1)}
                   </ThemedText>
@@ -1168,7 +1235,7 @@ export default function DriverHomeScreen() {
             <View style={styles.locationInfo}>
               {incomingRequest.stops.map((stop, idx) => (
                 <View key={stop.rideId}>
-                  {idx > 0 ? <View style={styles.locationLine} /> : null}
+                  {idx > 0 ? <View style={[styles.locationLine, { backgroundColor: theme.border }]} /> : null}
                   <View style={styles.locationRow}>
                     <View style={[styles.locationDot, { backgroundColor: Colors.travonyGreen }]} />
                     <View style={styles.locationTextContainer}>
@@ -1197,7 +1264,7 @@ export default function DriverHomeScreen() {
                   </ThemedText>
                 </View>
               </View>
-              <View style={styles.locationLine} />
+              <View style={[styles.locationLine, { backgroundColor: theme.border }]} />
               <View style={styles.locationRow}>
                 <View style={[styles.locationDot, { backgroundColor: theme.error }]} />
                 <View style={styles.locationTextContainer}>
@@ -1260,7 +1327,7 @@ export default function DriverHomeScreen() {
               <View style={styles.acceptButtonRingWrap}>
                 <CountdownRing seconds={countdownSeconds} total={COUNTDOWN_SECONDS} onGreenBg />
                 <View style={styles.countdownOverlayNumber}>
-                  <ThemedText style={[styles.countdownText, { color: countdownSeconds <= 5 ? "#ffdddd" : "rgba(255,255,255,0.9)" }]}>
+                  <ThemedText style={[styles.countdownText, { color: countdownSeconds <= 5 ? theme.error : "rgba(255,255,255,0.9)" }]}>
                     {countdownSeconds}
                   </ThemedText>
                 </View>
@@ -1271,7 +1338,7 @@ export default function DriverHomeScreen() {
             </Pressable>
             {incomingRequest.isNamedFare && !incomingRequest.isShared ? (
               <Pressable
-                style={[styles.declineButton, { borderColor: "#F59E0B" }]}
+                style={[styles.declineButton, { borderColor: theme.warning }]}
                 onPress={() => {
                   const base = Number(incomingRequest.riderProposedFare || incomingRequest.estimatedFare || 0);
                   setCounterAmount(Math.round(base * 1.1 * 100) / 100);
@@ -1279,7 +1346,7 @@ export default function DriverHomeScreen() {
                   if (countdownRef.current) clearInterval(countdownRef.current);
                 }}
               >
-                <ThemedText style={[styles.declineButtonText, { color: "#F59E0B" }]}>Counter</ThemedText>
+                <ThemedText style={[styles.declineButtonText, { color: theme.warning }]}>Counter</ThemedText>
               </Pressable>
             ) : null}
             <Pressable
@@ -1300,8 +1367,8 @@ export default function DriverHomeScreen() {
       >
         <View style={styles.warnOverlay}>
           <View style={[styles.warnCard, { backgroundColor: theme.backgroundRoot }]}>
-            <View style={[styles.warnIcon, { backgroundColor: "#F59E0B20" }]}>
-              <Ionicons name="pricetag" size={26} color="#F59E0B" />
+            <View style={[styles.warnIcon, { backgroundColor: theme.warning + "20" }]}>
+              <Ionicons name="pricetag" size={26} color={theme.warning} />
             </View>
             <ThemedText style={styles.warnTitle}>Send a counter-offer</ThemedText>
             <ThemedText style={[styles.warnMessage, { color: theme.textSecondary }]}>
@@ -1319,7 +1386,7 @@ export default function DriverHomeScreen() {
               >
                 <Ionicons name="remove" size={22} color={theme.text} />
               </Pressable>
-              <ThemedText style={{ fontSize: 24, fontWeight: "700", minWidth: 120, textAlign: "center" }}>
+              <ThemedText style={{ ...Typography.xxlHeavy, minWidth: 120, textAlign: "center" }}>
                 {counterModalRide?.currency || "AED"} {counterAmount.toFixed(2)}
               </ThemedText>
               <Pressable
@@ -1334,7 +1401,7 @@ export default function DriverHomeScreen() {
               </Pressable>
             </View>
             <Pressable
-              style={[styles.warnPrimaryBtn, { backgroundColor: "#F59E0B", opacity: counterBidMutation.isPending ? 0.7 : 1 }]}
+              style={[styles.warnPrimaryBtn, { backgroundColor: theme.warning, opacity: counterBidMutation.isPending ? 0.5 : 1 }]}
               onPress={() => {
                 if (counterModalRide && !counterBidMutation.isPending) {
                   counterBidMutation.mutate({ rideId: counterModalRide.id, amount: counterAmount });
@@ -1414,8 +1481,8 @@ export default function DriverHomeScreen() {
       >
         <View style={styles.warnOverlay}>
           <View style={[styles.warnCard, { backgroundColor: theme.backgroundRoot }]}>
-            <View style={[styles.warnIcon, { backgroundColor: "#F59E0B20" }]}>
-              <Ionicons name="battery-half" size={26} color="#F59E0B" />
+            <View style={[styles.warnIcon, { backgroundColor: theme.warning + "20" }]}>
+              <Ionicons name="battery-half" size={26} color={theme.warning} />
             </View>
             <ThemedText style={styles.warnTitle}>Low battery for this trip</ThemedText>
             <ThemedText style={[styles.warnMessage, { color: theme.textSecondary }]}>
@@ -1483,9 +1550,9 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: Spacing.md,
   },
-  warnTitle: { fontSize: 18, fontWeight: "700", textAlign: "center" },
+  warnTitle: { ...Typography.h3Heavy, textAlign: "center" },
   warnMessage: {
-    fontSize: 14,
+    ...Typography.bodyMedium,
     lineHeight: 20,
     textAlign: "center",
     marginTop: Spacing.sm,
@@ -1495,7 +1562,7 @@ const styles = StyleSheet.create({
     gap: Spacing.lg,
     marginTop: Spacing.md,
   },
-  warnStat: { fontSize: 13, fontWeight: "600" },
+  warnStat: { ...Typography.labelBold },
   warnPrimaryBtn: {
     alignSelf: "stretch",
     paddingVertical: 14,
@@ -1503,14 +1570,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: Spacing.lg,
   },
-  warnPrimaryText: { color: "#FFFFFF", fontSize: 15, fontWeight: "700" },
+  warnPrimaryText: { color: Colors.light.textOnPrimary, ...Typography.h4Heavy },
   warnSecondaryBtn: {
     alignSelf: "stretch",
     paddingVertical: 12,
     alignItems: "center",
     marginTop: Spacing.xs,
   },
-  warnSecondaryText: { fontSize: 14, fontWeight: "600" },
+  warnSecondaryText: { ...Typography.bodyBold },
   statusBar: {
     position: "absolute",
     left: Spacing.lg,
@@ -1521,7 +1588,7 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
@@ -1541,8 +1608,7 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   earningsText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   statusLabel: {
     ...Typography.h4,
@@ -1566,13 +1632,11 @@ const styles = StyleSheet.create({
   },
   prayerPauseBannerText: {
     flex: 1,
-    fontSize: 12,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   liveBannerText: {
-    ...Typography.bodyMedium,
-    color: "#fff",
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
   toggleTrack: {
     height: 32,
@@ -1585,12 +1649,12 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.textOnPrimary,
     justifyContent: "center",
     alignItems: "center",
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.2,
         shadowRadius: 2,
@@ -1623,9 +1687,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(16, 185, 129, 0.18)",
   },
   evHoldTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
-    color: "#fff",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
   evHoldSub: {
     ...Typography.caption,
@@ -1635,7 +1698,7 @@ const styles = StyleSheet.create({
     width: 10,
     height: 10,
     borderRadius: 5,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.textOnPrimary,
   },
   networkEfficiency: {
     ...Typography.caption,
@@ -1653,7 +1716,7 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 6,
@@ -1666,9 +1729,27 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.sm,
   },
+  goHereTapZone: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  goHereIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  goHereLabel: {
+    ...Typography.microHeavy,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+    marginBottom: 1,
+  },
   hubCardTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   hubCardSub: {
     ...Typography.caption,
@@ -1679,9 +1760,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   hubHeadButtonText: {
-    ...Typography.caption,
-    fontWeight: "700",
-    color: "#fff",
+    ...Typography.captionBold,
+    color: Colors.light.textOnPrimary,
   },
   hubDismiss: {
     padding: 4,
@@ -1699,8 +1779,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   networkHubsTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   networkHubsSubtitle: {
     ...Typography.caption,
@@ -1727,7 +1806,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.08,
         shadowRadius: 6,
@@ -1753,7 +1832,7 @@ const styles = StyleSheet.create({
     zIndex: 100,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.15,
         shadowRadius: 12,
@@ -1789,8 +1868,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   pmgthBadgeText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   evBadge: {
     flexDirection: "row",
@@ -1801,8 +1879,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   evBadgeText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   fareContainer: {
     flexDirection: "row",
@@ -1815,9 +1892,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   premiumText: {
-    ...Typography.small,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...Typography.smallHeavy,
+    color: Colors.light.textOnPrimary,
   },
   fareBadge: {
     paddingHorizontal: Spacing.md,
@@ -1826,7 +1902,7 @@ const styles = StyleSheet.create({
   },
   fareText: {
     ...Typography.h4,
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
   },
   customerInfo: {
     flexDirection: "row",
@@ -1847,8 +1923,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   ratingText: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   ridesCount: {
     ...Typography.caption,
@@ -1870,7 +1945,6 @@ const styles = StyleSheet.create({
   locationLine: {
     width: 2,
     height: 20,
-    backgroundColor: "#E0E0E0",
     marginLeft: 5,
     marginVertical: 2,
   },
@@ -1920,12 +1994,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   countdownText: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   acceptButtonText: {
     ...Typography.button,
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
     flex: 1,
     textAlign: "center",
   },
@@ -1937,8 +2010,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   declineButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   proximitySheet: {
     position: "absolute",
@@ -1949,7 +2021,7 @@ const styles = StyleSheet.create({
     zIndex: 99,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.12,
         shadowRadius: 10,
@@ -1984,11 +2056,10 @@ const styles = StyleSheet.create({
   },
   checkInButtonText: {
     ...Typography.button,
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
   },
   dismissLink: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   checkInSuccessContent: {
     flexDirection: "row",
@@ -1997,8 +2068,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   checkInSuccessTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   checkInSubtitle: {
     ...Typography.caption,

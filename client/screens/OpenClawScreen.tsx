@@ -18,7 +18,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { HubCard } from "@/components/HubCard";
 import type { HubCardData } from "@/components/HubCard";
 import { useTheme } from "@/hooks/useTheme";
-import { Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -195,7 +195,7 @@ export default function OpenClawScreen() {
         {location ? null : (
           <View style={[styles.locationBanner, { backgroundColor: Colors.travonyGold + "18", borderColor: Colors.travonyGold + "40" }]}>
             <Ionicons name="location-outline" size={16} color={Colors.travonyGold} />
-            <ThemedText style={{ fontSize: 12, color: Colors.travonyGold, flex: 1 }}>
+            <ThemedText style={{ ...Typography.small, color: Colors.travonyGold, flex: 1 }}>
               Enable location to sort hubs by distance
             </ThemedText>
           </View>
@@ -255,7 +255,7 @@ export default function OpenClawScreen() {
   if ((locationLoading || hubsLoading) && !hubsData) {
     return (
       <ThemedView style={styles.container}>
-        <View style={[styles.loadingWrap, { paddingTop: insets.top + 60 }]}>
+        <View style={[styles.loadingWrap, { paddingTop: insets.top + Spacing["4xl"] + Spacing.md + Spacing.xs * 2 }]}>
           <ActivityIndicator size="large" color={theme.primary} />
           <ThemedText style={{ color: theme.textSecondary, marginTop: Spacing.md }}>
             Loading hub network...
@@ -302,7 +302,7 @@ export default function OpenClawScreen() {
         <Ionicons name="flash" size={15} color={Colors.travonyGreen} />
         <ThemedText style={[styles.statsText, { color: theme.text }]}>{statsText}</ThemedText>
         <View style={[styles.evCountBadge, { backgroundColor: Colors.travonyGreen + "20" }]}>
-          <ThemedText style={{ fontSize: 11, color: Colors.travonyGreen, fontWeight: "700" }}>
+          <ThemedText style={{ ...Typography.caption, color: Colors.travonyGreen, fontWeight: "700" }}>
             {evHubs.length} EV
           </ThemedText>
         </View>
@@ -331,7 +331,7 @@ export default function OpenClawScreen() {
                 return total > 0 ? (
                   <View style={[styles.portsRow, { backgroundColor: Colors.travonyGreen + "15" }]}>
                     <Ionicons name="battery-charging-outline" size={16} color={Colors.travonyGreen} />
-                    <ThemedText style={{ fontSize: 13, color: Colors.travonyGreen }}>
+                    <ThemedText style={{ ...Typography.labelLight, color: Colors.travonyGreen }}>
                       {avail} of {total} ports available
                     </ThemedText>
                   </View>
@@ -342,7 +342,7 @@ export default function OpenClawScreen() {
             <View style={{ gap: Spacing.sm, marginTop: Spacing.md }}>
               {(
                 [
-                  { status: "charging" as const, label: "Charging", sub: "Need to charge before rides", icon: "battery-charging-outline" as keyof typeof Ionicons.glyphMap, color: "#2196F3" },
+                  { status: "charging" as const, label: "Charging", sub: "Need to charge before rides", icon: "battery-charging-outline" as keyof typeof Ionicons.glyphMap, color: theme.info },
                   { status: "ready" as const, label: "Ready", sub: "Charged and ready for pick-ups", icon: "checkmark-circle-outline" as keyof typeof Ionicons.glyphMap, color: Colors.travonyGreen },
                   { status: "departing" as const, label: "Departing", sub: "Heading out soon", icon: "navigate-outline" as keyof typeof Ionicons.glyphMap, color: Colors.travonyGold },
                 ]
@@ -354,8 +354,8 @@ export default function OpenClawScreen() {
                 >
                   <Ionicons name={icon} size={22} color={color} />
                   <View style={{ flex: 1 }}>
-                    <ThemedText style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>{label}</ThemedText>
-                    <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>{sub}</ThemedText>
+                    <ThemedText style={{ ...Typography.bodyBold, color: theme.text }}>{label}</ThemedText>
+                    <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>{sub}</ThemedText>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={color} />
                 </Pressable>
@@ -367,8 +367,8 @@ export default function OpenClawScreen() {
               >
                 <Ionicons name="log-in-outline" size={22} color={theme.textMuted} />
                 <View style={{ flex: 1 }}>
-                  <ThemedText style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>Standard Check-In</ThemedText>
-                  <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>Check in without EV status</ThemedText>
+                  <ThemedText style={{ ...Typography.bodyBold, color: theme.text }}>Standard Check-In</ThemedText>
+                  <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>Check in without EV status</ThemedText>
                 </View>
               </Pressable>
             </View>
@@ -377,7 +377,7 @@ export default function OpenClawScreen() {
               style={{ marginTop: Spacing.lg, alignItems: "center" }}
               onPress={() => setEvStagingHub(null)}
             >
-              <ThemedText style={{ fontSize: 14, color: theme.textMuted }}>Cancel</ThemedText>
+              <ThemedText style={{ ...Typography.bodyMedium, color: theme.textMuted }}>Cancel</ThemedText>
             </Pressable>
           </View>
         </View>
@@ -398,13 +398,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     borderRadius: BorderRadius.lg,
     zIndex: 10,
-    shadowColor: "#000",
+    shadowColor: Colors.black,
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
     shadowRadius: 4,
     elevation: 3,
   },
-  statsText: { flex: 1, fontSize: 13, fontWeight: "600" },
+  statsText: { flex: 1, ...Typography.labelBold },
   evCountBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -420,7 +420,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     marginBottom: Spacing.md,
   },
-  searchInput: { flex: 1, fontSize: 14, padding: 0 },
+  searchInput: { flex: 1, ...Typography.bodyMedium, padding: 0 },
   promptBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -428,8 +428,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     marginBottom: Spacing.md,
   },
-  promptTitle: { fontSize: 15, fontWeight: "600" },
-  promptMsg: { fontSize: 13, marginTop: 2 },
+  promptTitle: { ...Typography.bodySmallBold },
+  promptMsg: { ...Typography.labelLight, marginTop: 2 },
   locationBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -447,14 +447,13 @@ const styles = StyleSheet.create({
   },
   demandDotSm: { width: 8, height: 8, borderRadius: 4 },
   sectionTitle: {
-    fontSize: 12,
-    fontWeight: "600",
+    ...Typography.smallBold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   emptyWrap: { alignItems: "center", paddingTop: Spacing["2xl"], gap: Spacing.sm },
-  emptyTitle: { fontSize: 18, fontWeight: "600" },
-  emptyMsg: { fontSize: 14, textAlign: "center" },
+  emptyTitle: { ...Typography.h3 },
+  emptyMsg: { ...Typography.bodyMedium, textAlign: "center" },
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.55)",
@@ -466,8 +465,8 @@ const styles = StyleSheet.create({
     padding: Spacing.xl,
     paddingBottom: Spacing["2xl"],
   },
-  modalTitle: { fontSize: 18, fontWeight: "700" },
-  modalSubtitle: { fontSize: 13, marginBottom: Spacing.md },
+  modalTitle: { ...Typography.h3Heavy },
+  modalSubtitle: { ...Typography.labelLight, marginBottom: Spacing.md },
   portsRow: {
     flexDirection: "row",
     alignItems: "center",

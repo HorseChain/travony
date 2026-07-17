@@ -19,7 +19,7 @@ import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 interface SavedAddress {
   id: string;
@@ -128,7 +128,7 @@ export default function SavedAddressesScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.addButton,
-                { borderColor: theme.primary, opacity: pressed ? 0.7 : 1 },
+                { borderColor: theme.primary, opacity: pressed ? 0.8 : 1 },
               ]}
               onPress={() => setShowAddForm(!showAddForm)}
             >
@@ -166,14 +166,14 @@ export default function SavedAddressesScreen() {
                     styles.saveButton,
                     {
                       backgroundColor: theme.primary,
-                      opacity: addAddressMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+                      opacity: addAddressMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
                     },
                   ]}
                   onPress={handleAddAddress}
                   disabled={addAddressMutation.isPending}
                 >
                   {addAddressMutation.isPending ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <ActivityIndicator color={theme.textOnPrimary} size="small" />
                   ) : (
                     <ThemedText style={styles.saveButtonText}>Save Address</ThemedText>
                   )}
@@ -268,7 +268,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   addressCard: {
     marginBottom: Spacing.md,
@@ -295,8 +295,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   addressLabel: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   defaultBadge: {
     marginLeft: Spacing.sm,
@@ -305,8 +304,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   defaultText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   addressText: {
     ...Typography.bodyMedium,

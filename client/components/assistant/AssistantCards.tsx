@@ -1,0 +1,754 @@
+import React, { useState } from "react";
+import { View, StyleSheet, Pressable, ActivityIndicator } from "react-native";
+import Ionicons from "@expo/vector-icons/Ionicons";
+import { useNavigation } from "@react-navigation/native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { ThemedText } from "@/components/ThemedText";
+import { useTheme } from "@/hooks/useTheme";
+import { useAuth } from "@/hooks/useAuth";
+import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
+import { apiRequest } from "@/lib/query-client";
+import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
+
+// ============================================================================
+// Assistant cards — the interactive layer of the AI home. Every number shown
+// here came from the deterministic backend; the Confirm button is the ONLY
+// path that creates a ride, and it hits the existing POST /api/rides endpoint.
+// ============================================================================
+
+export interface AssistantPoint {
+  address: string;
+  lat: number;
+  lng: number;
+}
+
+export interface BookingCardData {
+  type: "booking";
+  pickup: AssistantPoint;
+  dropoff: AssistantPoint;
+  vehicleType: string;
+  regionCode: string;
+  currency: string;
+  fare: number;
+  platformFee: number;
+  driverEarnings: number;
+  distanceKm: number;
+  durationMin: number;
+  surgeMultiplier: number;
+  priceExplanation: string[];
+  walletBalance: number;
+  confirmPayload: Record<string, any>;
+}
+
+export type AssistantCardData =
+  | BookingCardData
+  | { type: "places"; places: Array<AssistantPoint & { label: string; icon: string; reason: string }>; mapOption?: boolean }
+  | { type: "action"; action: string; label: string }
+  | { type: "live_ride"; rideId: string; status?: string }
+  | { type: "wallet"; balance: string; currency: string; transactions: Array<{ id: string; type: string; amount: string; currency: string; description: string; status: string; createdAt: string }> }
+  | { type: "rides"; rides: Array<{ id: string; pickupAddress: string; dropoffAddress: string; fare: string; currency: string; status: string; createdAt: string; hasBlockchainProof: boolean }> }
+  | { type: "coffee"; items: Array<{ id: string; name: string; basePrice: number; currency: string; description: string; category: string }> }
+  | { type: "prayer"; subscriptions: Array<{ id: string; mosqueName: string; prayers: string; status: string }> }
+  | { type: "arrival"; arrivals: Array<{ id: string; label: string; destAddress: string; mode: string; arriveTimeLocal: string | null; arriveAtUtc: string | null; status: string }> };
+
+export interface AssistantCardHandlers {
+  onPickPlace: (place: AssistantPoint & { label?: string }) => void;
+  onBooked: (rideId: string) => void;
+  onEvent: (intent: string, accepted: boolean, destination?: AssistantPoint) => void;
+}
+
+function CardShell({ children }: { children: React.ReactNode }) {
+  const { theme } = useTheme();
+  return (
+    <View style={[styles.card, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}>
+      {children}
+    </View>
+  );
+}
+
+function RowButton({
+  label,
+  icon,
+  onPress,
+  tone = "default",
+}: {
+  label: string;
+  icon?: string;
+  onPress: () => void;
+  tone?: "default" | "primary";
+}) {
+  const { theme } = useTheme();
+  const primary = tone === "primary";
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.rowButton,
+        {
+          backgroundColor: primary ? theme.primary : theme.backgroundDefault,
+          borderColor: primary ? theme.primary : theme.border,
+          opacity: pressed ? 0.8 : 1,
+        },
+      ]}
+    >
+      {icon ? (
+        <Ionicons name={icon as any} size={16} color={primary ? theme.textOnPrimary : theme.primary} />
+      ) : null}
+      <ThemedText style={[styles.rowButtonText, { color: primary ? theme.textOnPrimary : theme.text }]}>
+        {label}
+      </ThemedText>
+    </Pressable>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Booking card — compact quote → expandable breakdown → explicit Confirm.
+// ---------------------------------------------------------------------------
+function BookingCard({ card, handlers }: { card: BookingCardData; handlers: AssistantCardHandlers }) {
+  const { theme } = useTheme();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+  const [expanded, setExpanded] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "wallet">("cash");
+  const [declined, setDeclined] = useState(false);
+  const [bookedRideId, setBookedRideId] = useState<string | null>(null);
+
+  const walletCoversFare = card.walletBalance >= card.fare;
+
+  const bookMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest("/api/rides", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...card.confirmPayload,
+          customerId: user?.id,
+          paymentMethod,
+        }),
+      }),
+    onSuccess: (ride: any) => {
+      const rideId = ride?.id || ride?.ride?.id;
+      setBookedRideId(rideId);
+      queryClient.invalidateQueries({ queryKey: ["/api/rides?status=active"] });
+      handlers.onEvent("book_ride", true, card.dropoff);
+      if (rideId) handlers.onBooked(rideId);
+    },
+  });
+
+  if (bookedRideId) {
+    return <LiveRideCard card={{ type: "live_ride", rideId: bookedRideId }} />;
+  }
+
+  return (
+    <CardShell>
+      <View style={styles.bookingHeader}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+          <Ionicons name="car-outline" size={18} color={theme.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.bookingFare}>
+            {card.currency} {card.fare.toFixed(2)}
+          </ThemedText>
+          <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]}>
+            {card.distanceKm} km · ~{card.durationMin} min
+            {card.surgeMultiplier > 1.05 ? ` · ${card.surgeMultiplier}x demand` : ""}
+          </ThemedText>
+        </View>
+      </View>
+
+      <View style={styles.routeRow}>
+        <Ionicons name="radio-button-on" size={12} color={theme.primary} />
+        <ThemedText style={[styles.routeText, { color: theme.textSecondary }]} numberOfLines={1}>
+          {card.pickup.address}
+        </ThemedText>
+      </View>
+      <View style={styles.routeRow}>
+        <Ionicons name="location" size={12} color={theme.primary} />
+        <ThemedText style={styles.routeText} numberOfLines={1}>
+          {card.dropoff.address}
+        </ThemedText>
+      </View>
+
+      {expanded ? (
+        <View style={[styles.breakdown, { borderTopColor: theme.border }]}>
+          {card.priceExplanation.map((line, i) => (
+            <ThemedText key={i} style={[styles.breakdownLine, { color: theme.textSecondary }]}>
+              {line}
+            </ThemedText>
+          ))}
+          <View style={styles.paymentRow}>
+            {(["cash", "wallet"] as const).map((m) => {
+              const disabled = m === "wallet" && !walletCoversFare;
+              const selected = paymentMethod === m;
+              return (
+                <Pressable
+                  key={m}
+                  disabled={disabled}
+                  onPress={() => setPaymentMethod(m)}
+                  style={[
+                    styles.paymentChip,
+                    {
+                      backgroundColor: selected ? theme.primary : theme.backgroundDefault,
+                      borderColor: selected ? theme.primary : theme.border,
+                      opacity: disabled ? 0.5 : 1,
+                    },
+                  ]}
+                >
+                  <Ionicons
+                    name={m === "cash" ? "cash-outline" : "wallet-outline"}
+                    size={14}
+                    color={selected ? theme.textOnPrimary : theme.text}
+                  />
+                  <ThemedText style={[styles.paymentChipText, { color: selected ? theme.textOnPrimary : theme.text }]}>
+                    {m === "cash" ? "Cash" : "Wallet"}
+                  </ThemedText>
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      ) : null}
+
+      {declined ? (
+        <ThemedText style={[styles.declinedText, { color: theme.textMuted }]}>
+          No problem — just ask when you're ready.
+        </ThemedText>
+      ) : (
+        <View style={styles.actionRow}>
+          <Pressable onPress={() => setExpanded(!expanded)} style={styles.detailsToggle}>
+            <ThemedText style={[styles.detailsToggleText, { color: theme.primary }]}>
+              {expanded ? "Hide details" : "Details"}
+            </ThemedText>
+            <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={14} color={theme.primary} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setDeclined(true);
+              handlers.onEvent("book_ride", false, card.dropoff);
+            }}
+            style={[styles.secondaryButton, { borderColor: theme.border }]}
+          >
+            <ThemedText style={[styles.secondaryButtonText, { color: theme.textSecondary }]}>Not now</ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={() => bookMutation.mutate()}
+            disabled={bookMutation.isPending}
+            style={({ pressed }) => [
+              styles.confirmButton,
+              { backgroundColor: theme.primary, opacity: pressed || bookMutation.isPending ? 0.8 : 1 },
+            ]}
+          >
+            {bookMutation.isPending ? (
+              <ActivityIndicator size="small" color={theme.textOnPrimary} />
+            ) : (
+              <ThemedText style={styles.confirmButtonText}>Confirm ride</ThemedText>
+            )}
+          </Pressable>
+        </View>
+      )}
+      {bookMutation.isError ? (
+        <ThemedText style={[styles.errorText, { color: theme.error }]}>
+          {(bookMutation.error as any)?.message || "Booking failed. Please try again."}
+        </ThemedText>
+      ) : null}
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Live ride card — polls the real ride, deep-links to the full ActiveRide.
+// ---------------------------------------------------------------------------
+function LiveRideCard({ card }: { card: { type: "live_ride"; rideId: string; status?: string } }) {
+  const { theme } = useTheme();
+  const { liteMode } = useLiteMode();
+  const navigation = useNavigation<any>();
+
+  const { data: ride } = useQuery<any>({
+    queryKey: ["/api/rides", card.rideId],
+    refetchInterval: litePollMs(8000, liteMode),
+  });
+
+  const status = ride?.status || card.status || "pending";
+  const statusLabel: Record<string, string> = {
+    pending: "Finding your driver…",
+    accepted: "Driver on the way",
+    arriving: "Driver arriving",
+    in_progress: "On the road",
+    started: "On the road",
+    completed: "Trip completed",
+    cancelled: "Cancelled",
+  };
+
+  return (
+    <Pressable onPress={() => navigation.navigate("ActiveRide", { rideId: card.rideId })}>
+      <CardShell>
+        <View style={styles.bookingHeader}>
+          <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+            {status === "pending" ? (
+              <ActivityIndicator size="small" color={theme.primary} />
+            ) : (
+              <Ionicons name="navigate-outline" size={18} color={theme.primary} />
+            )}
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.cardTitle}>{statusLabel[status] || status}</ThemedText>
+            <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]} numberOfLines={1}>
+              {ride?.dropoffAddress ? `To ${ride.dropoffAddress}` : "Tap to track your ride"}
+            </ThemedText>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+        </View>
+      </CardShell>
+    </Pressable>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Places card — tap a place to get an instant deterministic quote.
+// ---------------------------------------------------------------------------
+function PlacesCard({
+  card,
+  handlers,
+}: {
+  card: Extract<AssistantCardData, { type: "places" }>;
+  handlers: AssistantCardHandlers;
+}) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.places.map((p, i) => (
+        <Pressable
+          key={`${p.address}-${i}`}
+          onPress={() => handlers.onPickPlace(p)}
+          style={({ pressed }) => [
+            styles.placeRow,
+            { borderBottomColor: theme.border, opacity: pressed ? 0.8 : 1 },
+            i === card.places.length - 1 && !card.mapOption ? { borderBottomWidth: 0 } : null,
+          ]}
+        >
+          <Ionicons name={(p.icon as any) || "location-outline"} size={18} color={theme.primary} />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.placeLabel}>{p.label}</ThemedText>
+            <ThemedText style={[styles.placeReason, { color: theme.textMuted }]} numberOfLines={1}>
+              {p.reason || p.address}
+            </ThemedText>
+          </View>
+          <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+        </Pressable>
+      ))}
+      {card.mapOption ? (
+        <RowButton
+          label="Pick on map"
+          icon="map-outline"
+          onPress={() => navigation.navigate("MapHome", {})}
+        />
+      ) : null}
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Simple action card (open map / saved places).
+// ---------------------------------------------------------------------------
+function ActionCard({ card }: { card: Extract<AssistantCardData, { type: "action" }> }) {
+  const navigation = useNavigation<any>();
+  const go = () => {
+    if (card.action === "open_saved_addresses") {
+      navigation.getParent()?.navigate("ProfileTab", { screen: "SavedAddresses" });
+    } else {
+      navigation.navigate("MapHome", {});
+    }
+  };
+  return (
+    <CardShell>
+      <RowButton
+        label={card.label}
+        icon={card.action === "open_saved_addresses" ? "bookmark-outline" : "map-outline"}
+        onPress={go}
+        tone="primary"
+      />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Wallet card — balance + recent activity, deep-links to the Wallet tab.
+// ---------------------------------------------------------------------------
+function WalletCard({ card }: { card: Extract<AssistantCardData, { type: "wallet" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? card.transactions : card.transactions.slice(0, 2);
+  return (
+    <CardShell>
+      <Pressable onPress={() => navigation.getParent()?.navigate("WalletTab")} style={styles.bookingHeader}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+          <Ionicons name="wallet-outline" size={18} color={theme.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.bookingFare}>
+            {card.currency} {parseFloat(card.balance).toFixed(2)}
+          </ThemedText>
+          <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]}>Wallet balance</ThemedText>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+      </Pressable>
+      {shown.map((t) => (
+        <View key={t.id} style={[styles.txRow, { borderTopColor: theme.border }]}>
+          <ThemedText style={[styles.txDesc, { color: theme.textSecondary }]} numberOfLines={1}>
+            {t.description || t.type}
+          </ThemedText>
+          <ThemedText style={styles.txAmount}>
+            {t.currency} {parseFloat(t.amount).toFixed(2)}
+          </ThemedText>
+        </View>
+      ))}
+      {card.transactions.length > 2 && !expanded ? (
+        <Pressable onPress={() => setExpanded(true)} style={styles.detailsToggle}>
+          <ThemedText style={[styles.detailsToggleText, { color: theme.primary }]}>
+            Show more
+          </ThemedText>
+        </Pressable>
+      ) : null}
+      {card.transactions.length === 0 ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>No transactions yet.</ThemedText>
+      ) : null}
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Rides history card — compact recent trips, tap to open the receipt.
+// ---------------------------------------------------------------------------
+function RidesCard({ card }: { card: Extract<AssistantCardData, { type: "rides" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? card.rides : card.rides.slice(0, 2);
+  return (
+    <CardShell>
+      {card.rides.length === 0 ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>
+          No completed trips yet — your first one is a message away.
+        </ThemedText>
+      ) : (
+        shown.map((r, i) => (
+          <Pressable
+            key={r.id}
+            onPress={() => navigation.navigate("Invoice", { rideId: r.id })}
+            style={({ pressed }) => [
+              styles.placeRow,
+              { borderBottomColor: theme.border, opacity: pressed ? 0.8 : 1 },
+              i === shown.length - 1 ? { borderBottomWidth: 0 } : null,
+            ]}
+          >
+            <Ionicons name="time-outline" size={18} color={theme.primary} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={styles.placeLabel} numberOfLines={1}>
+                {r.dropoffAddress}
+              </ThemedText>
+              <ThemedText style={[styles.placeReason, { color: theme.textMuted }]}>
+                {new Date(r.createdAt).toLocaleDateString()} · {r.currency}{" "}
+                {parseFloat(r.fare).toFixed(2)}
+                {r.hasBlockchainProof ? " · verified" : ""}
+              </ThemedText>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+          </Pressable>
+        ))
+      )}
+      {card.rides.length > 2 && !expanded ? (
+        <Pressable onPress={() => setExpanded(true)} style={styles.detailsToggle}>
+          <ThemedText style={[styles.detailsToggleText, { color: theme.primary }]}>
+            Show all {card.rides.length}
+          </ThemedText>
+        </Pressable>
+      ) : null}
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Coffee card — quick menu preview, deep-links into the Coffee screen.
+// ---------------------------------------------------------------------------
+function CoffeeCard({ card }: { card: Extract<AssistantCardData, { type: "coffee" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.items.slice(0, 4).map((item, i) => (
+        <Pressable
+          key={item.id}
+          onPress={() => navigation.navigate("Coffee")}
+          style={({ pressed }) => [
+            styles.placeRow,
+            { borderBottomColor: theme.border, opacity: pressed ? 0.8 : 1 },
+          ]}
+        >
+          <Ionicons name="cafe-outline" size={18} color={theme.primary} />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.placeLabel}>{item.name}</ThemedText>
+            <ThemedText style={[styles.placeReason, { color: theme.textMuted }]} numberOfLines={1}>
+              {item.description}
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.txAmount, { color: theme.textSecondary }]}>
+            {item.currency} {item.basePrice}
+          </ThemedText>
+        </Pressable>
+      ))}
+      <RowButton label="Open coffee menu" icon="cafe-outline" onPress={() => navigation.navigate("Coffee")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Prayer rides card.
+// ---------------------------------------------------------------------------
+function PrayerCard({ card }: { card: Extract<AssistantCardData, { type: "prayer" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.subscriptions.map((s) => (
+        <View key={s.id} style={styles.placeRow}>
+          <Ionicons name="moon-outline" size={18} color={theme.primary} />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.placeLabel}>{s.mosqueName}</ThemedText>
+            <ThemedText style={[styles.placeReason, { color: theme.textMuted }]}>
+              {s.prayers.split(",").join(" · ")} · {s.status}
+            </ThemedText>
+          </View>
+        </View>
+      ))}
+      <RowButton
+        label={card.subscriptions.length > 0 ? "Manage prayer rides" : "Set up prayer rides"}
+        icon="moon-outline"
+        onPress={() => navigation.navigate("PrayerRides")}
+        tone="primary"
+      />
+      <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>
+        Prayer rides are always free — drivers volunteer.
+      </ThemedText>
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled arrivals card.
+// ---------------------------------------------------------------------------
+function ArrivalCard({ card }: { card: Extract<AssistantCardData, { type: "arrival" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.arrivals.map((a) => (
+        <View key={a.id} style={styles.placeRow}>
+          <Ionicons name="alarm-outline" size={18} color={theme.primary} />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.placeLabel}>{a.label}</ThemedText>
+            <ThemedText style={[styles.placeReason, { color: theme.textMuted }]} numberOfLines={1}>
+              {a.destAddress}
+              {a.arriveTimeLocal ? ` · by ${a.arriveTimeLocal}` : ""}
+            </ThemedText>
+          </View>
+        </View>
+      ))}
+      <RowButton
+        label={card.arrivals.length > 0 ? "Manage arrivals" : "Schedule an arrival"}
+        icon="alarm-outline"
+        onPress={() => navigation.navigate("ScheduledArrivals")}
+        tone="primary"
+      />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher.
+// ---------------------------------------------------------------------------
+export function AssistantCard({
+  card,
+  handlers,
+}: {
+  card: AssistantCardData;
+  handlers: AssistantCardHandlers;
+}) {
+  switch (card.type) {
+    case "booking":
+      return <BookingCard card={card} handlers={handlers} />;
+    case "live_ride":
+      return <LiveRideCard card={card} />;
+    case "places":
+      return <PlacesCard card={card} handlers={handlers} />;
+    case "action":
+      return <ActionCard card={card} />;
+    case "wallet":
+      return <WalletCard card={card} />;
+    case "rides":
+      return <RidesCard card={card} />;
+    case "coffee":
+      return <CoffeeCard card={card} />;
+    case "prayer":
+      return <PrayerCard card={card} />;
+    case "arrival":
+      return <ArrivalCard card={card} />;
+    default:
+      return null;
+  }
+}
+
+const styles = StyleSheet.create({
+  card: {
+    borderRadius: BorderRadius.md,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.lg,
+    marginTop: Spacing.sm,
+    gap: Spacing.sm,
+  },
+  bookingHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+  },
+  iconBubble: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bookingFare: {
+    ...Typography.h3,
+  },
+  bookingMeta: {
+    ...Typography.small,
+    marginTop: 2,
+  },
+  cardTitle: {
+    ...Typography.bodyMedium,
+  },
+  routeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  routeText: {
+    ...Typography.small,
+    flex: 1,
+  },
+  breakdown: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingTop: Spacing.md,
+    gap: 4,
+  },
+  breakdownLine: {
+    ...Typography.caption,
+  },
+  paymentRow: {
+    flexDirection: "row",
+    gap: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  paymentChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  paymentChipText: {
+    ...Typography.smallBold,
+  },
+  actionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  detailsToggle: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 2,
+    paddingVertical: Spacing.sm,
+    marginRight: "auto",
+  },
+  detailsToggleText: {
+    ...Typography.smallBold,
+  },
+  secondaryButton: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1,
+  },
+  secondaryButtonText: {
+    ...Typography.smallBold,
+  },
+  confirmButton: {
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm + 2,
+    borderRadius: BorderRadius.full,
+    minWidth: 120,
+    alignItems: "center",
+  },
+  confirmButtonText: {
+    ...Typography.smallHeavy,
+    color: Colors.light.textOnPrimary,
+  },
+  declinedText: {
+    ...Typography.small,
+    marginTop: Spacing.xs,
+  },
+  errorText: {
+    ...Typography.caption,
+  },
+  placeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  placeLabel: {
+    ...Typography.bodyMedium,
+  },
+  placeReason: {
+    ...Typography.caption,
+    marginTop: 1,
+  },
+  rowButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.sm,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.sm,
+    borderWidth: StyleSheet.hairlineWidth,
+    marginTop: Spacing.xs,
+  },
+  rowButtonText: {
+    ...Typography.smallBold,
+  },
+  txRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    gap: Spacing.md,
+  },
+  txDesc: {
+    ...Typography.small,
+    flex: 1,
+  },
+  txAmount: {
+    ...Typography.smallBold,
+  },
+  emptyLine: {
+    ...Typography.caption,
+  },
+});

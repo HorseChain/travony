@@ -7,7 +7,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 export interface RideSocialContext {
   counterpart: {
@@ -102,7 +102,7 @@ export function FollowCounterpartButton({ rideId }: { rideId: string }) {
         counterpart.isFollowing
           ? { backgroundColor: theme.backgroundSecondary, borderColor: theme.border, borderWidth: 1 }
           : { backgroundColor: theme.primary },
-        { opacity: pressed || followMutation.isPending ? 0.7 : 1 },
+        { opacity: pressed || followMutation.isPending ? 0.8 : 1 },
       ]}
       onPress={() =>
         followMutation.mutate({ userId: counterpart.id, unfollow: counterpart.isFollowing })
@@ -112,12 +112,12 @@ export function FollowCounterpartButton({ rideId }: { rideId: string }) {
       <Ionicons
         name={counterpart.isFollowing ? "checkmark" : "person-add-outline"}
         size={15}
-        color={counterpart.isFollowing ? theme.text : "#FFFFFF"}
+        color={counterpart.isFollowing ? theme.text : Colors.light.textOnPrimary}
       />
       <ThemedText
         style={[
           styles.followButtonText,
-          { color: counterpart.isFollowing ? theme.text : "#FFFFFF" },
+          { color: counterpart.isFollowing ? theme.text : Colors.light.textOnPrimary },
         ]}
       >
         {counterpart.isFollowing ? "Following" : `Follow ${counterpart.name.split(" ")[0]}`}
@@ -163,7 +163,7 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
             backgroundColor: theme.backgroundSecondary,
             borderWidth: 1,
             borderColor: theme.border,
-            opacity: pressed ? 0.7 : 1,
+            opacity: pressed ? 0.8 : 1,
           },
         ]}
         onPress={() => notify("Go Live on Twitch", linkChannelHint)}
@@ -181,13 +181,13 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
       <Pressable
         style={({ pressed }) => [
           styles.streamButton,
-          { backgroundColor: "#E91916", opacity: pressed || streamMutation.isPending ? 0.8 : 1 },
+          { backgroundColor: Colors.liveRed, opacity: pressed || streamMutation.isPending ? 0.8 : 1 },
         ]}
         onPress={() => streamMutation.mutate("stop")}
         disabled={streamMutation.isPending}
       >
         {streamMutation.isPending ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
+          <ActivityIndicator color={Colors.light.textOnPrimary} size="small" />
         ) : (
           <>
             <View style={styles.liveDot} />
@@ -206,7 +206,7 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
           backgroundColor: theme.backgroundSecondary,
           borderWidth: 1,
           borderColor: theme.border,
-          opacity: pressed || streamMutation.isPending ? 0.7 : 1,
+          opacity: pressed || streamMutation.isPending ? 0.8 : 1,
         },
       ]}
       onPress={() =>
@@ -292,10 +292,10 @@ export function PublishRideCard({ rideId, rideStatus }: { rideId: string; rideSt
         disabled={publishMutation.isPending}
       >
         {publishMutation.isPending ? (
-          <ActivityIndicator color="#FFFFFF" size="small" />
+          <ActivityIndicator color={Colors.light.textOnPrimary} size="small" />
         ) : (
           <>
-            <Ionicons name="megaphone-outline" size={16} color="#FFFFFF" />
+            <Ionicons name="megaphone-outline" size={16} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.publishButtonText}>Publish to feed</ThemedText>
           </>
         )}
@@ -316,8 +316,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   followButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   streamButton: {
     flexDirection: "row",
@@ -329,15 +328,14 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   streamButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
-    color: "#FFFFFF",
+    ...Typography.bodyBold,
+    color: Colors.light.textOnPrimary,
   },
   liveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.textOnPrimary,
   },
   publishSection: {
     marginTop: Spacing.lg,
@@ -375,8 +373,7 @@ const styles = StyleSheet.create({
     ...Typography.bodyMedium,
   },
   publishButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
-    color: "#FFFFFF",
+    ...Typography.bodyBold,
+    color: Colors.light.textOnPrimary,
   },
 });

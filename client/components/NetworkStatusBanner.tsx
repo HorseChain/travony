@@ -40,7 +40,7 @@ export function NetworkStatusBanner() {
 
   if (!visible) return null;
 
-  const bg = recovered ? Colors.travonyGreen : "#B23B3B";
+  const bg = recovered ? Colors.travonyGreen : Colors.networkError;
   const top = insets.top + Spacing.xs;
 
   return (
@@ -49,7 +49,7 @@ export function NetworkStatusBanner() {
         <Ionicons
           name={recovered ? "checkmark-circle-outline" : "cloud-offline-outline"}
           size={16}
-          color="#FFFFFF"
+          color={Colors.light.textOnPrimary}
         />
         <ThemedText style={styles.text}>
           {recovered ? "Back online" : "Reconnecting…"}
@@ -77,8 +77,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full ?? 999,
   },
   text: {
-    ...Typography.small,
-    color: "#FFFFFF",
-    fontWeight: "600",
+    ...Typography.smallBold,
+    color: Colors.light.textOnPrimary,
   },
 });

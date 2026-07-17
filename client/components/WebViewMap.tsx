@@ -3,7 +3,7 @@ import { View, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { WebView } from "react-native-webview";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Colors, Spacing } from "@/constants/theme";
+import { Typography, Colors, Spacing } from "@/constants/theme";
 import type { DimensionValue } from "react-native";
 
 interface MapLocation {
@@ -31,6 +31,10 @@ interface WebViewMapProps {
 }
 
 const TRAVONY_GREEN = Colors.travonyGreen;
+const DROPOFF_DARK = Colors.mapDarkMarker;
+const ROUTE_BLUE = Colors.reactionLike;
+const ROUTE_SHADOW = Colors.mapRoadStroke;
+const MARKER_WHITE = Colors.light.textOnPrimary;
 
 function generateMapHTML(isDark: boolean): string {
   const tileUrl = isDark
@@ -47,15 +51,15 @@ function generateMapHTML(isDark: boolean): string {
 html,body,#map{width:100%;height:100%;overflow:hidden}
 .leaflet-control-attribution{display:none!important}
 .leaflet-control-zoom{display:none!important}
-.pickup-marker{width:24px;height:24px;border-radius:50%;background:#fff;border:3px solid ${TRAVONY_GREEN};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3)}
+.pickup-marker{width:24px;height:24px;border-radius:50%;background:${MARKER_WHITE};border:3px solid ${TRAVONY_GREEN};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3)}
 .pickup-dot{width:10px;height:10px;border-radius:50%;background:${TRAVONY_GREEN}}
 .pickup-pulse{position:absolute;width:24px;height:24px;border-radius:50%;background:${TRAVONY_GREEN};opacity:0.4;animation:pulse 2s infinite}
 @keyframes pulse{0%{transform:scale(1);opacity:0.4}100%{transform:scale(2.5);opacity:0}}
-.dropoff-marker{width:28px;height:28px;border-radius:6px;background:#1a1a1a;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3)}
-.dropoff-inner{width:10px;height:10px;background:#fff}
-.dropoff-pin{width:4px;height:10px;background:#1a1a1a;margin:-2px auto 0}
-.driver-marker{width:40px;height:40px;border-radius:50%;background:#008B3D;border:3px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);position:relative}
-.driver-marker svg{fill:#fff;width:20px;height:20px}
+.dropoff-marker{width:28px;height:28px;border-radius:6px;background:${DROPOFF_DARK};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3)}
+.dropoff-inner{width:10px;height:10px;background:${MARKER_WHITE}}
+.dropoff-pin{width:4px;height:10px;background:${DROPOFF_DARK};margin:-2px auto 0}
+.driver-marker{width:40px;height:40px;border-radius:50%;background:${TRAVONY_GREEN};border:3px solid ${MARKER_WHITE};display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.4);position:relative}
+.driver-marker svg{fill:${MARKER_WHITE};width:20px;height:20px}
 .driver-pulse{position:absolute;width:40px;height:40px;border-radius:50%;background:${TRAVONY_GREEN};opacity:0.3;animation:pulse 1.5s infinite}
 </style>
 </head><body>
@@ -131,8 +135,8 @@ function handleMessage(e){
     else if(d.type==='setRoute'){
       if(routeLine)map.removeLayer(routeLine);
       if(d.coords&&d.coords.length>1){
-        var shadowLine=L.polyline(d.coords,{color:'#e0e0e0',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
-        routeLine=L.layerGroup([shadowLine,L.polyline(d.coords,{color:'#4285F4',weight:4,opacity:1,lineCap:'round',lineJoin:'round'})]).addTo(map);
+        var shadowLine=L.polyline(d.coords,{color:'${ROUTE_SHADOW}',weight:6,opacity:1,lineCap:'round',lineJoin:'round'}).addTo(map);
+        routeLine=L.layerGroup([shadowLine,L.polyline(d.coords,{color:'${ROUTE_BLUE}',weight:4,opacity:1,lineCap:'round',lineJoin:'round'})]).addTo(map);
       }
     }
     else if(d.type==='fitBounds'){
@@ -312,7 +316,7 @@ export default function WebViewMap({
         domStorageEnabled={true}
         startInLoadingState={true}
         renderLoading={() => (
-          <View style={[styles.loadingOverlay, { backgroundColor: isDark ? "#1d1d1d" : "#f5f5f5" }]}>
+          <View style={[styles.loadingOverlay, { backgroundColor: isDark ? Colors.mapDarkElement : Colors.mapLightSurface }]}>
             <ActivityIndicator size="large" color={TRAVONY_GREEN} />
             <ThemedText style={[styles.loadingText, { color: theme.textSecondary }]}>
               Loading map...
@@ -380,7 +384,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     marginTop: Spacing.md,
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   errorContainer: {
     flex: 1,
@@ -388,7 +392,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   errorText: {
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   etaContainer: {
     position: "absolute",
@@ -399,7 +403,7 @@ const styles = StyleSheet.create({
     padding: 12,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 8,
@@ -422,8 +426,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   etaLabel: {
-    fontSize: 11,
-    fontWeight: "500",
+    ...Typography.label,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -433,12 +436,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   etaValue: {
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.xxlHeavy,
   },
   etaUnit: {
-    fontSize: 14,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
     marginLeft: 4,
   },
   etaSeparator: {
@@ -447,7 +448,6 @@ const styles = StyleSheet.create({
     marginHorizontal: 8,
   },
   etaDistance: {
-    fontSize: 14,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
 });

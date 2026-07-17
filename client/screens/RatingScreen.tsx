@@ -50,19 +50,19 @@ function ArrivedScreen({ ride }: { ride: Ride | undefined }) {
   const fare = ride?.actualFare || ride?.estimatedFare;
 
   return (
-    <View style={[arrivedStyles.container, { backgroundColor: Colors.travonyGreen }]}>
+    <View style={[arrivedStyles.container, { backgroundColor: theme.primary }]}>
       <Animated.View style={{ transform: [{ scale: scaleAnim }], opacity: opacityAnim, alignItems: "center" }}>
-        <View style={arrivedStyles.checkCircle}>
-          <Ionicons name="checkmark" size={64} color={Colors.travonyGreen} />
+        <View style={[arrivedStyles.checkCircle, { backgroundColor: theme.backgroundRoot }]}>
+          <Ionicons name="checkmark" size={64} color={theme.primary} />
         </View>
-        <ThemedText style={arrivedStyles.title}>You've arrived</ThemedText>
+        <ThemedText style={[arrivedStyles.title, { color: theme.textOnPrimary }]}>You've arrived</ThemedText>
         {ride?.dropoffAddress ? (
-          <ThemedText style={arrivedStyles.address} numberOfLines={2}>
+          <ThemedText style={[arrivedStyles.address, { color: theme.textOnPrimary }]} numberOfLines={2}>
             {ride.dropoffAddress}
           </ThemedText>
         ) : null}
         {fare ? (
-          <ThemedText style={arrivedStyles.fare}>AED {fare}</ThemedText>
+          <ThemedText style={[arrivedStyles.fare, { color: theme.textOnPrimary }]}>AED {fare}</ThemedText>
         ) : null}
       </Animated.View>
     </View>
@@ -80,28 +80,23 @@ const arrivedStyles = StyleSheet.create({
     width: 120,
     height: 120,
     borderRadius: 60,
-    backgroundColor: "#fff",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: Spacing.xl,
   },
   title: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#fff",
+    ...Typography.h1,
     marginBottom: Spacing.md,
   },
   address: {
-    fontSize: 16,
-    color: "#fff",
+    ...Typography.body,
     opacity: 0.9,
     textAlign: "center",
     marginBottom: Spacing.md,
   },
   fare: {
-    fontSize: 24,
+    ...Typography.h2,
     fontWeight: "700",
-    color: "#fff",
     opacity: 0.95,
   },
 });
@@ -225,7 +220,7 @@ export default function RatingScreen() {
                   {
                     backgroundColor: tip === amount ? theme.primary : theme.backgroundDefault,
                     borderColor: tip === amount ? theme.primary : theme.border,
-                    opacity: pressed ? 0.9 : 1,
+                    opacity: pressed ? 0.8 : 1,
                   },
                 ]}
                 onPress={() => setTip(amount)}
@@ -233,7 +228,7 @@ export default function RatingScreen() {
                 <ThemedText
                   style={[
                     styles.tipText,
-                    { color: tip === amount ? "#FFFFFF" : theme.text },
+                    { color: tip === amount ? theme.textOnPrimary : theme.text },
                   ]}
                 >
                   {amount === 0 ? "No tip" : `AED ${amount}`}
@@ -269,14 +264,14 @@ export default function RatingScreen() {
             styles.submitButton,
             {
               backgroundColor: theme.primary,
-              opacity: submitRatingMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+              opacity: submitRatingMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
             },
           ]}
           onPress={handleSubmit}
           disabled={submitRatingMutation.isPending}
         >
           {submitRatingMutation.isPending ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={theme.textOnPrimary} />
           ) : (
             <ThemedText style={styles.submitButtonText}>Submit Rating</ThemedText>
           )}
@@ -360,8 +355,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   tipText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   commentInput: {
     borderRadius: BorderRadius.sm,
@@ -379,7 +373,7 @@ const styles = StyleSheet.create({
   },
   submitButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   skipButton: {
     alignItems: "center",
@@ -397,8 +391,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   footprintText: {
-    fontSize: 11,
-    fontWeight: "400",
+    ...Typography.caption,
     color: Colors.travonyGreen,
     letterSpacing: 0.8,
     textTransform: "uppercase",

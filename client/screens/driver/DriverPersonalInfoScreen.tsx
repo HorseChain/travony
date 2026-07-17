@@ -250,8 +250,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   sectionTitle: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginBottom: Spacing.sm,
     textTransform: "uppercase",
   },

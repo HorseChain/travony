@@ -450,7 +450,7 @@ export default function ActiveRideScreen() {
           </View>
           {eta && ride?.status !== "completed" ? (
             <View style={[styles.etaBadge, { backgroundColor: theme.primary }]}>
-              <Ionicons name="time-outline" size={14} color="#FFFFFF" />
+              <Ionicons name="time-outline" size={14} color={theme.textOnPrimary} />
               <ThemedText style={styles.etaBadgeText}>{eta} min</ThemedText>
             </View>
           ) : null}
@@ -549,9 +549,9 @@ export default function ActiveRideScreen() {
               </View>
             ) : null}
             {(telemetry.driver.isElectric || ride?.isEvRide) ? (
-              <View style={[styles.evBadge, { backgroundColor: "#16a34a15" }]}>
-                <Ionicons name="flash" size={13} color="#16a34a" />
-                <ThemedText style={[styles.evBadgeText, { color: "#16a34a" }]}>
+              <View style={[styles.evBadge, { backgroundColor: theme.evGreen + "15" }]}>
+                <Ionicons name="flash" size={13} color={theme.evGreen} />
+                <ThemedText style={[styles.evBadgeText, { color: theme.evGreen }]}>
                   {telemetry.driver.isElectric ? "Electric Vehicle" : "EV Requested"}
                 </ThemedText>
               </View>
@@ -570,7 +570,7 @@ export default function ActiveRideScreen() {
             >
               <Ionicons name="chatbubble-outline" size={20} color={theme.primary} />
               {unreadCount > 0 ? (
-                <View style={styles.chatBadge}>
+                <View style={[styles.chatBadge, { backgroundColor: theme.error }]}>
                   <ThemedText style={styles.chatBadgeText}>
                     {unreadCount > 9 ? "9+" : unreadCount}
                   </ThemedText>
@@ -582,19 +582,19 @@ export default function ActiveRideScreen() {
       ) : null}
       </View>
 
-      <View style={[styles.sideButtons, { bottom: tabBarHeight + 200 }]}>
+      <View style={[styles.sideButtons, { bottom: tabBarHeight + Spacing["5xl"] + Spacing["4xl"] + Spacing["3xl"] + Spacing["2xl"] + Spacing.xl + Spacing.lg + Spacing.md + Spacing.sm }]}>
         <Pressable
           style={[styles.shareButton, { backgroundColor: theme.primary }]}
           onPress={handleShareRide}
           disabled={shareMutation.isPending}
         >
-          <Ionicons name="share-social-outline" size={22} color="#FFFFFF" />
+          <Ionicons name="share-social-outline" size={22} color={theme.textOnPrimary} />
         </Pressable>
         <Pressable
-          style={styles.panicButton}
+          style={[styles.panicButton, { backgroundColor: theme.error }]}
           onPress={handlePanic}
         >
-          <Ionicons name="warning-outline" size={24} color="#FFFFFF" />
+          <Ionicons name="warning-outline" size={24} color={theme.textOnPrimary} />
         </Pressable>
       </View>
 
@@ -659,15 +659,15 @@ export default function ActiveRideScreen() {
           <Animated.View
             style={[
               styles.coffeeCard,
-              { backgroundColor: "#FFF7ED", borderColor: "#F59E0B30", opacity: coffeeCardAnim, transform: [{ translateY: coffeeCardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
+              { backgroundColor: theme.warning + "15", borderColor: theme.warning + "30", opacity: coffeeCardAnim, transform: [{ translateY: coffeeCardAnim.interpolate({ inputRange: [0, 1], outputRange: [10, 0] }) }] },
             ]}
           >
-            <Ionicons name="cafe-outline" size={20} color="#92400E" />
+            <Ionicons name="cafe-outline" size={20} color={theme.warning} />
             <ThemedText style={styles.coffeeCardText}>
               Want something delivered to your destination?
             </ThemedText>
             <Pressable
-              style={styles.coffeeOrderBtn}
+              style={[styles.coffeeOrderBtn, { backgroundColor: theme.warning }]}
               onPress={() => {
                 handleDismissCoffeeCard();
                 navigation.navigate("Coffee");
@@ -676,7 +676,7 @@ export default function ActiveRideScreen() {
               <ThemedText style={styles.coffeeOrderBtnText}>Order</ThemedText>
             </Pressable>
             <Pressable onPress={handleDismissCoffeeCard} style={styles.coffeeDismiss}>
-              <Ionicons name="close-outline" size={16} color="#92400E" />
+              <Ionicons name="close-outline" size={16} color={theme.warning} />
             </Pressable>
           </Animated.View>
         ) : null}
@@ -729,7 +729,7 @@ export default function ActiveRideScreen() {
                 }}
               >
                 <View style={{ flex: 1 }}>
-                  <ThemedText style={[styles.poolTitle, { color: theme.text, fontSize: 14 }]}>
+                  <ThemedText style={[styles.poolTitle, { color: theme.text, ...Typography.bodyMedium }]}>
                     {bid.driverName} · {parseFloat(bid.driverRating).toFixed(1)}★
                   </ThemedText>
                   <ThemedText style={[styles.poolSubtitle, { color: theme.textSecondary }]}>
@@ -814,7 +814,7 @@ export default function ActiveRideScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.cancelButton,
-              { borderColor: theme.error, opacity: pressed ? 0.9 : 1 },
+              { borderColor: theme.error, opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={handleCancelRide}
           >
@@ -884,9 +884,8 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   etaBadgeText: {
-    ...Typography.small,
-    color: "#FFFFFF",
-    fontWeight: "600",
+    ...Typography.smallBold,
+    color: Colors.light.textOnPrimary,
   },
   fareLockBadge: {
     flexDirection: "row",
@@ -899,8 +898,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
   fareLockBadgeText: {
-    ...Typography.small,
-    fontWeight: "500",
+    ...Typography.smallMedium,
   },
   shareBanner: {
     borderRadius: BorderRadius.md,
@@ -930,9 +928,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   shareBannerBtnText: {
-    ...Typography.caption,
-    color: "#fff",
-    fontWeight: "700",
+    ...Typography.captionBold,
+    color: Colors.light.textOnPrimary,
   },
   shareBannerDismiss: {
     padding: 4,
@@ -957,8 +954,7 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.md,
   },
   driverName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   driverDetails: {
     flexDirection: "row",
@@ -980,8 +976,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   licensePlateText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   driverNameRow: {
     flexDirection: "row",
@@ -997,8 +992,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   verifiedText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   vehicleDetails: {
     flexDirection: "row",
@@ -1028,14 +1022,12 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: "#FF3B30",
     alignItems: "center",
     justifyContent: "center",
   },
   chatBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.captionBold,
   },
   sideButtons: {
     position: "absolute",
@@ -1054,7 +1046,6 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 28,
-    backgroundColor: "#E53935",
     alignItems: "center",
     justifyContent: "center",
     ...Shadows.fab,
@@ -1121,8 +1112,7 @@ const styles = StyleSheet.create({
     ...Typography.h3,
   },
   otpValue: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
     letterSpacing: 2,
   },
   otpHint: {
@@ -1141,20 +1131,16 @@ const styles = StyleSheet.create({
   },
   coffeeCardText: {
     flex: 1,
-    fontSize: 12,
-    color: "#92400E",
-    fontWeight: "500",
+    ...Typography.smallMedium,
   },
   coffeeOrderBtn: {
-    backgroundColor: "#92400E",
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
     borderRadius: BorderRadius.sm,
   },
   coffeeOrderBtnText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.smallHeavy,
   },
   coffeeDismiss: {
     padding: 4,
@@ -1181,8 +1167,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   poolTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   poolSubtitle: {
     ...Typography.small,
@@ -1213,7 +1198,7 @@ const styles = StyleSheet.create({
   },
   poolBtnFilledText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   etaIntelligence: {
     flexDirection: "row",
@@ -1228,8 +1213,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.travonyGreen,
   },
   etaIntelText: {
-    fontSize: 10,
-    fontWeight: "400",
+    ...Typography.micro,
     letterSpacing: 0.8,
     textTransform: "uppercase",
   },
@@ -1243,8 +1227,7 @@ const styles = StyleSheet.create({
     alignSelf: "flex-start",
   },
   evBadgeText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginLeft: 4,
   },
 });

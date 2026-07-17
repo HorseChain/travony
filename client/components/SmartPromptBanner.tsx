@@ -3,7 +3,7 @@ import { View, StyleSheet, Pressable, Animated } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
 
 interface SmartPromptBannerProps {
   prompt: {
@@ -35,7 +35,7 @@ function getAccentColor(type: string): string {
     case "high_yield_opportunity":
       return Colors.travonyGreen;
     case "vehicle_available":
-      return "#4FC3F7";
+      return Colors.heatmapLow;
     case "low_supply":
       return Colors.dark.warning;
     case "demand_surge":
@@ -112,7 +112,7 @@ export default function SmartPromptBanner({
             style={[styles.actionButton, { backgroundColor: accentColor }]}
           >
             <ThemedText style={styles.actionText}>{prompt.actionLabel}</ThemedText>
-            <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+            <Ionicons name="arrow-forward" size={14} color={Colors.light.textOnPrimary} />
           </Pressable>
         ) : null}
       </View>
@@ -151,13 +151,11 @@ const styles = StyleSheet.create({
     marginRight: Spacing.sm,
   },
   title: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...Typography.bodySmallBold,
     marginBottom: 2,
   },
   message: {
-    fontSize: 13,
-    fontWeight: "400",
+    ...Typography.labelLight,
     lineHeight: 18,
   },
   dismissButton: {
@@ -173,8 +171,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   actionText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "600",
+    color: Colors.light.textOnPrimary,
+    ...Typography.bodyBold,
   },
 });

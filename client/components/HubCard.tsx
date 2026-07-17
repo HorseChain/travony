@@ -2,8 +2,8 @@ import React from "react";
 import { View, Pressable, StyleSheet } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
-import { Colors, Spacing, BorderRadius } from "@/constants/theme";
-import type { useTheme } from "@/hooks/useTheme";
+import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { useTheme } from "@/hooks/useTheme";
 
 type Theme = ReturnType<typeof useTheme>["theme"];
 
@@ -56,8 +56,8 @@ const HUB_TYPE_ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 export function getDemandColor(score: number): string {
   if (score >= 7) return Colors.travonyGreen;
   if (score >= 4) return Colors.travonyGold;
-  if (score >= 1) return "#4FC3F7";
-  return "#9E9E9E";
+  if (score >= 1) return Colors.heatmapLow;
+  return Colors.chargerGray;
 }
 
 export function getDemandLabel(score: number): string {
@@ -83,8 +83,9 @@ interface EvPortBarProps {
 }
 
 export function EvPortBar({ available, total, trackColor }: EvPortBarProps) {
+  const { theme } = useTheme();
   if (!total || total === 0) return null;
-  const portColor = available === 0 ? "#FF6B6B" : available <= 2 ? Colors.travonyGold : Colors.travonyGreen;
+  const portColor = available === 0 ? theme.error : available <= 2 ? Colors.travonyGold : Colors.travonyGreen;
   const occupiedPct = Math.min(100, Math.round(((total - available) / total) * 100));
   const freePct = 100 - occupiedPct;
 
@@ -93,11 +94,11 @@ export function EvPortBar({ available, total, trackColor }: EvPortBarProps) {
       <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
           <Ionicons name="battery-charging-outline" size={12} color={portColor} />
-          <ThemedText style={{ fontSize: 11, color: portColor, fontWeight: "600" }}>
+          <ThemedText style={{ ...Typography.captionBold, color: portColor }}>
             {available} / {total} ports free
           </ThemedText>
         </View>
-        <ThemedText style={{ fontSize: 10, color: "#888" }}>
+        <ThemedText style={{ ...Typography.micro, color: theme.textMuted }}>
           {occupiedPct}% occupied
         </ThemedText>
       </View>
@@ -135,11 +136,11 @@ export function HubCard({ hub, variant, onPress, onCheckIn, theme }: HubCardProp
       {hub.isEvHub ? (
         <View style={[styles.chargingBanner, { backgroundColor: Colors.travonyGreen + "15" }]}>
           <Ionicons name="flash" size={12} color={Colors.travonyGreen} />
-          <ThemedText style={{ fontSize: 11, color: Colors.travonyGreen, fontWeight: "700" }}>
+          <ThemedText style={{ ...Typography.caption, color: Colors.travonyGreen, fontWeight: "700" }}>
             Charging Available
           </ThemedText>
           {evPortsAvail > 0 ? (
-            <ThemedText style={{ fontSize: 11, color: Colors.travonyGreen }}>
+            <ThemedText style={{ ...Typography.caption, color: Colors.travonyGreen }}>
               {" "}\u00B7{" "}{evPortsAvail} ports free
             </ThemedText>
           ) : null}
@@ -156,7 +157,7 @@ export function HubCard({ hub, variant, onPress, onCheckIn, theme }: HubCardProp
           </ThemedText>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 2 }}>
             <View style={[styles.typeBadge, { backgroundColor: iconBg }]}>
-              <ThemedText style={{ fontSize: 9, color: iconColor, fontWeight: "700" }}>
+              <ThemedText style={{ ...Typography.nano, color: iconColor, fontWeight: "700" }}>
                 {typeLabel.toUpperCase()}
               </ThemedText>
             </View>
@@ -251,7 +252,7 @@ export function HubCard({ hub, variant, onPress, onCheckIn, theme }: HubCardProp
           onPress={onCheckIn}
           style={[styles.checkInBtn, { backgroundColor: hub.isEvHub ? Colors.travonyGreen : theme.primary }]}
         >
-          <Ionicons name={hub.isEvHub ? "flash" : "log-in-outline"} size={16} color="#FFFFFF" />
+          <Ionicons name={hub.isEvHub ? "flash" : "log-in-outline"} size={16} color={Colors.light.textOnPrimary} />
           <ThemedText style={styles.checkInText}>
             {hub.isEvHub ? "EV Check-In" : "Check In"}
           </ThemedText>
@@ -285,19 +286,19 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  hubName: { fontSize: 15, fontWeight: "600" },
-  hubDistance: { fontSize: 11 },
+  hubName: { ...Typography.bodySmallBold },
+  hubDistance: { ...Typography.caption },
   typeBadge: {
     paddingHorizontal: 5,
     paddingVertical: 2,
     borderRadius: 4,
   },
-  hubDesc: { fontSize: 13, marginTop: Spacing.sm, lineHeight: 18 },
+  hubDesc: { ...Typography.labelLight, marginTop: Spacing.sm, lineHeight: 18 },
   hubDivider: { height: StyleSheet.hairlineWidth, marginVertical: Spacing.md },
   hubStats: { flexDirection: "row", justifyContent: "space-around", marginBottom: Spacing.md },
   hubStat: { alignItems: "center" },
-  hubStatVal: { fontSize: 16, fontWeight: "700" },
-  hubStatLabel: { fontSize: 10, marginTop: 2 },
+  hubStatVal: { ...Typography.h4Heavy },
+  hubStatLabel: { ...Typography.micro, marginTop: 2 },
   demandBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -307,7 +308,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   demandDot: { width: 6, height: 6, borderRadius: 3 },
-  demandBadgeText: { fontSize: 11, fontWeight: "700" },
+  demandBadgeText: { ...Typography.caption, fontWeight: "700" },
   demandBarWrap: { marginBottom: Spacing.md },
   demandBarTrack: { height: 4, borderRadius: 2, overflow: "hidden" },
   demandBarFill: { height: 4, borderRadius: 2 },
@@ -319,7 +320,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     gap: 6,
   },
-  checkInText: { color: "#FFFFFF", fontSize: 14, fontWeight: "600" },
+  checkInText: { color: Colors.light.textOnPrimary, ...Typography.bodyBold },
   portTrack: {
     height: 6,
     borderRadius: 3,

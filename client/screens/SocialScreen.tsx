@@ -14,7 +14,7 @@ import { StatusBadges, type StatusBadge } from "@/components/StatusBadges";
 import { useTheme } from "@/hooks/useTheme";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 import type { SocialStackParamList } from "@/navigation/SocialStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<SocialStackParamList, "Social">;
@@ -25,10 +25,10 @@ const REACTIONS: {
   activeIcon: keyof typeof Ionicons.glyphMap;
   color: string;
 }[] = [
-  { type: "like", icon: "thumbs-up-outline", activeIcon: "thumbs-up", color: "#4285F4" },
-  { type: "love", icon: "heart-outline", activeIcon: "heart", color: "#E0518F" },
-  { type: "fire", icon: "flame-outline", activeIcon: "flame", color: "#FB8C00" },
-  { type: "celebrate", icon: "sparkles-outline", activeIcon: "sparkles", color: "#F5A623" },
+  { type: "like", icon: "thumbs-up-outline", activeIcon: "thumbs-up", color: Colors.reactionLike },
+  { type: "love", icon: "heart-outline", activeIcon: "heart", color: Colors.reactionLove },
+  { type: "fire", icon: "flame-outline", activeIcon: "flame", color: Colors.reactionFire },
+  { type: "celebrate", icon: "sparkles-outline", activeIcon: "sparkles", color: Colors.reactionCelebrate },
 ];
 
 interface SocialPost {
@@ -105,7 +105,7 @@ function LiveCard({ post, onPress }: { post: SocialPost; onPress: () => void }) 
     >
       <View style={styles.liveCardTop}>
         <Avatar uri={post.authorAvatar} name={post.authorName} size={36} />
-        <View style={styles.liveBadge}>
+        <View style={[styles.liveBadge, { backgroundColor: theme.error }]}>
           <View style={styles.liveDot} />
           <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
         </View>
@@ -148,7 +148,7 @@ function FeedCard({
           <StatusBadges badges={post.badges} />
         </View>
         {isStream && post.isLive ? (
-          <View style={styles.liveBadge}>
+          <View style={[styles.liveBadge, { backgroundColor: theme.error }]}>
             <View style={styles.liveDot} />
             <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
           </View>
@@ -192,11 +192,11 @@ function FeedCard({
           <Pressable
             style={({ pressed }) => [
               styles.watchButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.9 : 1 },
+              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={onWatch}
           >
-            <Ionicons name="play" size={14} color="#FFFFFF" />
+            <Ionicons name="play" size={14} color={theme.textOnPrimary} />
             <ThemedText style={styles.watchButtonText}>Watch live</ThemedText>
           </Pressable>
         ) : (
@@ -439,7 +439,6 @@ const styles = StyleSheet.create({
   liveBadge: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#E91916",
     borderRadius: 4,
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -449,16 +448,14 @@ const styles = StyleSheet.create({
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.textOnPrimary,
   },
   liveBadgeText: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...Typography.captionBold,
+    color: Colors.light.textOnPrimary,
   },
   liveCardName: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   liveCardCity: {
     ...Typography.small,
@@ -477,8 +474,7 @@ const styles = StyleSheet.create({
     marginLeft: Spacing.md,
   },
   feedAuthor: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   feedTime: {
     ...Typography.small,
@@ -498,8 +494,7 @@ const styles = StyleSheet.create({
     marginRight: Spacing.md,
   },
   feedTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
   feedMeta: {
     ...Typography.small,
@@ -532,8 +527,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   reactionCount: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginLeft: Spacing.xs,
   },
   commentButton: {
@@ -542,8 +536,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   commentCount: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   watchButton: {
     flexDirection: "row",
@@ -555,9 +548,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   watchButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
-    color: "#FFFFFF",
+    ...Typography.bodyBold,
+    color: Colors.light.textOnPrimary,
   },
   emptyState: {
     alignItems: "center",

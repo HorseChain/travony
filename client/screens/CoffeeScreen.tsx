@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Colors } from "@/constants/theme";
+import { Typography, Spacing, BorderRadius, Colors } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 
 type OrderType = "order" | "buy" | "gift";
@@ -46,8 +46,8 @@ const SIZE_LABELS: Record<CoffeeSize, string> = {
 
 const ORDER_TYPE_CONFIG: Record<OrderType, { label: string; icon: string; description: string; color: string }> = {
   order: { label: "Order", icon: "cafe-outline", description: "Get coffee delivered to you", color: Colors.travonyGreen },
-  buy: { label: "Buy", icon: "cart-outline", description: "Pick up at a hub", color: "#FF9500" },
-  gift: { label: "Gift", icon: "gift-outline", description: "Send coffee to someone", color: "#FF2D55" },
+  buy: { label: "Buy", icon: "cart-outline", description: "Pick up at a hub", color: Colors.light.warning },
+  gift: { label: "Gift", icon: "gift-outline", description: "Send coffee to someone", color: Colors.light.error },
 };
 
 const CATEGORY_ICONS: Record<string, string> = {
@@ -215,7 +215,7 @@ export default function CoffeeScreen() {
 
         <View style={[styles.orderTypeBadge, { backgroundColor: ORDER_TYPE_CONFIG[orderType].color + "15" }]}>
           <Ionicons name={ORDER_TYPE_CONFIG[orderType].icon as any} size={16} color={ORDER_TYPE_CONFIG[orderType].color} />
-          <ThemedText style={{ color: ORDER_TYPE_CONFIG[orderType].color, fontWeight: "600", fontSize: 13 }}>
+          <ThemedText style={{ color: ORDER_TYPE_CONFIG[orderType].color, ...Typography.labelBold }}>
             {ORDER_TYPE_CONFIG[orderType].label} Mode
           </ThemedText>
         </View>
@@ -290,15 +290,14 @@ export default function CoffeeScreen() {
               ]}
             >
               <ThemedText style={{
-                color: size === s ? "#FFFFFF" : theme.text,
-                fontWeight: "700",
-                fontSize: 15,
+                color: size === s ? theme.textOnPrimary : theme.text,
+                ...Typography.bodySmallHeavy,
               }}>
                 {SIZE_LABELS[s]}
               </ThemedText>
               <ThemedText style={{
-                color: size === s ? "#FFFFFF" : theme.textMuted,
-                fontSize: 11,
+                color: size === s ? theme.textOnPrimary : theme.textMuted,
+                ...Typography.caption,
               }}>
                 {s}
               </ThemedText>
@@ -364,35 +363,35 @@ export default function CoffeeScreen() {
 
         <View style={[styles.priceSummary, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
           <View style={styles.priceRow}>
-            <ThemedText style={{ color: theme.textSecondary, fontSize: 14 }}>
+            <ThemedText style={{ color: theme.textSecondary, ...Typography.bodyMedium }}>
               {selectedItem.name} ({size}) x{quantity}
             </ThemedText>
-            <ThemedText style={{ color: theme.text, fontSize: 14, fontWeight: "600" }}>
+            <ThemedText style={{ color: theme.text, ...Typography.bodyBold }}>
               {(itemPrice * quantity).toFixed(2)} AED
             </ThemedText>
           </View>
           {deliveryFee > 0 ? (
             <View style={styles.priceRow}>
-              <ThemedText style={{ color: theme.textSecondary, fontSize: 14 }}>
+              <ThemedText style={{ color: theme.textSecondary, ...Typography.bodyMedium }}>
                 Delivery Fee
               </ThemedText>
-              <ThemedText style={{ color: theme.text, fontSize: 14, fontWeight: "600" }}>
+              <ThemedText style={{ color: theme.text, ...Typography.bodyBold }}>
                 {deliveryFee.toFixed(2)} AED
               </ThemedText>
             </View>
           ) : (
             <View style={styles.priceRow}>
-              <ThemedText style={{ color: Colors.travonyGreen, fontSize: 14 }}>
+              <ThemedText style={{ color: Colors.travonyGreen, ...Typography.bodyMedium }}>
                 Pickup - No delivery fee
               </ThemedText>
             </View>
           )}
           <View style={[styles.priceDivider, { backgroundColor: theme.border }]} />
           <View style={styles.priceRow}>
-            <ThemedText style={{ color: theme.text, fontSize: 16, fontWeight: "700" }}>
+            <ThemedText style={{ color: theme.text, ...Typography.h4Heavy }}>
               Total
             </ThemedText>
-            <ThemedText style={{ color: theme.primary, fontSize: 16, fontWeight: "700" }}>
+            <ThemedText style={{ color: theme.primary, ...Typography.h4Heavy }}>
               {totalAmount.toFixed(2)} AED
             </ThemedText>
           </View>
@@ -401,13 +400,13 @@ export default function CoffeeScreen() {
         <Pressable
           onPress={handlePlaceOrder}
           disabled={createOrderMutation.isPending}
-          style={[styles.placeOrderButton, { backgroundColor: theme.primary, opacity: createOrderMutation.isPending ? 0.7 : 1 }]}
+          style={[styles.placeOrderButton, { backgroundColor: theme.primary, opacity: createOrderMutation.isPending ? 0.5 : 1 }]}
         >
           {createOrderMutation.isPending ? (
-            <ActivityIndicator size="small" color="#FFFFFF" />
+            <ActivityIndicator size="small" color={theme.textOnPrimary} />
           ) : (
             <>
-              <Ionicons name="cafe" size={18} color="#FFFFFF" />
+              <Ionicons name="cafe" size={18} color={theme.textOnPrimary} />
               <ThemedText style={styles.placeOrderText}>
                 Place {ORDER_TYPE_CONFIG[orderType].label} - {totalAmount.toFixed(2)} AED
               </ThemedText>
@@ -464,12 +463,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   typeTitle: {
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.xxlHeavy,
     marginBottom: 4,
   },
   typeSubtitle: {
-    fontSize: 14,
+    ...Typography.bodyMedium,
     textAlign: "center",
   },
   typeCard: {
@@ -491,12 +489,11 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   typeCardTitle: {
-    fontSize: 17,
-    fontWeight: "700",
+    ...Typography.bodyLargeHeavy,
     marginBottom: 2,
   },
   typeCardDesc: {
-    fontSize: 13,
+    ...Typography.labelLight,
   },
   backRow: {
     flexDirection: "row",
@@ -523,8 +520,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   categoryTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   menuItem: {
     flexDirection: "row",
@@ -538,16 +534,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   menuItemName: {
-    fontSize: 15,
-    fontWeight: "600",
+    ...Typography.bodySmallBold,
     marginBottom: 2,
   },
   menuItemDesc: {
-    fontSize: 12,
+    ...Typography.small,
   },
   menuItemPrice: {
-    fontSize: 14,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
     marginLeft: Spacing.md,
   },
   selectedItemCard: {
@@ -557,16 +551,14 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   selectedItemName: {
-    fontSize: 20,
-    fontWeight: "700",
+    ...Typography.xlHeavy,
     marginBottom: 4,
   },
   selectedItemDesc: {
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   customLabel: {
-    fontSize: 14,
-    fontWeight: "600",
+    ...Typography.bodyBold,
     marginBottom: Spacing.sm,
     marginTop: Spacing.md,
   },
@@ -595,8 +587,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   quantityValue: {
-    fontSize: 20,
-    fontWeight: "700",
+    ...Typography.xlHeavy,
     minWidth: 30,
     textAlign: "center",
   },
@@ -604,7 +595,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
-    fontSize: 14,
+    ...Typography.bodyMedium,
     minHeight: 44,
   },
   priceSummary: {
@@ -633,8 +624,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   placeOrderText: {
-    color: "#FFFFFF",
-    fontSize: 16,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.h4Heavy,
   },
 });

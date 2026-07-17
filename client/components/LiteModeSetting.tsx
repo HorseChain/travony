@@ -7,6 +7,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useLiteMode, LitePreference } from "@/hooks/useLiteMode";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 
+
 const OPTIONS: { key: LitePreference; label: string }[] = [
   { key: "auto", label: "Auto" },
   { key: "on", label: "On" },
@@ -69,7 +70,7 @@ export function LiteModeSetting() {
               <ThemedText
                 style={[
                   styles.segmentText,
-                  { color: selected ? "#FFFFFF" : theme.textSecondary },
+                  { color: selected ? Colors.light.textOnPrimary : theme.textSecondary },
                 ]}
               >
                 {opt.label}
@@ -108,8 +109,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   label: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   badge: {
     paddingHorizontal: 6,
@@ -117,10 +117,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   badgeText: {
-    ...Typography.caption,
-    color: "#FFFFFF",
-    fontWeight: "700",
-    fontSize: 10,
+    ...Typography.microHeavy,
+    color: Colors.light.textOnPrimary,
   },
   subtitle: {
     ...Typography.small,
@@ -140,7 +138,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   segmentText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
 });

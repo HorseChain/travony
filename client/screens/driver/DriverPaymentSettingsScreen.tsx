@@ -211,7 +211,7 @@ export default function DriverPaymentSettingsScreen() {
                 disabled={addAccountMutation.isPending}
               >
                 {addAccountMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={theme.textOnPrimary} />
                 ) : (
                   <ThemedText style={styles.saveButtonText}>Save</ThemedText>
                 )}
@@ -284,8 +284,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   bankName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   accountNumber: {
     ...Typography.small,
@@ -297,8 +296,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   defaultText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   holderName: {
     ...Typography.small,
@@ -312,8 +310,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   emptyTitle: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   emptySubtitle: {
     ...Typography.small,
@@ -331,8 +328,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   addButtonText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   addAccountForm: {
     borderRadius: BorderRadius.xl,
@@ -370,8 +366,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cancelButtonText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   saveButton: {
     flex: 1,
@@ -380,9 +375,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   saveButtonText: {
-    ...Typography.body,
-    fontWeight: "600",
-    color: "#FFFFFF",
+    ...Typography.h4,
+    color: Colors.light.textOnPrimary,
   },
   infoCard: {
     flexDirection: "row",

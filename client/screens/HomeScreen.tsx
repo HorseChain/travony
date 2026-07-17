@@ -21,15 +21,15 @@ import { ThemedText } from "@/components/ThemedText";
 import RideMap from "@/components/RideMap";
 import LiteTripView from "@/components/LiteTripView";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
-import BookingBottomSheet from "@/components/BookingBottomSheet";
+import BookingBottomSheet, { getPopularLocationsForRegion } from "@/components/BookingBottomSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
-import { Spacing, BorderRadius, Shadows, Colors } from "@/constants/theme";
+import { Typography, Spacing, BorderRadius, Shadows, Colors } from "@/constants/theme";
 import { HomeScreenSkeleton } from "@/components/SkeletonLoader";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
-type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "Home">;
-type RouteProps = RouteProp<HomeStackParamList, "Home">;
+type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "MapHome">;
+type RouteProps = RouteProp<HomeStackParamList, "MapHome">;
 
 interface LocationData {
   address: string;
@@ -121,12 +121,6 @@ export default function HomeScreen() {
     staleTime: 10000,
   });
 
-  const { data: allRidesData } = useQuery<{ rides?: any[] } | any[]>({
-    queryKey: ["/api/rides"],
-    enabled: !!user?.id,
-    staleTime: 30000,
-  });
-
   const { data: telemetryData } = useQuery<TelemetryData>({
     queryKey: ["/api/rides", activeRide?.id, "telemetry"],
     enabled: !!activeRide?.id,
@@ -135,6 +129,17 @@ export default function HomeScreen() {
 
   const { data: savedAddresses } = useQuery<{ id: string; label: string; address: string; lat: string; lng: string }[]>({
     queryKey: [`/api/saved-addresses/${user?.id}`],
+    enabled: !!user?.id,
+    staleTime: 60000,
+  });
+
+  const suggestNow = new Date();
+  const suggestKey = `/api/rides/destination-suggestions?hour=${suggestNow.getHours()}&dow=${suggestNow.getDay()}&tzOffset=${-suggestNow.getTimezoneOffset()}`;
+  const { data: suggestionData } = useQuery<{
+    suggestions: { address: string; lat: number; lng: number; label: string; icon: string; reason: string; score: number }[];
+    source: string;
+  }>({
+    queryKey: [suggestKey],
     enabled: !!user?.id,
     staleTime: 60000,
   });
@@ -297,49 +302,61 @@ export default function HomeScreen() {
     }
   };
 
-  const recentDropoffs: LocationData[] = (() => {
-    const ridesArr = Array.isArray(allRidesData) ? allRidesData : (allRidesData as any)?.rides;
-    if (!ridesArr) return [];
-    const seen = new Set<string>();
-    const result: LocationData[] = [];
-    for (const ride of ridesArr) {
-      if (ride.dropoffAddress && !seen.has(ride.dropoffAddress)) {
-        seen.add(ride.dropoffAddress);
-        result.push({ address: ride.dropoffAddress, lat: parseFloat(ride.dropoffLat), lng: parseFloat(ride.dropoffLng) });
-        if (result.length >= 3) break;
+  // Smart destination suggestions ranked server-side by the rider's own history
+  // (frequency + recency + time-of-day/day match) merged with saved Home/Work.
+  // Falls back cleanly to saved places, then popular locations, so the row is
+  // never empty for a signed-in rider.
+  const destinationChips: Array<{ label: string; location: LocationData; icon: string; reason?: string }> = (() => {
+    const suggestions = suggestionData?.suggestions;
+    if (suggestions && suggestions.length > 0) {
+      return suggestions
+        .filter((s) => s.lat !== 0 || s.lng !== 0)
+        .map((s) => ({
+          label: s.label,
+          icon: s.icon || "location-outline",
+          reason: s.reason,
+          location: { address: s.address, lat: s.lat, lng: s.lng },
+        }));
+    }
+
+    // Fallback 1: saved Home/Work (shown immediately while suggestions load or
+    // when the rider has no ride history yet).
+    const chips: Array<{ label: string; location: LocationData; icon: string; reason?: string }> = [];
+    if (savedAddresses) {
+      const homeAddr = savedAddresses.find((a) => a.label?.toLowerCase() === "home");
+      const workAddr = savedAddresses.find((a) => a.label?.toLowerCase() === "work");
+      if (homeAddr && homeAddr.address && parseFloat(homeAddr.lat) !== 0) {
+        chips.push({
+          label: "Home",
+          icon: "home-outline",
+          reason: "Saved place",
+          location: { address: homeAddr.address, lat: parseFloat(homeAddr.lat), lng: parseFloat(homeAddr.lng) },
+        });
+      }
+      if (workAddr && workAddr.address && parseFloat(workAddr.lat) !== 0) {
+        chips.push({
+          label: "Work",
+          icon: "briefcase-outline",
+          reason: "Saved place",
+          location: { address: workAddr.address, lat: parseFloat(workAddr.lat), lng: parseFloat(workAddr.lng) },
+        });
       }
     }
-    return result;
-  })();
 
-  const destinationChips: Array<{ label: string; location: LocationData; icon: string }> = [];
-  if (savedAddresses) {
-    const homeAddr = savedAddresses.find((a) => a.label?.toLowerCase() === "home");
-    const workAddr = savedAddresses.find((a) => a.label?.toLowerCase() === "work");
-    if (homeAddr && homeAddr.address && parseFloat(homeAddr.lat) !== 0) {
-      destinationChips.push({
-        label: "Home",
-        icon: "home-outline",
-        location: { address: homeAddr.address, lat: parseFloat(homeAddr.lat), lng: parseFloat(homeAddr.lng) },
-      });
+    // Fallback 2: popular destinations for the rider's region.
+    if (chips.length === 0) {
+      const popular = getPopularLocationsForRegion(currentLocation?.lat, currentLocation?.lng);
+      for (const p of popular.slice(0, 5)) {
+        chips.push({
+          label: p.address.length > 20 ? p.address.slice(0, 19) + "…" : p.address,
+          icon: (p.icon as string) || "location-outline",
+          reason: "Popular nearby",
+          location: { address: p.address, lat: p.lat, lng: p.lng },
+        });
+      }
     }
-    if (workAddr && workAddr.address && parseFloat(workAddr.lat) !== 0) {
-      destinationChips.push({
-        label: "Work",
-        icon: "briefcase-outline",
-        location: { address: workAddr.address, lat: parseFloat(workAddr.lat), lng: parseFloat(workAddr.lng) },
-      });
-    }
-  }
-  for (const rd of recentDropoffs) {
-    if (rd.lat !== 0 && rd.lng !== 0) {
-      destinationChips.push({
-        label: rd.address.length > 16 ? rd.address.slice(0, 15) + "…" : rd.address,
-        icon: "location-outline",
-        location: rd,
-      });
-    }
-  }
+    return chips;
+  })();
 
   const getActiveRidePillText = () => {
     if (!activeRide) return "";
@@ -419,7 +436,7 @@ export default function HomeScreen() {
             styles.activeRidePill,
             {
               backgroundColor: theme.primary,
-              top: insets.top + 100,
+              top: insets.top + Spacing["5xl"] + Spacing["4xl"] + Spacing.md,
               opacity: activePillAnim,
               transform: [{ translateY: activePillAnim.interpolate({ inputRange: [0, 1], outputRange: [-20, 0] }) }],
             },
@@ -433,7 +450,7 @@ export default function HomeScreen() {
             <ThemedText style={styles.activeRidePillText} numberOfLines={1}>
               {getActiveRidePillText()}
             </ThemedText>
-            <Ionicons name="chevron-forward" size={14} color="#fff" />
+            <Ionicons name="chevron-forward" size={14} color={Colors.light.textOnPrimary} />
           </Pressable>
         </Animated.View>
       ) : null}
@@ -455,10 +472,17 @@ export default function HomeScreen() {
                 ]}
                 onPress={() => handleChipPress(chip.location)}
               >
-                <Ionicons name={chip.icon as any} size={12} color={theme.primary} />
-                <ThemedText style={[styles.chipText, { color: theme.text }]} numberOfLines={1}>
-                  {chip.label}
-                </ThemedText>
+                <Ionicons name={chip.icon as any} size={14} color={theme.primary} />
+                <View style={styles.chipTextColumn}>
+                  <ThemedText style={[styles.chipText, { color: theme.text }]} numberOfLines={1}>
+                    {chip.label}
+                  </ThemedText>
+                  {chip.reason ? (
+                    <ThemedText style={[styles.chipReason, { color: theme.textMuted }]} numberOfLines={1}>
+                      {chip.reason}
+                    </ThemedText>
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </ScrollView>
@@ -546,7 +570,7 @@ export default function HomeScreen() {
               {
                 backgroundColor: theme.backgroundElevated,
                 borderColor: theme.border,
-                opacity: pressed ? 0.85 : 1,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => navigation.navigate("OpenClaw", { variant: "rider" })}
@@ -563,7 +587,7 @@ export default function HomeScreen() {
 
           {evModeActive && (availableEvDriverCount > 0 || evHubsWithPorts.length > 0) ? (
             <View style={[styles.evAvailableBadge, { backgroundColor: Colors.travonyGreen }]}>
-              <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={14} color="#fff" />
+              <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={14} color={Colors.light.textOnPrimary} />
               <ThemedText style={styles.evAvailableBadgeText}>
                 {availableEvDriverCount > 0
                   ? `${availableEvDriverCount} EV nearby`
@@ -578,7 +602,7 @@ export default function HomeScreen() {
               {
                 backgroundColor: theme.backgroundElevated,
                 borderColor: theme.border,
-                opacity: pressed ? 0.85 : 1,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => navigation.navigate("ScheduledArrivals")}
@@ -593,7 +617,7 @@ export default function HomeScreen() {
               {
                 backgroundColor: theme.backgroundElevated,
                 borderColor: theme.border,
-                opacity: pressed ? 0.85 : 1,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => navigation.navigate("PrayerRides")}
@@ -606,14 +630,14 @@ export default function HomeScreen() {
             style={({ pressed }) => [
               styles.coffeeButton,
               {
-                backgroundColor: "#8B4513",
-                borderColor: "#6B3410",
-                opacity: pressed ? 0.85 : 1,
+                backgroundColor: Colors.coffee,
+                borderColor: Colors.coffeeDark,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => navigation.navigate("Coffee")}
           >
-            <Ionicons name="cafe" size={18} color="#fff" />
+            <Ionicons name="cafe" size={18} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.coffeeButtonText}>Coffee</ThemedText>
           </Pressable>
         </View>
@@ -659,12 +683,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   greeting: {
-    fontSize: 17,
-    fontWeight: "600",
+    ...Typography.bodyLargeBold,
   },
   greetingSubtitle: {
-    fontSize: 12,
-    fontWeight: "400",
+    ...Typography.small,
     marginTop: 2,
   },
   networkStatus: {
@@ -679,8 +701,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.travonyGreen,
   },
   networkText: {
-    fontSize: 11,
-    fontWeight: "400",
+    ...Typography.caption,
     color: Colors.travonyGreen,
     letterSpacing: 0.5,
   },
@@ -702,14 +723,13 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.backgroundRoot,
     opacity: 0.9,
   },
   activeRidePillText: {
     flex: 1,
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
+    color: Colors.light.textOnPrimary,
+    ...Typography.labelBold,
   },
   overlayArea: {
     position: "absolute",
@@ -730,16 +750,23 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: Spacing.md,
-    paddingVertical: 6,
-    borderRadius: BorderRadius.full,
+    paddingVertical: 8,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
-    gap: 5,
+    gap: 7,
     ...Shadows.card,
   },
+  chipTextColumn: {
+    maxWidth: 150,
+  },
   chipText: {
-    fontSize: 12,
-    fontWeight: "500",
-    maxWidth: 110,
+    ...Typography.smallBold,
+    maxWidth: 150,
+  },
+  chipReason: {
+    ...Typography.micro,
+    marginTop: 1,
+    maxWidth: 150,
   },
   evHubCard: {
     flexDirection: "row",
@@ -755,8 +782,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   evHubCardText: {
-    fontSize: 12,
-    fontWeight: "500",
+    ...Typography.smallMedium,
   },
   evHubDismiss: {
     padding: 4,
@@ -778,15 +804,15 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   arrivalCardText: { flex: 1 },
-  arrivalCardTitle: { fontSize: 13, fontWeight: "700" },
-  arrivalCardSubtitle: { fontSize: 11, marginTop: 1 },
+  arrivalCardTitle: { ...Typography.labelHeavy },
+  arrivalCardSubtitle: { ...Typography.caption, marginTop: 1 },
   prayerSkipButton: {
     borderWidth: 1,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  prayerSkipText: { fontSize: 12, fontWeight: "600" },
+  prayerSkipText: { ...Typography.smallBold },
   quickActionsRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -813,9 +839,8 @@ const styles = StyleSheet.create({
     height: 48,
   },
   coffeeButtonText: {
-    color: "#fff",
-    fontSize: 13,
-    fontWeight: "600",
+    color: Colors.light.textOnPrimary,
+    ...Typography.labelBold,
   },
   evAvailableBadge: {
     flexDirection: "row",
@@ -827,21 +852,18 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   evAvailableBadgeText: {
-    color: "#fff",
-    fontSize: 12,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.smallHeavy,
   },
   networkHubsText: {
     flex: 1,
   },
   networkHubsTitle: {
-    fontSize: 14,
-    fontWeight: "600",
+    ...Typography.bodyBold,
     letterSpacing: 0.3,
   },
   networkHubsSubtitle: {
-    fontSize: 11,
-    fontWeight: "400",
+    ...Typography.caption,
     marginTop: 2,
   },
 });

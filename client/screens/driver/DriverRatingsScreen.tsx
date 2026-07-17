@@ -261,12 +261,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarText: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   customerName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   ratingDate: {
     ...Typography.small,
@@ -284,8 +282,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   emptyTitle: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   emptySubtitle: {
     ...Typography.small,

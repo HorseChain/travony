@@ -79,7 +79,7 @@ export function GuaranteeBanner({ isOnline }: Props) {
         ]}
       >
         <Animated.View style={{ transform: [{ scale: pulseScale }] }}>
-          <Ionicons name="checkmark-circle" size={20} color="#fff" />
+          <Ionicons name="checkmark-circle" size={20} color={Colors.light.textOnPrimary} />
         </Animated.View>
         <View style={styles.payoutContent}>
           <ThemedText style={styles.payoutTitle}>Guarantee paid</ThemedText>
@@ -102,7 +102,7 @@ export function GuaranteeBanner({ isOnline }: Props) {
   return (
     <View style={[styles.banner, { backgroundColor: Colors.travonyGreen + "15" }]}>
       <View style={[styles.iconContainer, { backgroundColor: Colors.travonyGreen }]}>
-        <Ionicons name="shield-checkmark" size={16} color="#fff" />
+        <Ionicons name="shield-checkmark" size={16} color={Colors.light.textOnPrimary} />
       </View>
       <View style={styles.textContainer}>
         <ThemedText style={[styles.guaranteeText, { color: Colors.travonyGreen }]}>
@@ -134,8 +134,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   guaranteeText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   payoutToast: {
     flexDirection: "row",
@@ -147,7 +146,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.2,
         shadowRadius: 8,
@@ -161,9 +160,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   payoutTitle: {
-    ...Typography.bodyMedium,
-    color: "#fff",
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
   payoutAmount: {
     ...Typography.small,

@@ -11,7 +11,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { RideConversation } from "@/components/RideChat";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing } from "@/constants/theme";
+import { Typography, Spacing } from "@/constants/theme";
 
 interface ActiveRideConversation {
   id: string;
@@ -99,6 +99,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: Spacing.lg,
   },
-  emptyTitle: { fontSize: 18, fontWeight: "700", marginBottom: Spacing.sm },
-  emptyBody: { fontSize: 14, lineHeight: 21, textAlign: "center" },
+  emptyTitle: { ...Typography.h3Heavy, marginBottom: Spacing.sm },
+  emptyBody: { ...Typography.bodyMedium, lineHeight: 21, textAlign: "center" },
 });

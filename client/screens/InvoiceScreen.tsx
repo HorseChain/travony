@@ -278,7 +278,7 @@ export default function InvoiceScreen() {
               </View>
               <View style={styles.paymentMethodBadge}>
                 {ride.paymentMethod === "usdt" ? (
-                  <ThemedText style={{ fontSize: 11, fontWeight: "700", color: "#26A17B" }}>
+                  <ThemedText style={{ ...Typography.smallHeavy, color: theme.crypto }}>
                     USDT
                   </ThemedText>
                 ) : (
@@ -332,38 +332,38 @@ export default function InvoiceScreen() {
             </View>
           </View>
 
-          <View style={[styles.carbonSection, { backgroundColor: "#E3F2FD" }]}>
+          <View style={[styles.carbonSection, { backgroundColor: theme.evGreen + "15", borderColor: theme.evGreen + "30", borderWidth: 1 }]}>
             <View style={styles.carbonHeader}>
-              <Ionicons name="leaf-outline" size={18} color="#1976D2" />
-              <ThemedText style={styles.carbonTitle}>
+              <Ionicons name="leaf-outline" size={18} color={theme.evGreen} />
+              <ThemedText style={[styles.carbonTitle, { color: theme.evGreen }]}>
                 Carbon Footprint
               </ThemedText>
             </View>
             <View style={styles.carbonStats}>
               <View style={styles.carbonItem}>
-                <ThemedText style={styles.carbonValue}>
+                <ThemedText style={[styles.carbonValue, { color: theme.evGreen }]}>
                   {((parseFloat(ride.distance || "0") * 0.12) / 2).toFixed(2)} kg
                 </ThemedText>
-                <ThemedText style={styles.carbonLabel}>CO2 saved</ThemedText>
+                <ThemedText style={[styles.carbonLabel, { color: theme.textSecondary }]}>CO2 saved</ThemedText>
               </View>
-              <View style={styles.carbonDivider} />
+              <View style={[styles.carbonDivider, { backgroundColor: theme.border }]} />
               <View style={styles.carbonItem}>
-                <ThemedText style={[styles.carbonValue, { color: "#2E7D32" }]}>
+                <ThemedText style={[styles.carbonValue, { color: theme.evGreen }]}>
                   50%
                 </ThemedText>
-                <ThemedText style={styles.carbonLabel}>reduction</ThemedText>
+                <ThemedText style={[styles.carbonLabel, { color: theme.textSecondary }]}>reduction</ThemedText>
               </View>
             </View>
-            <ThemedText style={styles.carbonNote}>
+            <ThemedText style={[styles.carbonNote, { color: theme.textMuted }]}>
               By using shared mobility, you saved CO2 emissions compared to driving alone.
             </ThemedText>
           </View>
 
           {ride.blockchainHash ? (
-            <View style={[styles.blockchainSection, { backgroundColor: "#E8F5E9" }]}>
+            <View style={[styles.blockchainSection, { backgroundColor: theme.blockchain + "15", borderColor: theme.blockchain + "30", borderWidth: 1 }]}>
               <View style={styles.blockchainHeader}>
-                <Ionicons name="shield-checkmark" size={18} color="#2E7D32" />
-                <ThemedText style={styles.blockchainTitle}>
+                <Ionicons name="shield-checkmark" size={18} color={theme.blockchain} />
+                <ThemedText style={[styles.blockchainTitle, { color: theme.blockchain }]}>
                   Blockchain Verified
                 </ThemedText>
               </View>
@@ -382,7 +382,7 @@ export default function InvoiceScreen() {
             style={[styles.bookAgainButton, { backgroundColor: theme.primary }]}
             onPress={handleBookAgain}
           >
-            <Ionicons name="repeat-outline" size={18} color="#fff" />
+            <Ionicons name="repeat-outline" size={18} color={theme.textOnPrimary} />
             <ThemedText style={styles.bookAgainButtonText}>Book this trip again</ThemedText>
           </Pressable>
 
@@ -452,8 +452,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   invoiceNumber: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   invoiceDate: {
     ...Typography.body,
@@ -525,8 +524,7 @@ const styles = StyleSheet.create({
     ...Typography.body,
   },
   paymentValue: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   paymentMethodBadge: {
     flexDirection: "row",
@@ -545,12 +543,10 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
   },
   totalLabel: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   totalValue: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   transparencySection: {
     padding: Spacing.md,
@@ -570,8 +566,7 @@ const styles = StyleSheet.create({
     ...Typography.small,
   },
   transparencyValue: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   verifiedRow: {
     flexDirection: "row",
@@ -597,18 +592,17 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   blockchainTitle: {
-    ...Typography.small,
-    fontWeight: "600",
-    color: "#2E7D32",
+    ...Typography.smallBold,
+    color: Colors.light.blockchain,
   },
   blockchainHash: {
     ...Typography.small,
     fontFamily: "monospace",
-    color: "#1B5E20",
+    color: Colors.light.blockchain,
   },
   blockchainNetwork: {
     ...Typography.small,
-    color: "#4CAF50",
+    color: Colors.light.blockchain,
     marginTop: 4,
   },
   carbonSection: {
@@ -623,9 +617,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   carbonTitle: {
-    ...Typography.small,
-    fontWeight: "600",
-    color: "#1976D2",
+    ...Typography.smallBold,
+    color: Colors.light.evGreen,
   },
   carbonStats: {
     flexDirection: "row",
@@ -637,22 +630,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   carbonValue: {
-    ...Typography.h3,
-    fontWeight: "700",
-    color: "#1976D2",
+    ...Typography.h3Heavy,
+    color: Colors.light.evGreen,
   },
   carbonLabel: {
     ...Typography.caption,
-    color: "#64B5F6",
+    color: Colors.light.evGreen,
   },
   carbonDivider: {
     width: 1,
     height: 30,
-    backgroundColor: "#BBDEFB",
+    backgroundColor: Colors.light.evGreen + "40",
   },
   carbonNote: {
     ...Typography.caption,
-    color: "#42A5F5",
+    color: Colors.light.evGreen,
     textAlign: "center",
   },
   actions: {
@@ -668,7 +660,7 @@ const styles = StyleSheet.create({
   },
   bookAgainButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   shareButton: {
     flexDirection: "row",

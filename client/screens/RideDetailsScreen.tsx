@@ -36,13 +36,16 @@ interface Ride {
   driverEarnings: string | null;
 }
 
-const statusColors: Record<string, string> = {
-  completed: "#43A047",
-  cancelled: "#E53935",
-  pending: "#FB8C00",
-  accepted: "#00B14F",
-  in_progress: "#00B14F",
-};
+function getStatusColor(status: string, theme: ReturnType<typeof useTheme>["theme"]): string {
+  switch (status) {
+    case "completed": return theme.success;
+    case "cancelled": return theme.error;
+    case "pending": return theme.warning;
+    case "accepted":
+    case "in_progress": return theme.primary;
+    default: return theme.textMuted;
+  }
+}
 
 export default function RideDetailsScreen() {
   const insets = useSafeAreaInsets();
@@ -128,13 +131,13 @@ export default function RideDetailsScreen() {
         <View
           style={[
             styles.statusBadge,
-            { backgroundColor: (statusColors[ride.status] || theme.primary) + "20" },
+            { backgroundColor: getStatusColor(ride.status, theme) + "20" },
           ]}
         >
           <ThemedText
             style={[
               styles.statusText,
-              { color: statusColors[ride.status] || theme.primary },
+              { color: getStatusColor(ride.status, theme) },
             ]}
           >
             {ride.status.replace("_", " ").toUpperCase()}
@@ -224,8 +227,8 @@ export default function RideDetailsScreen() {
       {ride.status === "completed" && ride.blockchainHash && (
         <Card style={styles.detailsCard}>
           <View style={styles.blockchainHeader}>
-            <View style={[styles.blockchainIcon, { backgroundColor: "#8247E5" + "20" }]}>
-              <Ionicons name="shield-checkmark-outline" size={20} color="#8247E5" />
+            <View style={[styles.blockchainIcon, { backgroundColor: theme.blockchain + "20" }]}>
+              <Ionicons name="shield-checkmark-outline" size={20} color={theme.blockchain} />
             </View>
             <ThemedText style={styles.cardTitle}>Blockchain Verified</ThemedText>
           </View>
@@ -278,7 +281,7 @@ export default function RideDetailsScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.verifyButton,
-              { backgroundColor: "#8247E5", opacity: pressed ? 0.8 : 1 },
+              { backgroundColor: theme.blockchain, opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={() => {
               const url = ride.blockchainTxHash
@@ -287,7 +290,7 @@ export default function RideDetailsScreen() {
               Linking.openURL(url);
             }}
           >
-            <Ionicons name="open-outline" size={16} color="#FFFFFF" />
+            <Ionicons name="open-outline" size={16} color={theme.textOnPrimary} />
             <ThemedText style={styles.verifyButtonText}>
               Verify on PolygonScan
             </ThemedText>
@@ -314,7 +317,7 @@ export default function RideDetailsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.actionButton,
-            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.7 : 1 },
+            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={handleGetReceipt}
         >
@@ -326,7 +329,7 @@ export default function RideDetailsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.actionButton,
-            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.7 : 1 },
+            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={handleReportIssue}
         >
@@ -368,8 +371,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   statusText: {
-    ...Typography.small,
-    fontWeight: "700",
+    ...Typography.smallHeavy,
   },
   dateText: {
     ...Typography.small,
@@ -426,8 +428,7 @@ const styles = StyleSheet.create({
     ...Typography.body,
   },
   detailValue: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   totalRow: {
     flexDirection: "row",
@@ -456,9 +457,8 @@ const styles = StyleSheet.create({
     marginHorizontal: Spacing.xs,
   },
   actionText: {
-    ...Typography.body,
+    ...Typography.bodySmallMedium,
     marginLeft: Spacing.sm,
-    fontWeight: "500",
   },
   blockchainHeader: {
     flexDirection: "row",
@@ -493,9 +493,8 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   verifyButtonText: {
-    ...Typography.body,
-    color: "#FFFFFF",
-    fontWeight: "600",
+    ...Typography.h4,
+    color: Colors.light.textOnPrimary,
     marginLeft: Spacing.sm,
   },
 });

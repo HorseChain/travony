@@ -1,6 +1,6 @@
 import React, { Component, forwardRef, useEffect, useState } from "react";
 import { View, Text, StyleSheet, ActivityIndicator, Platform } from "react-native";
-import { Spacing } from "@/constants/theme";
+import { Typography, Spacing, Colors } from "@/constants/theme";
 
 let RNMapView: any = null;
 let RNMarker: any = null;
@@ -61,7 +61,7 @@ const MapFallbackView = ({ style, message }: { style?: any; message?: string }) 
   <View style={[styles.fallbackContainer, style]}>
     <View style={styles.fallbackContent}>
       <View style={styles.mapIcon}>
-        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: "#FFFFFF" }} />
+        <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: Colors.light.backgroundRoot }} />
       </View>
       <Text style={styles.fallbackTitle}>Map View</Text>
       <Text style={styles.fallbackMessage}>
@@ -89,7 +89,7 @@ const SafeMapView = forwardRef((props: any, ref: any) => {
   if (!isReady) {
     return (
       <View style={[styles.fallbackContainer, props.style]}>
-        <ActivityIndicator size="large" color="#00B14F" />
+        <ActivityIndicator size="large" color={Colors.travonyGreen} />
         <Text style={styles.loadingText}>Loading map...</Text>
       </View>
     );
@@ -197,7 +197,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#E8F5E9",
+    backgroundColor: Colors.successLight,
   },
   fallbackContent: {
     alignItems: "center",
@@ -207,26 +207,25 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: "#00B14F",
+    backgroundColor: Colors.travonyGreen,
     justifyContent: "center",
     alignItems: "center",
     marginBottom: Spacing.lg,
   },
   fallbackTitle: {
-    fontSize: 20,
-    fontWeight: "600",
-    color: "#1A1A1A",
+    ...Typography.xlBold,
+    color: Colors.light.text,
     marginBottom: Spacing.sm,
   },
   fallbackMessage: {
-    fontSize: 14,
-    color: "#666",
+    ...Typography.bodyMedium,
+    color: Colors.gray,
     textAlign: "center",
     maxWidth: 280,
   },
   loadingText: {
     marginTop: Spacing.md,
-    fontSize: 14,
-    color: "#666",
+    ...Typography.bodyMedium,
+    color: Colors.gray,
   },
 });

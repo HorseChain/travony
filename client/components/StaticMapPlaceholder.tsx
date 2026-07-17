@@ -3,7 +3,7 @@ import { View, StyleSheet, Pressable, Image } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
 
 interface StaticMapPlaceholderProps {
   onEnableMap?: () => void;
@@ -19,14 +19,14 @@ export function StaticMapPlaceholder({
   const { theme, isDark } = useTheme();
 
   return (
-    <View style={[styles.container, { backgroundColor: isDark ? "#1a1a2e" : "#e8f4e8" }]}>
+    <View style={[styles.container, { backgroundColor: isDark ? Colors.mapDarkBg : Colors.mapLightBg }]}>
       <View style={styles.gridPattern}>
         {Array.from({ length: 20 }).map((_, i) => (
           <View 
             key={i} 
             style={[
               styles.gridLine, 
-              { backgroundColor: isDark ? "#2a2a4e" : "#d0e8d0" }
+              { backgroundColor: isDark ? Colors.mapDarkGrid : Colors.mapLightGrid }
             ]} 
           />
         ))}
@@ -42,7 +42,7 @@ export function StaticMapPlaceholder({
             style={[styles.enableButton, { backgroundColor: Colors.travonyGreen }]}
             onPress={onEnableMap}
           >
-            <Ionicons name="map-outline" size={20} color="#fff" />
+            <Ionicons name="map-outline" size={20} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.enableButtonText}>{message}</ThemedText>
           </Pressable>
         ) : (
@@ -52,10 +52,10 @@ export function StaticMapPlaceholder({
         )}
       </View>
       
-      <View style={[styles.roadH, styles.road1, { backgroundColor: isDark ? "#3a3a5e" : "#c0d8c0" }]} />
-      <View style={[styles.roadH, styles.road2, { backgroundColor: isDark ? "#3a3a5e" : "#c0d8c0" }]} />
-      <View style={[styles.roadV, styles.road3, { backgroundColor: isDark ? "#3a3a5e" : "#c0d8c0" }]} />
-      <View style={[styles.roadV, styles.road4, { backgroundColor: isDark ? "#3a3a5e" : "#c0d8c0" }]} />
+      <View style={[styles.roadH, styles.road1, { backgroundColor: isDark ? Colors.mapDarkRoad : Colors.mapLightRoad }]} />
+      <View style={[styles.roadH, styles.road2, { backgroundColor: isDark ? Colors.mapDarkRoad : Colors.mapLightRoad }]} />
+      <View style={[styles.roadV, styles.road3, { backgroundColor: isDark ? Colors.mapDarkRoad : Colors.mapLightRoad }]} />
+      <View style={[styles.roadV, styles.road4, { backgroundColor: isDark ? Colors.mapDarkRoad : Colors.mapLightRoad }]} />
     </View>
   );
 }
@@ -104,12 +104,11 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   enableButtonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "600",
+    color: Colors.light.textOnPrimary,
+    ...Typography.h4,
   },
   readyText: {
-    fontSize: 16,
+    ...Typography.body,
   },
   roadH: {
     position: "absolute",

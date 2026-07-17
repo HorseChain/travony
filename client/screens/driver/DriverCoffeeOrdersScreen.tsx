@@ -16,20 +16,20 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Colors, Typography } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 
 type TabMode = "available" | "my_orders";
 
 const STATUS_COLORS: Record<string, string> = {
-  pending: "#FF9500",
-  accepted: "#007AFF",
-  preparing: "#5856D6",
-  ready: "#34C759",
-  picked_up: "#007AFF",
-  delivering: "#FF9500",
+  pending: Colors.light.warning,
+  accepted: Colors.light.info,
+  preparing: Colors.light.blockchain,
+  ready: Colors.light.evGreen,
+  picked_up: Colors.light.info,
+  delivering: Colors.light.warning,
   delivered: Colors.travonyGreen,
-  cancelled: "#FF3B30",
+  cancelled: Colors.light.error,
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -125,19 +125,19 @@ export default function DriverCoffeeOrdersScreen() {
         <View style={[styles.orderCard, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}>
           <View style={styles.orderHeader}>
             <View style={styles.orderTitleRow}>
-              <Ionicons name="cafe" size={18} color="#8B4513" />
+              <Ionicons name="cafe" size={18} color={theme.textSecondary} />
               <ThemedText style={[styles.orderName, { color: theme.text }]}>
                 {item.coffeeName}
               </ThemedText>
               <View style={[styles.typeBadge, { backgroundColor: statusColor + "20" }]}>
-                <ThemedText style={{ fontSize: 11, color: statusColor, fontWeight: "600" }}>
+                <ThemedText style={{ ...Typography.captionBold, color: statusColor }}>
                   {item.orderType.toUpperCase()}
                 </ThemedText>
               </View>
             </View>
             <View style={[styles.statusBadge, { backgroundColor: statusColor + "15" }]}>
               <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-              <ThemedText style={{ fontSize: 12, color: statusColor, fontWeight: "600" }}>
+              <ThemedText style={{ ...Typography.captionBold, color: statusColor }}>
                 {STATUS_LABELS[item.status] || item.status}
               </ThemedText>
             </View>
@@ -145,16 +145,16 @@ export default function DriverCoffeeOrdersScreen() {
 
           <View style={styles.orderDetails}>
             <View style={styles.detailRow}>
-              <ThemedText style={{ fontSize: 13, color: theme.textSecondary }}>
+              <ThemedText style={{ ...Typography.labelHeavy, color: theme.textSecondary }}>
                 Size: {item.coffeeSize} | Qty: {item.quantity}
               </ThemedText>
-              <ThemedText style={{ fontSize: 15, color: theme.primary, fontWeight: "700" }}>
+              <ThemedText style={{ ...Typography.labelHeavy, color: theme.text }}>
                 {parseFloat(item.totalAmount).toFixed(2)} {item.currency}
               </ThemedText>
             </View>
 
             {item.specialInstructions ? (
-              <ThemedText style={{ fontSize: 12, color: theme.textMuted, marginTop: 4 }} numberOfLines={2}>
+              <ThemedText style={{ ...Typography.small, color: theme.textMuted, marginTop: 4 }} numberOfLines={2}>
                 Note: {item.specialInstructions}
               </ThemedText>
             ) : null}
@@ -162,16 +162,16 @@ export default function DriverCoffeeOrdersScreen() {
             {item.deliveryAddress ? (
               <View style={styles.addressRow}>
                 <Ionicons name="location-outline" size={14} color={theme.textSecondary} />
-                <ThemedText style={{ fontSize: 12, color: theme.textSecondary, flex: 1 }} numberOfLines={1}>
+                <ThemedText style={{ ...Typography.small, color: theme.textSecondary, flex: 1 }} numberOfLines={1}>
                   {item.deliveryAddress}
                 </ThemedText>
               </View>
             ) : null}
 
             {item.giftMessage ? (
-              <View style={[styles.giftMessageBox, { backgroundColor: "#FF2D55" + "10", borderColor: "#FF2D55" + "30" }]}>
-                <Ionicons name="gift-outline" size={14} color="#FF2D55" />
-                <ThemedText style={{ fontSize: 12, color: "#FF2D55", flex: 1 }}>
+              <View style={[styles.giftMessageBox, { backgroundColor: theme.error + "10", borderColor: theme.error + "30" }]}>
+                <Ionicons name="gift-outline" size={14} color={theme.error} />
+                <ThemedText style={{ ...Typography.small, color: theme.error, flex: 1 }}>
                   {item.recipientName ? `To: ${item.recipientName} - ` : ""}{item.giftMessage}
                 </ThemedText>
               </View>
@@ -186,10 +186,10 @@ export default function DriverCoffeeOrdersScreen() {
                 style={[styles.actionButton, { backgroundColor: Colors.travonyGreen }]}
               >
                 {acceptMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
                 ) : (
                   <>
-                    <Ionicons name="checkmark-circle-outline" size={18} color="#FFFFFF" />
+                    <Ionicons name="checkmark-circle-outline" size={18} color={Colors.light.textOnPrimary} />
                     <ThemedText style={styles.actionButtonText}>Accept Order</ThemedText>
                   </>
                 )}
@@ -203,10 +203,10 @@ export default function DriverCoffeeOrdersScreen() {
                 style={[styles.actionButton, { backgroundColor: theme.primary }]}
               >
                 {updateStatusMutation.isPending ? (
-                  <ActivityIndicator size="small" color="#FFFFFF" />
+                  <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
                 ) : (
                   <>
-                    <Ionicons name={nextAction.icon as any} size={18} color="#FFFFFF" />
+                    <Ionicons name={nextAction.icon as any} size={18} color={Colors.light.textOnPrimary} />
                     <ThemedText style={styles.actionButtonText}>{nextAction.label}</ThemedText>
                   </>
                 )}
@@ -226,7 +226,7 @@ export default function DriverCoffeeOrdersScreen() {
         <ThemedText style={[styles.emptyTitle, { color: theme.text }]}>
           {tab === "available" ? "No Available Orders" : "No Orders Yet"}
         </ThemedText>
-        <ThemedText style={{ color: theme.textSecondary, fontSize: 13, textAlign: "center" }}>
+        <ThemedText style={{ color: theme.textSecondary, ...Typography.labelLight, textAlign: "center" }}>
           {tab === "available"
             ? "New coffee orders from riders will appear here."
             : "Orders you accept will show up here."}
@@ -243,7 +243,7 @@ export default function DriverCoffeeOrdersScreen() {
             onPress={() => setTab("available")}
             style={[styles.tabButton, tab === "available" ? { backgroundColor: theme.primary } : null]}
           >
-            <ThemedText style={{ color: tab === "available" ? "#FFFFFF" : theme.text, fontSize: 13, fontWeight: "600" }}>
+            <ThemedText style={{ color: tab === "available" ? theme.textOnPrimary : theme.text, ...Typography.labelBold }}>
               Available
             </ThemedText>
           </Pressable>
@@ -251,7 +251,7 @@ export default function DriverCoffeeOrdersScreen() {
             onPress={() => setTab("my_orders")}
             style={[styles.tabButton, tab === "my_orders" ? { backgroundColor: theme.primary } : null]}
           >
-            <ThemedText style={{ color: tab === "my_orders" ? "#FFFFFF" : theme.text, fontSize: 13, fontWeight: "600" }}>
+            <ThemedText style={{ color: tab === "my_orders" ? theme.textOnPrimary : theme.text, ...Typography.labelBold }}>
               My Orders
             </ThemedText>
           </Pressable>
@@ -321,8 +321,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   orderName: {
-    fontSize: 16,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
     flex: 1,
   },
   typeBadge: {
@@ -379,9 +378,8 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   actionButtonText: {
-    color: "#FFFFFF",
-    fontSize: 14,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.bodyHeavy,
   },
   emptyState: {
     flex: 1,
@@ -391,7 +389,6 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
 });

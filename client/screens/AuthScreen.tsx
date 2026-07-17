@@ -201,13 +201,13 @@ export default function AuthScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.primaryButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.9 : 1 },
+              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={handleAuth}
             disabled={isLoading}
           >
             {isLoading ? (
-              <ActivityIndicator color="#FFFFFF" />
+              <ActivityIndicator color={theme.textOnPrimary} />
             ) : (
               <ThemedText style={styles.primaryButtonText}>
                 {isLogin ? "Sign In" : isDriver ? "Register as Driver" : "Create Account"}
@@ -318,7 +318,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   divider: {
     flexDirection: "row",

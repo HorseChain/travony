@@ -31,7 +31,7 @@ type Region = {
 import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Shadows, Colors } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "SelectLocation">;
@@ -376,7 +376,7 @@ export default function SelectLocationScreen() {
           </View>
           <View style={[styles.markerFixed]} pointerEvents="none">
             <View style={[styles.markerPin, { backgroundColor: type === "pickup" ? theme.primary : theme.error }]}>
-              <Ionicons name="location-outline" size={20} color="#FFFFFF" />
+              <Ionicons name="location-outline" size={20} color={Colors.light.textOnPrimary} />
             </View>
             <View style={[styles.markerShadow, { backgroundColor: "rgba(0,0,0,0.2)" }]} />
           </View>
@@ -409,7 +409,7 @@ export default function SelectLocationScreen() {
         />
         <View style={[styles.markerFixed]}>
           <View style={[styles.markerPin, { backgroundColor: type === "pickup" ? theme.primary : theme.error }]}>
-            <Ionicons name="location-outline" size={20} color="#FFFFFF" />
+            <Ionicons name="location-outline" size={20} color={Colors.light.textOnPrimary} />
           </View>
           <View style={[styles.markerShadow, { backgroundColor: "rgba(0,0,0,0.2)" }]} />
         </View>
@@ -499,7 +499,7 @@ export default function SelectLocationScreen() {
             styles.confirmButton,
             {
               backgroundColor: theme.primary,
-              opacity: !selectedLocation ? 0.5 : pressed ? 0.9 : 1,
+              opacity: !selectedLocation ? 0.5 : pressed ? 0.8 : 1,
             },
           ]}
           onPress={handleConfirmLocation}
@@ -572,9 +572,8 @@ const styles = StyleSheet.create({
     ...Shadows.card,
   },
   currentLocationText: {
-    ...Typography.body,
+    ...Typography.bodySmallMedium,
     marginLeft: Spacing.md,
-    fontWeight: "500",
   },
   resultsContainer: {
     marginTop: Spacing.sm,
@@ -583,8 +582,7 @@ const styles = StyleSheet.create({
     ...Shadows.card,
   },
   resultsHeader: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
     paddingHorizontal: Spacing.lg,
     paddingTop: Spacing.md,
     paddingBottom: Spacing.sm,
@@ -654,7 +652,7 @@ const styles = StyleSheet.create({
   },
   confirmButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   webMapFallback: {
     alignItems: "center",

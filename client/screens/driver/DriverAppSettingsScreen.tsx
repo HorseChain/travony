@@ -395,7 +395,7 @@ export default function DriverAppSettingsScreen() {
                         onPress={() => togglePauselPrayer(p.key)}
                       >
                         <ThemedText
-                          style={[styles.prayerChipText, { color: active ? "#fff" : theme.textSecondary }]}
+                          style={[styles.prayerChipText, { color: active ? theme.textOnPrimary : theme.textSecondary }]}
                         >
                           {p.label}
                         </ThemedText>
@@ -448,8 +448,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   sectionHeader: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
     marginBottom: Spacing.sm,
     marginLeft: Spacing.sm,
   },
@@ -477,8 +476,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   settingLabel: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   settingSubtitle: {
     ...Typography.small,
@@ -510,8 +508,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   ratingValue: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   slider: {
     width: "100%",
@@ -553,7 +550,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   prayerChipText: {
-    fontSize: 13,
-    fontWeight: "600",
+    ...Typography.labelBold,
   },
 });

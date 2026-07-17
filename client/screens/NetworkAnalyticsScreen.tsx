@@ -13,11 +13,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 
 const TIER_COLORS: Record<string, string> = {
-  bronze: "#CD7F32",
-  silver: "#C0C0C0",
-  gold: "#FFD700",
-  platinum: "#E5E4E2",
-  diamond: "#B9F2FF",
+  bronze: Colors.tierBronze,
+  silver: Colors.tierSilver,
+  gold: Colors.tierGold,
+  platinum: Colors.tierPlatinum,
+  diamond: Colors.tierDiamond,
 };
 
 const TIER_ICONS: Record<string, string> = {
@@ -252,8 +252,7 @@ const styles = StyleSheet.create({
     textTransform: "capitalize",
   },
   scoreText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   progressContainer: {
     gap: Spacing.xs,
@@ -292,8 +291,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   activityHub: {
-    ...Typography.bodyMedium,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
   activityMeta: {
     ...Typography.caption,

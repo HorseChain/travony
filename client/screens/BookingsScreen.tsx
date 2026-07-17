@@ -30,11 +30,11 @@ interface Booking {
 }
 
 const statusColors: Record<string, string> = {
-  completed: "#43A047",
-  cancelled: "#E53935",
-  pending: "#FB8C00",
-  accepted: "#00B14F",
-  in_progress: "#00B14F",
+  completed: Colors.light.success,
+  cancelled: Colors.light.error,
+  pending: Colors.light.warning,
+  accepted: Colors.travonyGreen,
+  in_progress: Colors.travonyGreen,
 };
 
 const statusLabels: Record<string, string> = {
@@ -248,8 +248,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   statusText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   bookingDate: {
     ...Typography.small,

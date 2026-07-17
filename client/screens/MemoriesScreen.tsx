@@ -26,7 +26,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useTheme } from "@/hooks/useTheme";
 import { useLiteMode } from "@/hooks/useLiteMode";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 interface Memory {
   rideId: string;
@@ -243,11 +243,11 @@ function MemoryCard({ memory, onShare }: { memory: Memory; onShare: (m: Memory) 
           <Pressable
             style={({ pressed }) => [
               styles.shareButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.85 : 1 },
+              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={() => onShare(memory)}
           >
-            <Ionicons name="share-social-outline" size={14} color="#FFFFFF" />
+            <Ionicons name="share-social-outline" size={14} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.shareButtonText}>Share</ThemedText>
           </Pressable>
         )}
@@ -413,16 +413,16 @@ export default function MemoriesScreen() {
               <Pressable
                 style={({ pressed }) => [
                   styles.publishButton,
-                  { backgroundColor: theme.primary, opacity: pressed || publishMutation.isPending ? 0.85 : 1 },
+                  { backgroundColor: theme.primary, opacity: pressed || publishMutation.isPending ? 0.8 : 1 },
                 ]}
                 onPress={() => publishMutation.mutate()}
                 disabled={publishMutation.isPending}
               >
                 {publishMutation.isPending ? (
-                  <ActivityIndicator color="#FFFFFF" />
+                  <ActivityIndicator color={Colors.light.textOnPrimary} />
                 ) : (
                   <>
-                    <Ionicons name="share-social-outline" size={16} color="#FFFFFF" />
+                    <Ionicons name="share-social-outline" size={16} color={Colors.light.textOnPrimary} />
                     <ThemedText style={styles.publishButtonText}>Share to feed</ThemedText>
                   </>
                 )}
@@ -454,13 +454,12 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   highlightLabel: {
-    ...Typography.small,
+    ...Typography.smallBold,
     color: "rgba(255,255,255,0.85)",
-    fontWeight: "600",
   },
   highlightBig: {
     ...Typography.h3,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
     marginTop: 4,
   },
   highlightSub: {
@@ -479,8 +478,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   memoryDate: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   roleChip: {
     flexDirection: "row",
@@ -491,8 +489,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   roleChipText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   mapWrap: {
     height: 140,
@@ -517,8 +514,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   tagText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   memoryBottom: {
     flexDirection: "row",
@@ -543,8 +539,7 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   postedText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   shareButton: {
     flexDirection: "row",
@@ -555,9 +550,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   shareButtonText: {
-    ...Typography.small,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...Typography.smallHeavy,
+    color: Colors.light.textOnPrimary,
   },
   emptyState: {
     alignItems: "center",
@@ -612,8 +606,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   addPhotoText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   photoPreviewWrap: {
     marginTop: Spacing.md,
@@ -642,8 +635,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.lg,
   },
   publishButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
-    color: "#FFFFFF",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
 });

@@ -244,27 +244,27 @@ export default function ConfirmRideScreen() {
           style={({ pressed }) => [
             styles.evOptionCard,
             {
-              backgroundColor: evPreferred ? "#16a34a" : theme.card,
-              borderColor: evPreferred ? "#16a34a" : theme.border,
-              opacity: pressed ? 0.9 : 1,
+              backgroundColor: evPreferred ? theme.evGreen : theme.card,
+              borderColor: evPreferred ? theme.evGreen : theme.border,
+              opacity: pressed ? 0.8 : 1,
             },
           ]}
           onPress={() => setEvPreferred(!evPreferred)}
         >
-          <View style={[styles.evOptionIcon, { backgroundColor: evPreferred ? "rgba(255,255,255,0.2)" : "#16a34a20" }]}>
-            <Ionicons name="flash" size={22} color={evPreferred ? "#fff" : "#16a34a"} />
+          <View style={[styles.evOptionIcon, { backgroundColor: evPreferred ? "rgba(255,255,255,0.2)" : theme.evGreen + "20" }]}>
+            <Ionicons name="flash" size={22} color={evPreferred ? theme.textOnPrimary : theme.evGreen} />
           </View>
           <View style={styles.evOptionText}>
-            <ThemedText style={[styles.evOptionTitle, evPreferred ? { color: "#fff" } : {}]}>
+            <ThemedText style={[styles.evOptionTitle, evPreferred ? { color: theme.textOnPrimary } : {}]}>
               EV Ride
             </ThemedText>
-            <ThemedText style={[styles.evOptionSubtitle, evPreferred ? { color: "rgba(255,255,255,0.8)" } : { color: theme.textMuted }]}>
+            <ThemedText style={[styles.evOptionSubtitle, evPreferred ? { color: theme.textOnPrimary, opacity: 0.8 } : { color: theme.textMuted }]}>
               {evAvailability.evDriversAvailable} electric {evAvailability.evDriversAvailable === 1 ? "vehicle" : "vehicles"} nearby
             </ThemedText>
           </View>
           {evPreferred ? (
             <View style={styles.evSelectedBadge}>
-              <Ionicons name="checkmark-circle" size={20} color="#fff" />
+              <Ionicons name="checkmark-circle" size={20} color={theme.textOnPrimary} />
             </View>
           ) : null}
         </Pressable>
@@ -285,7 +285,7 @@ export default function ConfirmRideScreen() {
                 backgroundColor: theme.card,
                 borderColor: selectedVehicle.id === vehicle.id ? theme.primary : theme.border,
                 borderWidth: selectedVehicle.id === vehicle.id ? 2 : 1,
-                opacity: pressed ? 0.9 : 1,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => setSelectedVehicle(vehicle)}
@@ -312,7 +312,7 @@ export default function ConfirmRideScreen() {
                 backgroundColor: theme.card,
                 borderColor: selectedPayment.id === payment.id ? theme.primary : theme.border,
                 borderWidth: selectedPayment.id === payment.id ? 2 : 1,
-                opacity: pressed ? 0.9 : 1,
+                opacity: pressed ? 0.8 : 1,
               },
             ]}
             onPress={() => setSelectedPayment(payment)}
@@ -408,9 +408,9 @@ export default function ConfirmRideScreen() {
       </Card>
 
       {evPreferred ? (
-        <View style={[styles.evConfirmBadge, { backgroundColor: "#16a34a15", borderColor: "#16a34a30" }]}>
-          <Ionicons name="flash" size={16} color="#16a34a" />
-          <ThemedText style={[styles.evConfirmText, { color: "#16a34a" }]}>
+        <View style={[styles.evConfirmBadge, { backgroundColor: theme.evGreen + "15", borderColor: theme.evGreen + "30" }]}>
+          <Ionicons name="flash" size={16} color={theme.evGreen} />
+          <ThemedText style={[styles.evConfirmText, { color: theme.evGreen }]}>
             EV Preferred — system will match the nearest electric vehicle
           </ThemedText>
         </View>
@@ -420,15 +420,15 @@ export default function ConfirmRideScreen() {
         style={({ pressed }) => [
           styles.bookButton,
           {
-            backgroundColor: evPreferred ? "#16a34a" : theme.primary,
-            opacity: bookRideMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+            backgroundColor: evPreferred ? theme.evGreen : theme.primary,
+            opacity: bookRideMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
           },
         ]}
         onPress={handleBookRide}
         disabled={bookRideMutation.isPending}
       >
         {bookRideMutation.isPending ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={theme.textOnPrimary} />
         ) : (
           <ThemedText style={styles.bookButtonText}>
             {evPreferred ? "Request EV Preferred" : "Request Movement"}
@@ -518,13 +518,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   vehicleName: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
     marginBottom: Spacing.xs,
   },
   vehiclePrice: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   paymentList: {
     flexDirection: "row",
@@ -540,9 +538,8 @@ const styles = StyleSheet.create({
     marginRight: Spacing.sm,
   },
   paymentName: {
-    ...Typography.bodyMedium,
+    ...Typography.bodyMediumMedium,
     marginLeft: Spacing.sm,
-    fontWeight: "500",
   },
   fareCard: {
     padding: Spacing.lg,
@@ -557,8 +554,7 @@ const styles = StyleSheet.create({
     ...Typography.bodyMedium,
   },
   fareValue: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   fareTotalRow: {
     flexDirection: "row",
@@ -591,8 +587,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   surgeText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginLeft: Spacing.xs,
   },
   transparencyToggle: {
@@ -603,8 +598,7 @@ const styles = StyleSheet.create({
     paddingTop: Spacing.sm,
   },
   transparencyToggleText: {
-    ...Typography.small,
-    fontWeight: "500",
+    ...Typography.smallMedium,
     marginHorizontal: Spacing.xs,
   },
   transparencySection: {
@@ -626,8 +620,7 @@ const styles = StyleSheet.create({
     ...Typography.small,
   },
   transparencyValue: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   blockchainBadge: {
     flexDirection: "row",
@@ -637,8 +630,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   blockchainText: {
-    ...Typography.small,
-    fontWeight: "500",
+    ...Typography.smallMedium,
     marginLeft: Spacing.xs,
   },
   bookButton: {
@@ -649,7 +641,7 @@ const styles = StyleSheet.create({
   },
   bookButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   evOptionCard: {
     flexDirection: "row",
@@ -671,8 +663,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   evOptionTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   evOptionSubtitle: {
     ...Typography.small,
@@ -690,8 +681,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   evConfirmText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
     marginLeft: Spacing.sm,
     flex: 1,
   },

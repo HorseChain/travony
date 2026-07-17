@@ -18,7 +18,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/query-client";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Typography, Spacing, BorderRadius, Colors } from "@/constants/theme";
 
 interface RideMessage {
   id: string;
@@ -221,7 +221,7 @@ export function RideConversation({
           <ThemedText
             style={[
               styles.bubbleText,
-              { color: isMine ? "#FFFFFF" : theme.text },
+              { color: isMine ? Colors.light.textOnPrimary : theme.text },
             ]}
           >
             {display}
@@ -340,14 +340,14 @@ export function RideConversation({
             styles.sendBtn,
             {
               backgroundColor: text.trim() ? theme.primary : theme.card,
-              opacity: sendMutation.isPending ? 0.6 : 1,
+              opacity: sendMutation.isPending ? 0.5 : 1,
             },
           ]}
         >
           <Ionicons
             name="send"
             size={20}
-            color={text.trim() ? "#FFFFFF" : theme.textMuted}
+            color={text.trim() ? Colors.light.textOnPrimary : theme.textMuted}
           />
         </Pressable>
       </View>
@@ -386,7 +386,7 @@ export function RideConversation({
                   >
                     <View style={{ flex: 1 }}>
                       <ThemedText
-                        style={[styles.langNative, { color: selected ? "#FFFFFF" : theme.text }]}
+                        style={[styles.langNative, { color: selected ? Colors.light.textOnPrimary : theme.text }]}
                       >
                         {item.nativeName}
                       </ThemedText>
@@ -400,7 +400,7 @@ export function RideConversation({
                       </ThemedText>
                     </View>
                     {selected ? (
-                      <Ionicons name="checkmark-circle" size={22} color="#FFFFFF" />
+                      <Ionicons name="checkmark-circle" size={22} color={Colors.light.textOnPrimary} />
                     ) : null}
                   </Pressable>
                 );
@@ -462,8 +462,8 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.sm,
     gap: Spacing.sm,
   },
-  title: { fontSize: 16, fontWeight: "700" },
-  subtitle: { fontSize: 11, marginTop: 2 },
+  title: { ...Typography.h4Heavy },
+  subtitle: { ...Typography.caption, marginTop: 2 },
   langBtn: {
     flexDirection: "row",
     alignItems: "center",
@@ -472,7 +472,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     borderRadius: 18,
   },
-  langCode: { fontSize: 12, fontWeight: "700" },
+  langCode: { ...Typography.smallHeavy },
   closeBtn: {
     width: 36,
     height: 36,
@@ -481,7 +481,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   center: { flex: 1, alignItems: "center", justifyContent: "center", paddingVertical: Spacing["2xl"] },
-  emptyText: { marginTop: Spacing.sm, fontSize: 14 },
+  emptyText: { marginTop: Spacing.sm, ...Typography.bodyMedium },
   listContent: { flexGrow: 1, paddingVertical: Spacing.sm },
   bubbleRow: { flexDirection: "row", marginVertical: 3 },
   bubble: {
@@ -490,14 +490,14 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.lg,
   },
-  bubbleText: { fontSize: 14, lineHeight: 20 },
+  bubbleText: { ...Typography.bodyMedium, lineHeight: 20 },
   quickRow: { gap: Spacing.sm, paddingVertical: Spacing.sm },
   quickChip: {
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
   },
-  quickText: { fontSize: 12, fontWeight: "600" },
+  quickText: { ...Typography.smallBold },
   inputRow: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingTop: Platform.OS === "ios" ? 12 : 8,
     paddingBottom: Platform.OS === "ios" ? 12 : 8,
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   sendBtn: {
     width: 44,
@@ -528,7 +528,7 @@ const styles = StyleSheet.create({
     borderTopRightRadius: BorderRadius.xl,
     paddingHorizontal: Spacing.lg,
   },
-  langTitle: { fontSize: 17, fontWeight: "700", marginTop: Spacing.xs },
+  langTitle: { ...Typography.bodyLargeHeavy, marginTop: Spacing.xs },
   langRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -537,6 +537,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
     marginBottom: Spacing.sm,
   },
-  langNative: { fontSize: 15, fontWeight: "600" },
-  langName: { fontSize: 12, marginTop: 2 },
+  langNative: { ...Typography.bodySmallBold },
+  langName: { ...Typography.small, marginTop: 2 },
 });

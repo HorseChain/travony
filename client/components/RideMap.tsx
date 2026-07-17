@@ -70,31 +70,31 @@ interface RideMapProps {
 }
 
 const TRAVONY_GREEN = Colors.travonyGreen;
-const TRAVONY_DARK_GREEN = "#008B3D";
+const TRAVONY_DARK_GREEN = Colors.travonyDarkGreen;
 const ERROR_RED = Colors.light.error;
-const ROUTE_BLUE = "#4285F4";
+const ROUTE_BLUE = Colors.reactionLike;
 
 const lightMapStyle = [
   { featureType: "poi", stylers: [{ visibility: "off" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
   { featureType: "road", elementType: "geometry", stylers: [{ lightness: 5 }] },
   { featureType: "road", elementType: "labels.icon", stylers: [{ visibility: "off" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#aadaff" }] },
-  { featureType: "landscape", elementType: "geometry", stylers: [{ color: "#f5f5f5" }] },
-  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: "#ffffff" }] },
-  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: "#e0e0e0" }] },
-  { featureType: "road.arterial", elementType: "geometry.fill", stylers: [{ color: "#ffffff" }] },
-  { featureType: "road.local", elementType: "geometry.fill", stylers: [{ color: "#ffffff" }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: Colors.mapWater }] },
+  { featureType: "landscape", elementType: "geometry", stylers: [{ color: Colors.mapLightSurface }] },
+  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: Colors.light.backgroundRoot }] },
+  { featureType: "road.highway", elementType: "geometry.stroke", stylers: [{ color: Colors.mapRoadStroke }] },
+  { featureType: "road.arterial", elementType: "geometry.fill", stylers: [{ color: Colors.light.backgroundRoot }] },
+  { featureType: "road.local", elementType: "geometry.fill", stylers: [{ color: Colors.light.backgroundRoot }] },
 ];
 
 const darkMapStyle = [
-  { elementType: "geometry", stylers: [{ color: "#1d1d1d" }] },
-  { elementType: "labels.text.fill", stylers: [{ color: "#8a8a8a" }] },
-  { elementType: "labels.text.stroke", stylers: [{ color: "#1d1d1d" }] },
-  { featureType: "road", elementType: "geometry.fill", stylers: [{ color: "#2a2a2a" }] },
-  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: "#1d1d1d" }] },
-  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: "#3a3a3a" }] },
-  { featureType: "water", elementType: "geometry", stylers: [{ color: "#0e1626" }] },
+  { elementType: "geometry", stylers: [{ color: Colors.mapDarkElement }] },
+  { elementType: "labels.text.fill", stylers: [{ color: Colors.mapDarkGrid }] },
+  { elementType: "labels.text.stroke", stylers: [{ color: Colors.mapDarkElement }] },
+  { featureType: "road", elementType: "geometry.fill", stylers: [{ color: Colors.mapDarkGrid }] },
+  { featureType: "road", elementType: "geometry.stroke", stylers: [{ color: Colors.mapDarkElement }] },
+  { featureType: "road.highway", elementType: "geometry.fill", stylers: [{ color: Colors.mapDarkRoad }] },
+  { featureType: "water", elementType: "geometry", stylers: [{ color: Colors.mapDarkBg }] },
   { featureType: "poi", stylers: [{ visibility: "off" }] },
   { featureType: "transit", stylers: [{ visibility: "off" }] },
 ];
@@ -137,8 +137,9 @@ function DropoffMarker() {
 }
 
 function EvHubMapMarker({ name, availablePorts, totalChargingPorts }: { name: string; availablePorts: number; totalChargingPorts: number }) {
+  const { theme } = useTheme();
   const pct = totalChargingPorts > 0 ? availablePorts / totalChargingPorts : 0;
-  const dotColor = pct > 0.5 ? "#16a34a" : pct > 0.2 ? "#f59e0b" : "#ef4444";
+  const dotColor = pct > 0.5 ? theme.evGreen : pct > 0.2 ? Colors.amber : theme.error;
   return (
     <View style={styles.evHubMarkerContainer}>
       <View style={[styles.evHubMarkerBubble, { borderColor: dotColor }]}>
@@ -151,11 +152,11 @@ function EvHubMapMarker({ name, availablePorts, totalChargingPorts }: { name: st
 }
 
 function ChargerMapMarker({ isOperational = true }: { isOperational?: boolean }) {
-  const tint = isOperational ? "#0EA5A4" : "#9CA3AF";
+  const tint = isOperational ? Colors.evCharger : Colors.chargerGray;
   return (
     <View style={styles.chargerMarkerContainer}>
       <View style={[styles.chargerMarkerBubble, { backgroundColor: tint }]}>
-        <Ionicons name={"battery-charging" as keyof typeof Ionicons.glyphMap} size={13} color="#FFFFFF" />
+        <Ionicons name={"battery-charging" as keyof typeof Ionicons.glyphMap} size={13} color={Colors.light.textOnPrimary} />
       </View>
       <View style={[styles.chargerMarkerPin, { backgroundColor: tint }]} />
     </View>
@@ -200,7 +201,7 @@ function DriverMarker({ heading = 0, vehicleType = "car" }: { heading?: number; 
       <RNAnimated.View style={[styles.driverPulseRing, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
       <RNAnimated.View style={[styles.driverVehicle, { transform: [{ rotate: rotationStr }] }]}>
         <View style={styles.driverIconBg}>
-          <Ionicons name={getVehicleIcon()} size={20} color="#FFFFFF" />
+          <Ionicons name={getVehicleIcon()} size={20} color={Colors.light.textOnPrimary} />
         </View>
         <View style={styles.driverArrow} />
       </RNAnimated.View>
@@ -438,12 +439,12 @@ export default function RideMap({
           ) : null}
           {eta ? (
             <View style={[styles.etaBadgeWeb, { backgroundColor: TRAVONY_GREEN }]}>
-              <Ionicons name="time-outline" size={16} color="#FFFFFF" />
+              <Ionicons name="time-outline" size={16} color={Colors.light.textOnPrimary} />
               <ThemedText style={styles.etaBadgeText}>{eta} min</ThemedText>
               {distance ? (
                 <>
                   <View style={styles.etaDivider} />
-                  <Ionicons name="navigate-outline" size={16} color="#FFFFFF" />
+                  <Ionicons name="navigate-outline" size={16} color={Colors.light.textOnPrimary} />
                   <ThemedText style={styles.etaBadgeText}>{distance.toFixed(1)} km</ThemedText>
                 </>
               ) : null}
@@ -485,7 +486,7 @@ export default function RideMap({
         mapPadding={{ top: 0, right: 0, bottom: 0, left: 0 }}
         loadingEnabled={true}
         loadingIndicatorColor={TRAVONY_GREEN}
-        loadingBackgroundColor={isDark ? "#1d1d1d" : "#f5f5f5"}
+        loadingBackgroundColor={isDark ? Colors.mapDarkElement : Colors.mapLightSurface}
         moveOnMarkerPress={false}
       >
         {showRoute && routeGradient && routeGradient.length > 1 && Polyline ? (
@@ -493,7 +494,7 @@ export default function RideMap({
             <Polyline
               coordinates={routeGradient}
               strokeWidth={6}
-              strokeColor={isDark ? "#4a4a4a" : "#e0e0e0"}
+              strokeColor={isDark ? Colors.mapStrokeDark : Colors.mapRoadStroke}
               lineCap="round"
               lineJoin="round"
             />
@@ -510,7 +511,7 @@ export default function RideMap({
             <Polyline
               coordinates={fallbackRoute}
               strokeWidth={5}
-              strokeColor={isDark ? "#4a4a4a" : "#e0e0e0"}
+              strokeColor={isDark ? Colors.mapStrokeDark : Colors.mapRoadStroke}
               lineDashPattern={[12, 8]}
               lineCap="round"
             />
@@ -607,7 +608,7 @@ export default function RideMap({
       </MapView>
 
       {!isMapReady ? (
-        <View style={[styles.loadingOverlay, { backgroundColor: isDark ? "#1d1d1d" : "#f5f5f5" }]}>
+        <View style={[styles.loadingOverlay, { backgroundColor: isDark ? Colors.mapDarkElement : Colors.mapLightSurface }]}>
           <ActivityIndicator size="large" color={TRAVONY_GREEN} />
           <ThemedText style={[styles.loadingText, { color: theme.textSecondary }]}>
             Loading map...
@@ -691,14 +692,14 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.backgroundRoot,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
     borderColor: TRAVONY_GREEN,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
         shadowRadius: 4,
@@ -724,12 +725,12 @@ const styles = StyleSheet.create({
     width: 28,
     height: 28,
     borderRadius: 6,
-    backgroundColor: "#1a1a1a",
+    backgroundColor: Colors.mapDarkMarker,
     alignItems: "center",
     justifyContent: "center",
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.25,
         shadowRadius: 4,
@@ -741,12 +742,12 @@ const styles = StyleSheet.create({
   dropoffSquare: {
     width: 10,
     height: 10,
-    backgroundColor: "#FFFFFF",
+    backgroundColor: Colors.light.backgroundRoot,
   },
   dropoffPin: {
     width: 4,
     height: 10,
-    backgroundColor: "#1a1a1a",
+    backgroundColor: Colors.mapDarkMarker,
     marginTop: -2,
   },
   evHubMarkerContainer: {
@@ -763,7 +764,7 @@ const styles = StyleSheet.create({
     gap: 3,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.2,
         shadowRadius: 3,
@@ -781,7 +782,7 @@ const styles = StyleSheet.create({
     width: 3,
     height: 8,
     borderRadius: 1.5,
-    backgroundColor: "#555",
+    backgroundColor: Colors.mapPinGray,
     marginTop: -1,
   },
   chargerMarkerContainer: {
@@ -794,10 +795,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 2,
-    borderColor: "#FFFFFF",
+    borderColor: Colors.light.backgroundRoot,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.25,
         shadowRadius: 3,
@@ -836,10 +837,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 3,
-    borderColor: "#FFFFFF",
+    borderColor: Colors.light.backgroundRoot,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 3 },
         shadowOpacity: 0.3,
         shadowRadius: 5,
@@ -897,7 +898,7 @@ const styles = StyleSheet.create({
     backgroundColor: TRAVONY_GREEN,
     marginRight: Spacing.md,
     borderWidth: 3,
-    borderColor: "#FFFFFF",
+    borderColor: Colors.light.backgroundRoot,
     ...Platform.select({
       ios: {
         shadowColor: TRAVONY_GREEN,
@@ -913,7 +914,7 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     borderRadius: 3,
-    backgroundColor: "#1a1a1a",
+    backgroundColor: Colors.mapDarkMarker,
     marginRight: Spacing.md,
   },
   locationConnector: {
@@ -939,9 +940,8 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   etaBadgeText: {
-    ...Typography.bodyMedium,
-    color: "#FFFFFF",
-    fontWeight: "600",
+    ...Typography.bodyBold,
+    color: Colors.light.textOnPrimary,
   },
   etaDivider: {
     width: 1,
@@ -972,7 +972,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 6,
@@ -989,7 +989,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.12,
         shadowRadius: 8,
@@ -1011,7 +1011,7 @@ const styles = StyleSheet.create({
   },
   etaLabel: {
     ...Typography.small,
-    fontSize: 11,
+    ...Typography.caption,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 2,
@@ -1021,13 +1021,11 @@ const styles = StyleSheet.create({
     alignItems: "baseline",
   },
   etaValue: {
-    fontSize: 24,
-    fontWeight: "700",
+    ...Typography.xxlHeavy,
     lineHeight: 28,
   },
   etaUnit: {
-    fontSize: 14,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
     marginLeft: 3,
   },
   etaSeparator: {
@@ -1037,7 +1035,6 @@ const styles = StyleSheet.create({
     alignSelf: "center",
   },
   etaDistance: {
-    fontSize: 14,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
 });

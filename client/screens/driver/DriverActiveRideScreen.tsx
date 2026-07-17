@@ -140,7 +140,7 @@ const progressStyles = StyleSheet.create({
   label: {
     ...Typography.small,
     textAlign: "center",
-    fontSize: 10,
+    ...Typography.micro,
   },
   line: {
     position: "absolute",
@@ -549,18 +549,18 @@ export default function DriverActiveRideScreen() {
                   AED {ride.estimatedFare || "0.00"}
                 </ThemedText>
                 {ride.paymentMethod === "cash" ? (
-                  <View style={[styles.paymentBadge, { backgroundColor: "#F59E0B20" }]}>
-                    <Ionicons name="cash-outline" size={12} color="#F59E0B" />
-                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#F59E0B" }}>Cash</ThemedText>
+                  <View style={[styles.paymentBadge, { backgroundColor: theme.warning + "20" }]}>
+                    <Ionicons name="cash-outline" size={12} color={theme.warning} />
+                    <ThemedText style={{ ...Typography.smallBold, color: theme.warning }}>Cash</ThemedText>
                   </View>
                 ) : ride.paymentMethod === "card" ? (
-                  <View style={[styles.paymentBadge, { backgroundColor: "#4F46E520" }]}>
-                    <Ionicons name="card-outline" size={12} color="#4F46E5" />
-                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#4F46E5" }}>Card</ThemedText>
+                  <View style={[styles.paymentBadge, { backgroundColor: theme.blockchain + "20" }]}>
+                    <Ionicons name="card-outline" size={12} color={theme.blockchain} />
+                    <ThemedText style={{ ...Typography.smallBold, color: theme.blockchain }}>Card</ThemedText>
                   </View>
                 ) : ride.paymentMethod === "usdt" ? (
-                  <View style={[styles.paymentBadge, { backgroundColor: "#26A17B20" }]}>
-                    <ThemedText style={{ fontSize: 11, fontWeight: "600", color: "#26A17B" }}>USDT</ThemedText>
+                  <View style={[styles.paymentBadge, { backgroundColor: theme.crypto + "20" }]}>
+                    <ThemedText style={{ ...Typography.smallBold, color: theme.crypto }}>USDT</ThemedText>
                   </View>
                 ) : null}
               </View>
@@ -579,10 +579,10 @@ export default function DriverActiveRideScreen() {
                   setChatVisible(true);
                 }}
               >
-                <Ionicons name="chatbubble-ellipses" size={18} color="#fff" />
+                <Ionicons name="chatbubble-ellipses" size={18} color={theme.textOnPrimary} />
                 <ThemedText style={styles.chatButtonLabel}>Chat</ThemedText>
                 {unreadCount > 0 ? (
-                  <View style={styles.chatBadge}>
+                  <View style={[styles.chatBadge, { backgroundColor: theme.error }]}>
                     <ThemedText style={styles.chatBadgeText}>
                       {unreadCount > 9 ? "9+" : unreadCount}
                     </ThemedText>
@@ -599,7 +599,7 @@ export default function DriverActiveRideScreen() {
             style={[styles.navigateButton, { backgroundColor: Colors.travonyGreen }]}
             onPress={handleNavigate}
           >
-            <Ionicons name="navigate" size={22} color="#fff" />
+            <Ionicons name="navigate" size={22} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.navigateButtonText}>
               Navigate to {(ride?.status === "started" || ride?.status === "in_progress") ? "Drop-off" : "Pickup"}
             </ThemedText>
@@ -682,7 +682,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 4,
@@ -697,7 +697,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: -2 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
@@ -740,8 +740,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   sharedBannerTitle: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   sharedStopRow: {
     flexDirection: "row",
@@ -756,21 +755,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   sharedStopDotText: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#fff",
+    ...Typography.captionBold,
+    color: Colors.light.textOnPrimary,
   },
   sharedStopText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   sharedStopMeta: {
     ...Typography.small,
-    fontSize: 11,
+    ...Typography.caption,
   },
   otpBannerText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     marginBottom: 4,
   },
   otpCodeRow: {
@@ -780,8 +776,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   otpCodeLabel: {
-    ...Typography.bodyMedium,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
   otpCode: {
     ...Typography.h3,
@@ -806,7 +801,7 @@ const styles = StyleSheet.create({
   },
   customerDetails: { flex: 1 },
   customerName: { ...Typography.h4, marginBottom: 2 },
-  fareAmount: { ...Typography.body, fontWeight: "600" },
+  fareAmount: { ...Typography.h4 },
   customerActions: {
     flexDirection: "row",
     gap: Spacing.sm,
@@ -829,9 +824,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
   },
   chatButtonLabel: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.bodyHeavy,
   },
   chatBadge: {
     position: "absolute",
@@ -841,14 +835,12 @@ const styles = StyleSheet.create({
     height: 18,
     paddingHorizontal: 4,
     borderRadius: 9,
-    backgroundColor: "#FF3B30",
     alignItems: "center",
     justifyContent: "center",
   },
   chatBadgeText: {
-    color: "#FFFFFF",
-    fontSize: 11,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.captionBold,
   },
   buttonSection: {
     gap: Spacing.sm,
@@ -873,8 +865,7 @@ const styles = StyleSheet.create({
   },
   navigateButtonText: {
     ...Typography.button,
-    color: "#fff",
-    fontSize: 17,
+    color: Colors.light.textOnPrimary,
   },
   primaryButton: {
     height: 52,
@@ -930,13 +921,12 @@ const styles = StyleSheet.create({
   },
   earningsFlashFare: {
     ...Typography.h2,
-    color: "#fff",
-    fontWeight: "800",
+    color: Colors.light.textOnPrimary,
+    fontWeight: "800" as const,
   },
   earningsFlashTotal: {
-    ...Typography.body,
+    ...Typography.h4,
     color: "rgba(255,255,255,0.85)",
-    fontWeight: "600",
   },
   earningsFlashScore: {
     ...Typography.caption,

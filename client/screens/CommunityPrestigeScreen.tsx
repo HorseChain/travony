@@ -12,11 +12,11 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useHeaderHeight } from "@react-navigation/elements";
 
 const TIER_COLORS: Record<string, string> = {
-  bronze: "#CD7F32",
-  silver: "#C0C0C0",
-  gold: "#FFD700",
-  platinum: "#E5E4E2",
-  diamond: "#B9F2FF",
+  bronze: Colors.tierBronze,
+  silver: Colors.tierSilver,
+  gold: Colors.tierGold,
+  platinum: Colors.tierPlatinum,
+  diamond: Colors.tierDiamond,
 };
 
 const TIER_ICONS: Record<string, string> = {
@@ -35,7 +35,7 @@ const TIERS = [
   { name: "Diamond", key: "diamond", requirement: "1000+ pts", description: "Elite network champions" },
 ];
 
-const MEDAL_COLORS = ["#FFD700", "#C0C0C0", "#CD7F32"];
+const MEDAL_COLORS = [Colors.tierGold, Colors.tierSilver, Colors.tierBronze];
 
 interface LeaderboardEntry {
   id: string;
@@ -306,8 +306,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.sm,
   },
   tierCardName: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   tierCardReq: {
     ...Typography.caption,
@@ -330,16 +329,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   rankText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   leaderboardInfo: {
     flex: 1,
     marginLeft: Spacing.md,
   },
   leaderboardName: {
-    ...Typography.bodyMedium,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
   leaderboardMeta: {
     flexDirection: "row",
@@ -352,8 +349,7 @@ const styles = StyleSheet.create({
     textTransform: "capitalize",
   },
   leaderboardScore: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   emptyContainer: {
     alignItems: "center",

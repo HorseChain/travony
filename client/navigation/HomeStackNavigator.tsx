@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import AssistantHomeScreen from "@/screens/AssistantHomeScreen";
 import HomeScreen from "@/screens/HomeScreen";
 import SelectLocationScreen from "@/screens/SelectLocationScreen";
 import ConfirmRideScreen from "@/screens/ConfirmRideScreen";
@@ -20,6 +21,19 @@ export type HomeStackParamList = {
       address: string; 
       lat: number; 
       lng: number; 
+    };
+    selectedPickup?: {
+      address: string;
+      lat: number;
+      lng: number;
+    };
+  } | undefined;
+  MapHome: {
+    selectedLocation?: {
+      type: "pickup" | "dropoff";
+      address: string;
+      lat: number;
+      lng: number;
     };
     selectedPickup?: {
       address: string;
@@ -51,6 +65,11 @@ export default function HomeStackNavigator() {
     <Stack.Navigator screenOptions={screenOptions}>
       <Stack.Screen
         name="Home"
+        component={AssistantHomeScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="MapHome"
         component={HomeScreen}
         options={{ headerShown: false }}
       />

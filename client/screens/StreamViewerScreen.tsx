@@ -10,7 +10,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 import type { SocialStackParamList } from "@/navigation/SocialStackNavigator";
 
 type StreamViewerRoute = RouteProp<SocialStackParamList, "StreamViewer">;
@@ -47,7 +47,7 @@ export default function StreamViewerScreen() {
           Streams open directly on Twitch when using the web version.
         </ThemedText>
         <Pressable
-          style={({ pressed }) => [styles.openButton, { backgroundColor: theme.primary, opacity: pressed ? 0.9 : 1 }]}
+          style={({ pressed }) => [styles.openButton, { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 }]}
           onPress={openInTwitch}
         >
           <ThemedText style={styles.openButtonText}>Open {channel} on Twitch</ThemedText>
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
   },
   openButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   floatingButton: {
     position: "absolute",
@@ -127,7 +127,6 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   floatingButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
 });

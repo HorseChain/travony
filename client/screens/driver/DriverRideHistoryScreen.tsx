@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   rideItem: {
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.lg,
     padding: Spacing.lg,
   },
   rideHeader: {
@@ -209,12 +209,10 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   avatarText: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   customerName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   rideDate: {
     ...Typography.small,
@@ -233,8 +231,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
   },
   statusText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   locationInfo: {
     paddingLeft: Spacing.xs,

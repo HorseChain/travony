@@ -103,7 +103,7 @@ export function CreditToast() {
       style={[styles.container, { backgroundColor: Colors.travonyGreen, opacity: toastOpacity }]}
     >
       <View style={styles.iconContainer}>
-        <Ionicons name="wallet" size={20} color="#fff" />
+        <Ionicons name="wallet" size={20} color={Colors.light.textOnPrimary} />
       </View>
       <View style={styles.content}>
         <ThemedText style={styles.title}>{label}</ThemedText>
@@ -133,7 +133,7 @@ const styles = StyleSheet.create({
     zIndex: 9999,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 4 },
         shadowOpacity: 0.25,
         shadowRadius: 10,
@@ -155,9 +155,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    ...Typography.bodyMedium,
-    color: "#fff",
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
   amount: {
     ...Typography.small,

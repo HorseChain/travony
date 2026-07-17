@@ -16,7 +16,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Colors, Typography } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 
 const PRAYER_OPTIONS: { key: string; label: string }[] = [
@@ -210,7 +210,7 @@ export default function PrayerRidesScreen() {
   ];
   const chipText = (active: boolean) => [
     styles.chipText,
-    { color: active ? "#fff" : theme.text },
+    { color: active ? Colors.light.textOnPrimary : theme.text },
   ];
 
   const renderForm = () => (
@@ -331,12 +331,12 @@ export default function PrayerRidesScreen() {
           <ThemedText style={{ color: theme.text }}>Cancel</ThemedText>
         </Pressable>
         <Pressable
-          style={[styles.primaryButton, { opacity: saveMutation.isPending ? 0.6 : 1 }]}
+          style={[styles.primaryButton, { opacity: saveMutation.isPending ? 0.5 : 1 }]}
           onPress={() => saveMutation.mutate()}
           disabled={saveMutation.isPending}
         >
           {saveMutation.isPending ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
           ) : (
             <ThemedText style={styles.primaryButtonText}>Save</ThemedText>
           )}
@@ -443,7 +443,7 @@ export default function PrayerRidesScreen() {
           renderForm()
         ) : subscription ? null : (
           <Pressable style={styles.primaryButton} onPress={startEditing}>
-            <Ionicons name="add" size={18} color="#fff" />
+            <Ionicons name="add" size={18} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.primaryButtonText}>Set up Prayer Rides</ThemedText>
           </Pressable>
         )}
@@ -475,20 +475,20 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     alignItems: "flex-start",
   },
-  heroTitle: { fontSize: 15, fontWeight: "700", marginBottom: 2 },
-  heroText: { fontSize: 12, lineHeight: 17 },
+  heroTitle: { ...Typography.bodyHeavy, marginBottom: 2 },
+  heroText: { ...Typography.small, lineHeight: 17 },
   formCard: {
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     padding: Spacing.lg,
   },
-  sectionLabel: { fontSize: 13, fontWeight: "700", marginTop: Spacing.md, marginBottom: Spacing.sm },
+  sectionLabel: { ...Typography.smallHeavy, marginTop: Spacing.md, marginBottom: Spacing.sm },
   input: {
     borderWidth: 1,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   list: { marginTop: Spacing.sm, gap: Spacing.xs },
   listRow: {
@@ -506,9 +506,9 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
   },
-  rowTitle: { fontSize: 14, fontWeight: "600" },
-  rowMeta: { fontSize: 12 },
-  changeLink: { fontSize: 12, fontWeight: "600" },
+  rowTitle: { ...Typography.bodyBold },
+  rowMeta: { ...Typography.small },
+  changeLink: { ...Typography.smallBold },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   chip: {
     paddingHorizontal: Spacing.md,
@@ -516,8 +516,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1,
   },
-  chipText: { fontSize: 13, fontWeight: "600" },
-  hint: { fontSize: 11, lineHeight: 15, marginTop: Spacing.sm },
+  chipText: { ...Typography.smallBold },
+  hint: { ...Typography.caption, lineHeight: 15, marginTop: Spacing.sm },
   pickupRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -526,7 +526,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     padding: Spacing.md,
   },
-  pickupText: { flex: 1, fontSize: 14 },
+  pickupText: { flex: 1, ...Typography.bodyMedium },
   formActions: { flexDirection: "row", gap: Spacing.md, marginTop: Spacing.lg },
   secondaryButton: {
     flex: 1,
@@ -545,7 +545,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  primaryButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  primaryButtonText: { ...Typography.bodyMedium, color: Colors.light.textOnPrimary, fontWeight: "700" as const },
   itemCard: {
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
@@ -560,15 +560,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  itemTitle: { fontSize: 15, fontWeight: "700" },
+  itemTitle: { ...Typography.bodyHeavy },
   nextBlock: {
     marginTop: Spacing.md,
     paddingTop: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
     gap: 2,
   },
-  nextLine: { fontSize: 13 },
-  nextStrong: { fontSize: 13, fontWeight: "700", color: Colors.travonyGreen },
+  nextLine: { ...Typography.small },
+  nextStrong: { ...Typography.smallHeavy, color: Colors.travonyGreen },
   itemActions: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.md },
   smallButton: {
     borderWidth: 1,
@@ -576,6 +576,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm,
   },
-  smallButtonText: { fontSize: 12, fontWeight: "600" },
-  emptyText: { fontSize: 13, textAlign: "center", marginTop: Spacing.xl, lineHeight: 18 },
+  smallButtonText: { ...Typography.smallBold },
+  emptyText: { ...Typography.small, textAlign: "center" as const, marginTop: Spacing.xl, lineHeight: 18 },
 });

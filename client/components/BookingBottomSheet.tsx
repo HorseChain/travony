@@ -295,6 +295,14 @@ POPULAR_LOCATIONS_BY_REGION["BD"] = POPULAR_LOCATIONS_BD;
 POPULAR_LOCATIONS_BY_REGION["IN"] = POPULAR_LOCATIONS_IN;
 POPULAR_LOCATIONS_BY_REGION["PK"] = POPULAR_LOCATIONS_PK;
 
+export function getPopularLocationsForRegion(lat?: number, lng?: number) {
+  if (typeof lat === "number" && typeof lng === "number") {
+    const region = detectRegionFromCoordinates(lat, lng);
+    return POPULAR_LOCATIONS_BY_REGION[region] || POPULAR_LOCATIONS_UAE;
+  }
+  return POPULAR_LOCATIONS_UAE;
+}
+
 function detectRegionFromCoordinates(lat: number, lng: number): string {
   if (lat >= 22.5 && lat <= 26.5 && lng >= 88.0 && lng <= 92.5) return "BD";
   if (lat >= 6.0 && lat <= 35.5 && lng >= 68.0 && lng <= 97.5) return "IN";
@@ -869,7 +877,7 @@ export default function BookingBottomSheet({
         disabled={!pickupLocation || !dropoffLocation}
       >
         <ThemedText style={styles.nextButtonText}>Choose Route</ThemedText>
-        <Ionicons name="arrow-forward-outline" size={20} color="#FFFFFF" />
+        <Ionicons name="arrow-forward-outline" size={20} color={Colors.light.textOnPrimary} />
       </Pressable>
     </View>
   );
@@ -999,7 +1007,7 @@ export default function BookingBottomSheet({
         </Pressable>
         <Pressable style={[styles.continueButton, { backgroundColor: theme.primary }]} onPress={handleNextTab}>
           <ThemedText style={styles.continueButtonText}>Continue</ThemedText>
-          <Ionicons name="arrow-forward-outline" size={20} color="#FFFFFF" />
+          <Ionicons name="arrow-forward-outline" size={20} color={Colors.light.textOnPrimary} />
         </Pressable>
       </View>
     </View>
@@ -1017,7 +1025,7 @@ export default function BookingBottomSheet({
           </View>
           <View style={{ alignItems: "flex-end" }}>
             {shareActive ? (
-              <ThemedText style={{ fontSize: 13, color: theme.textMuted, textDecorationLine: "line-through" }}>
+              <ThemedText style={{ ...Typography.labelLight, color: theme.textMuted, textDecorationLine: "line-through" }}>
                 {currencyCode} {(soloFareValue + (selectedPmgthDriver?.premiumAmount || 0)).toFixed(2)}
               </ThemedText>
             ) : null}
@@ -1048,15 +1056,15 @@ export default function BookingBottomSheet({
         >
           <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={18} color={evModeSelected ? Colors.travonyGreen : theme.textMuted} />
           <View style={{ flex: 1 }}>
-            <ThemedText style={{ fontSize: 13, fontWeight: "600", color: evModeSelected ? Colors.travonyGreen : theme.text }}>
+            <ThemedText style={{ ...Typography.labelBold, color: evModeSelected ? Colors.travonyGreen : theme.text }}>
               EV Preferred
             </ThemedText>
-            <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+            <ThemedText style={{ ...Typography.caption, color: theme.textMuted }}>
               {evModeSelected ? "Requesting electric vehicle — hubs shown on map" : "Request electric vehicle for this ride"}
             </ThemedText>
           </View>
           <View style={[styles.evToggleCheck, { backgroundColor: evModeSelected ? Colors.travonyGreen : theme.border }]}>
-            {evModeSelected ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+            {evModeSelected ? <Ionicons name="checkmark" size={12} color={Colors.light.textOnPrimary} /> : null}
           </View>
         </Pressable>
 
@@ -1077,17 +1085,17 @@ export default function BookingBottomSheet({
           >
             <Ionicons name={"people-outline" as keyof typeof Ionicons.glyphMap} size={18} color={shareActive ? theme.primary : theme.textMuted} />
             <View style={{ flex: 1 }}>
-              <ThemedText style={{ fontSize: 13, fontWeight: "600", color: shareActive ? theme.primary : theme.text }}>
+              <ThemedText style={{ ...Typography.labelBold, color: shareActive ? theme.primary : theme.text }}>
                 Share & save
               </ThemedText>
-              <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+              <ThemedText style={{ ...Typography.caption, color: theme.textMuted }}>
                 {shareActive
                   ? `Sharing with a co-rider going your way — you save ${currencyCode} ${shareSavings.toFixed(2)}`
                   : "Ride with someone going your way and pay less"}
               </ThemedText>
             </View>
             <View style={[styles.evToggleCheck, { backgroundColor: shareActive ? theme.primary : theme.border }]}>
-              {shareActive ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+              {shareActive ? <Ionicons name="checkmark" size={12} color={Colors.light.textOnPrimary} /> : null}
             </View>
           </Pressable>
         ) : null}
@@ -1110,17 +1118,17 @@ export default function BookingBottomSheet({
           >
             <Ionicons name={"pricetag-outline" as keyof typeof Ionicons.glyphMap} size={18} color={nameFareActive ? theme.primary : theme.textMuted} />
             <View style={{ flex: 1 }}>
-              <ThemedText style={{ fontSize: 13, fontWeight: "600", color: nameFareActive ? theme.primary : theme.text }}>
+              <ThemedText style={{ ...Typography.labelBold, color: nameFareActive ? theme.primary : theme.text }}>
                 Name your fare
               </ThemedText>
-              <ThemedText style={{ fontSize: 11, color: theme.textMuted }}>
+              <ThemedText style={{ ...Typography.caption, color: theme.textMuted }}>
                 {nameFareActive
                   ? "Drivers can accept your price or send a counter-offer"
                   : "Propose your own price — drivers accept or counter"}
               </ThemedText>
             </View>
             <View style={[styles.evToggleCheck, { backgroundColor: nameFareActive ? theme.primary : theme.border }]}>
-              {nameFareActive ? <Ionicons name="checkmark" size={12} color="#fff" /> : null}
+              {nameFareActive ? <Ionicons name="checkmark" size={12} color={Colors.light.textOnPrimary} /> : null}
             </View>
           </Pressable>
         ) : null}
@@ -1155,10 +1163,10 @@ export default function BookingBottomSheet({
               <Ionicons name="remove" size={20} color={nameFareAmount <= nameFareFloor ? theme.textMuted : theme.primary} />
             </Pressable>
             <View style={{ alignItems: "center" }}>
-              <ThemedText style={{ fontSize: 20, fontWeight: "700", color: theme.primary }}>
+              <ThemedText style={{ ...Typography.xlHeavy, color: theme.primary }}>
                 {currencyCode} {nameFareAmount.toFixed(2)}
               </ThemedText>
-              <ThemedText style={{ fontSize: 10, color: theme.textMuted }}>
+              <ThemedText style={{ ...Typography.micro, color: theme.textMuted }}>
                 {currencyCode} {nameFareFloor.toFixed(0)} – {currencyCode} {nameFareCeiling.toFixed(0)}
               </ThemedText>
             </View>
@@ -1280,7 +1288,7 @@ export default function BookingBottomSheet({
                 styles.paymentOption,
                 {
                   backgroundColor: selectedPayment.id === method.id ? theme.primary + "10" : theme.card,
-                  borderColor: walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.border,
+                  borderColor: walletInsufficient ? Colors.amber : selectedPayment.id === method.id ? theme.primary : theme.border,
                 },
               ]}
               onPress={() => {
@@ -1292,10 +1300,10 @@ export default function BookingBottomSheet({
                 Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
               }}
             >
-              <Ionicons name={method.icon as any} size={18} color={walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.text} />
+              <Ionicons name={method.icon as any} size={18} color={walletInsufficient ? Colors.amber : selectedPayment.id === method.id ? theme.primary : theme.text} />
               {isWallet ? (
                 <View style={{ flex: 1, alignItems: "center" }}>
-                  <ThemedText style={[styles.paymentText, { color: walletInsufficient ? "#F59E0B" : selectedPayment.id === method.id ? theme.primary : theme.text }]}>
+                  <ThemedText style={[styles.paymentText, { color: walletInsufficient ? Colors.amber : selectedPayment.id === method.id ? theme.primary : theme.text }]}>
                     {walletInsufficient ? `Wallet · ${currencyCode} ${walletBalance.toFixed(2)} (top up needed)` : `Wallet · ${currencyCode} ${walletBalance.toFixed(2)}`}
                   </ThemedText>
                 </View>
@@ -1318,14 +1326,14 @@ export default function BookingBottomSheet({
             styles.bookButton,
             { 
               backgroundColor: !user?.id ? theme.warning : theme.primary, 
-              opacity: bookRideMutation.isPending ? 0.7 : 1 
+              opacity: bookRideMutation.isPending ? 0.5 : 1 
             },
           ]}
           onPress={handleBookRide}
           disabled={bookRideMutation.isPending}
         >
           {bookRideMutation.isPending ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={Colors.light.textOnPrimary} />
           ) : !user?.id ? (
             <ThemedText style={styles.bookButtonText}>Sign in to Book</ThemedText>
           ) : (
@@ -1417,8 +1425,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   tabLabel: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   tabIndicator: {
     position: "absolute",
@@ -1472,8 +1479,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   currentLocationText: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   locationsList: {
     maxHeight: 160,
@@ -1506,7 +1512,7 @@ const styles = StyleSheet.create({
   },
   nextButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   tripSummary: {
     flexDirection: "row",
@@ -1564,8 +1570,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   vehicleName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     marginBottom: 2,
   },
   vehicleEta: {
@@ -1573,8 +1578,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   vehiclePrice: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   surgeBanner: {
     flexDirection: "row",
@@ -1586,8 +1590,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   surgeText: {
-    ...Typography.caption,
-    fontWeight: "500",
+    ...Typography.label,
   },
   tabButtons: {
     flexDirection: "row",
@@ -1613,7 +1616,7 @@ const styles = StyleSheet.create({
   },
   continueButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   fareCard: {
     borderRadius: BorderRadius.md,
@@ -1634,8 +1637,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   vehicleBadgeText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   fasterPickupBadge: {
     flexDirection: "row",
@@ -1647,8 +1649,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.sm,
   },
   fasterPickupText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   evToggleRow: {
     flexDirection: "row",
@@ -1667,8 +1668,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   fareTotal: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   fareDivider: {
     height: 1,
@@ -1685,8 +1685,7 @@ const styles = StyleSheet.create({
     ...Typography.caption,
   },
   fareValue: {
-    ...Typography.caption,
-    fontWeight: "500",
+    ...Typography.label,
   },
   transparencyRow: {
     flexDirection: "row",
@@ -1702,15 +1701,13 @@ const styles = StyleSheet.create({
   },
   transparencyLabel: {
     ...Typography.caption,
-    fontSize: 10,
+    ...Typography.micro,
   },
   transparencyValue: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   sectionLabel: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: Spacing.sm,
@@ -1731,13 +1728,12 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   priorityLabel: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
     textAlign: "center",
   },
   priorityDesc: {
     ...Typography.small,
-    fontSize: 10,
+    ...Typography.micro,
     textAlign: "center",
   },
   paymentRow: {
@@ -1755,8 +1751,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   paymentText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   bookButton: {
     flex: 1,
@@ -1769,11 +1764,11 @@ const styles = StyleSheet.create({
   },
   bookButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   bookButtonPrice: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
     opacity: 0.9,
   },
   evIndicatorBanner: {
@@ -1786,8 +1781,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   evIndicatorText: {
-    ...Typography.caption,
-    fontWeight: "600",
+    ...Typography.captionBold,
   },
   fareLockRow: {
     flexDirection: "row",

@@ -87,8 +87,8 @@ export function FasterPickupBanner({
       ]}
       onPress={handlePress}
     >
-      <View style={[styles.flashCircle, { backgroundColor: isSelected ? "#fff" : Colors.travonyGreen }]}>
-        <Ionicons name="flash" size={18} color={isSelected ? Colors.travonyGreen : "#fff"} />
+      <View style={[styles.flashCircle, { backgroundColor: isSelected ? Colors.light.backgroundRoot : Colors.travonyGreen }]}>
+        <Ionicons name="flash" size={18} color={isSelected ? Colors.travonyGreen : Colors.light.textOnPrimary} />
       </View>
 
       <View style={styles.center}>
@@ -124,7 +124,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.08,
         shadowRadius: 4,
@@ -146,11 +146,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
   },
   time: {
-    ...Typography.h4,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   timeSelected: {
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
   },
   right: {
     flexDirection: "row",
@@ -158,17 +157,16 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   price: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   priceSelected: {
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
   },
   checkCircle: {
     width: 22,
     height: 22,
     borderRadius: 11,
-    backgroundColor: "#fff",
+    backgroundColor: Colors.light.backgroundRoot,
     alignItems: "center",
     justifyContent: "center",
   },

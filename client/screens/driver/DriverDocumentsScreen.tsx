@@ -80,7 +80,7 @@ export default function DriverDocumentsScreen() {
       case "verified":
         return Colors.travonyGreen;
       case "pending":
-        return "#FFC107";
+        return theme.warning;
       case "required":
         return theme.error;
       default:
@@ -198,8 +198,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusTitle: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   statusSubtitle: {
     ...Typography.small,
@@ -230,8 +229,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   docTitle: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   docDescription: {
     ...Typography.small,
@@ -242,8 +240,7 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   statusLabel: {
-    ...Typography.caption,
-    fontWeight: "500",
+    ...Typography.label,
   },
   infoCard: {
     flexDirection: "row",

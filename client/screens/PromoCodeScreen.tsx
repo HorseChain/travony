@@ -10,7 +10,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 interface AppliedCoupon {
   id: string;
@@ -100,14 +100,14 @@ export default function PromoCodeScreen() {
               styles.applyButton,
               {
                 backgroundColor: theme.primary,
-                opacity: applyCodeMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+                opacity: applyCodeMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
               },
             ]}
             onPress={handleApplyCode}
             disabled={applyCodeMutation.isPending}
           >
             {applyCodeMutation.isPending ? (
-              <ActivityIndicator color="#FFFFFF" size="small" />
+              <ActivityIndicator color={theme.textOnPrimary} size="small" />
             ) : (
               <ThemedText style={styles.applyButtonText}>Apply</ThemedText>
             )}
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
   },
   applyButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   appliedSection: {
     marginBottom: Spacing["2xl"],
@@ -231,8 +231,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   couponCode: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
   },
   couponDetails: {
     flexDirection: "row",
@@ -240,8 +239,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.xs,
   },
   couponDiscount: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginRight: Spacing.md,
   },
   couponExpiry: {

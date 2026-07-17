@@ -20,7 +20,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 import type { SocialStackParamList } from "@/navigation/SocialStackNavigator";
 
 interface Comment {
@@ -176,15 +176,15 @@ export default function PostCommentsScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.sendButton,
-            { backgroundColor: canSend ? theme.primary : theme.backgroundSecondary, opacity: pressed ? 0.85 : 1 },
+            { backgroundColor: canSend ? theme.primary : theme.backgroundSecondary, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={() => addComment.mutate()}
           disabled={!canSend}
         >
           {addComment.isPending ? (
-            <ActivityIndicator color="#FFFFFF" size="small" />
+            <ActivityIndicator color={Colors.light.textOnPrimary} size="small" />
           ) : (
-            <Ionicons name="arrow-up" size={20} color="#FFFFFF" />
+            <Ionicons name="arrow-up" size={20} color={Colors.light.textOnPrimary} />
           )}
         </Pressable>
       </View>
@@ -207,8 +207,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   commentAuthor: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   commentTime: {
     ...Typography.caption,

@@ -362,9 +362,9 @@ export default function RideTruthScreen() {
             disabled={consentMutation.isPending}
           >
             {consentMutation.isPending ? (
-              <ActivityIndicator size="small" color="#FFFFFF" />
+              <ActivityIndicator size="small" color={theme.textOnPrimary} />
             ) : (
-              <ThemedText style={[styles.primaryButtonText, { color: "#FFFFFF" }]}>
+              <ThemedText style={[styles.primaryButtonText, { color: theme.textOnPrimary }]}>
                 Join the Truth Engine
               </ThemedText>
             )}
@@ -463,9 +463,9 @@ export default function RideTruthScreen() {
               disabled={logRideMutation.isPending}
             >
               {logRideMutation.isPending ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
+                <ActivityIndicator size="small" color={theme.textOnPrimary} />
               ) : (
-                <ThemedText style={[styles.primaryButtonText, { color: "#FFFFFF" }]}>
+                <ThemedText style={[styles.primaryButtonText, { color: theme.textOnPrimary }]}>
                   Submit Ride
                 </ThemedText>
               )}
@@ -620,7 +620,7 @@ export default function RideTruthScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.menuItem,
-                { opacity: pressed ? 0.7 : 1 },
+                { opacity: pressed ? 0.8 : 1 },
               ]}
               onPress={handleDeleteData}
               disabled={deleteDataMutation.isPending}
@@ -646,7 +646,7 @@ export default function RideTruthScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.menuItem,
-                { opacity: pressed ? 0.7 : 1 },
+                { opacity: pressed ? 0.8 : 1 },
               ]}
               onPress={handleRevokeConsent}
               disabled={revokeConsentMutation.isPending}
@@ -795,8 +795,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   questionBtnText: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   primaryButton: {
     height: Spacing.buttonHeight,
@@ -819,8 +818,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   rideProvider: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   rideDate: {
     ...Typography.small,
@@ -832,8 +830,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xs,
   },
   scoreText: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   rankingRow: {
     flexDirection: "row",
@@ -849,12 +846,10 @@ const styles = StyleSheet.create({
     marginRight: Spacing.md,
   },
   rankNumber: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   rankProvider: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     flex: 1,
   },
   divider: {

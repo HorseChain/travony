@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useMemo, useState } from "react";
 import { View, StyleSheet, Platform, Pressable, Animated } from "react-native";
-import { Colors, Spacing } from "@/constants/theme";
+import { Typography, Colors, Spacing } from "@/constants/theme";
 import { useTheme } from "@/hooks/useTheme";
 import { ThemedText } from "@/components/ThemedText";
 
@@ -20,9 +20,9 @@ interface HeatmapOverlayProps {
 }
 
 const INTENSITY_COLORS = {
-  low: "#4FC3F7",
-  medium: "#FFA726",
-  high: "#EF5350",
+  low: Colors.heatmapLow,
+  medium: Colors.heatmapMid,
+  high: Colors.heatmapHigh,
 };
 
 function getIntensityColor(intensity: number): string {
@@ -211,7 +211,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 6,
@@ -227,13 +227,11 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   infoLabel: {
-    fontSize: 11,
-    fontWeight: "400",
+    ...Typography.caption,
     marginRight: Spacing.sm,
   },
   infoValue: {
-    fontSize: 12,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   legendContainer: {
     paddingHorizontal: Spacing.lg,
@@ -241,7 +239,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 1 },
         shadowOpacity: 0.08,
         shadowRadius: 4,
@@ -251,8 +249,7 @@ const styles = StyleSheet.create({
     }),
   },
   legendTitle: {
-    fontSize: 10,
-    fontWeight: "600",
+    ...Typography.microBold,
     textTransform: "uppercase",
     letterSpacing: 0.5,
     marginBottom: 4,
@@ -273,7 +270,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   legendLabel: {
-    fontSize: 11,
-    fontWeight: "500",
+    ...Typography.label,
   },
 });

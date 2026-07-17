@@ -3,11 +3,52 @@ import { Platform } from "react-native";
 export const Colors = {
   travonyGreen: "#00B14F",
   travonyGold: "#FFB800",
+  black: "#000000",
+  tierBronze: "#CD7F32",
+  tierSilver: "#C0C0C0",
+  tierGold: "#FFD700",
+  tierPlatinum: "#E5E4E2",
+  tierDiamond: "#B9F2FF",
+  eventPurple: "#7C4DFF",
+  evCharger: "#0EA5A4",
+  surfaceGray: "#E0E0E0",
+  coffee: "#8B4513",
+  coffeeDark: "#6B3410",
+  successLight: "#E8F5E9",
+  gray: "#666666",
+  mapDarkBg: "#1a1a2e",
+  mapDarkGrid: "#2a2a4e",
+  mapDarkRoad: "#3a3a5e",
+  mapLightBg: "#e8f4e8",
+  mapLightGrid: "#d0e8d0",
+  mapLightRoad: "#c0d8c0",
+  networkError: "#B23B3B",
+  liveRed: "#E91916",
+  heatmapLow: "#4FC3F7",
+  heatmapMid: "#FFA726",
+  heatmapHigh: "#EF5350",
+  amber: "#F59E0B",
+  travonyDarkGreen: "#008B3D",
+  cityChampion: "#8E44AD",
+  prestige: "#00A3A3",
+  chargerGray: "#9CA3AF",
+  mapPinGray: "#555555",
+  mapDarkElement: "#1d1d1d",
+  mapLightSurface: "#f5f5f5",
+  mapWater: "#aadaff",
+  mapRoadStroke: "#e0e0e0",
+  mapStrokeDark: "#4a4a4a",
+  mapDarkMarker: "#1a1a1a",
+  reactionLike: "#4285F4",
+  reactionLove: "#E0518F",
+  reactionFire: "#FB8C00",
+  reactionCelebrate: "#F5A623",
   light: {
     text: "#1A1A1A",
     textPrimary: "#1A1A1A",
     textSecondary: "#4A4A4A",
     textMuted: "#9E9E9E",
+    textOnPrimary: "#FFFFFF",
     buttonText: "#FFFFFF",
     tabIconDefault: "#9E9E9E",
     tabIconSelected: "#00B14F",
@@ -24,6 +65,11 @@ export const Colors = {
     error: "#E53935",
     warning: "#FB8C00",
     success: "#43A047",
+    crypto: "#26A17B",
+    blockchain: "#8247E5",
+    evGreen: "#16a34a",
+    info: "#0EA5E9",
+    star: "#F5A623",
     card: "#FFFFFF",
     overlay: "rgba(0, 0, 0, 0.5)",
     backgroundPressed: "#EBEBEB",
@@ -33,6 +79,7 @@ export const Colors = {
     textPrimary: "#ECEDEE",
     textSecondary: "#B0B0B0",
     textMuted: "#6E6E6E",
+    textOnPrimary: "#FFFFFF",
     buttonText: "#FFFFFF",
     tabIconDefault: "#6E6E6E",
     tabIconSelected: "#00C95C",
@@ -42,13 +89,18 @@ export const Colors = {
     primaryDark: "#00B14F",
     backgroundRoot: "#1A1A1A",
     backgroundDefault: "#2A2C2E",
-    backgroundElevated: "#2A2C2E",
+    backgroundElevated: "#353739",
     backgroundSecondary: "#353739",
     backgroundTertiary: "#404244",
     border: "#404244",
     error: "#EF5350",
     warning: "#FFA726",
     success: "#66BB6A",
+    crypto: "#2EC090",
+    blockchain: "#A47BF5",
+    evGreen: "#22c55e",
+    info: "#38BDF8",
+    star: "#F5A623",
     card: "#2A2C2E",
     overlay: "rgba(0, 0, 0, 0.7)",
     backgroundPressed: "#404244",
@@ -121,12 +173,136 @@ export const Typography = {
     fontSize: 16,
     fontWeight: "400" as const,
   },
+  bodyBold: {
+    fontSize: 14,
+    fontWeight: "600" as const,
+  },
+  bodyHeavy: {
+    fontSize: 14,
+    fontWeight: "700" as const,
+  },
+  smallBold: {
+    fontSize: 12,
+    fontWeight: "600" as const,
+  },
+  smallHeavy: {
+    fontSize: 12,
+    fontWeight: "700" as const,
+  },
+  captionBold: {
+    fontSize: 11,
+    fontWeight: "600" as const,
+  },
+  label: {
+    fontSize: 13,
+    fontWeight: "500" as const,
+  },
+  labelBold: {
+    fontSize: 13,
+    fontWeight: "600" as const,
+  },
+  labelHeavy: {
+    fontSize: 13,
+    fontWeight: "700" as const,
+  },
+  smallMedium: {
+    fontSize: 12,
+    fontWeight: "500" as const,
+  },
+  bodyMediumMedium: {
+    fontSize: 14,
+    fontWeight: "500" as const,
+  },
+  h4Heavy: {
+    fontSize: 16,
+    fontWeight: "700" as const,
+  },
+  h2Heavy: {
+    fontSize: 22,
+    fontWeight: "700" as const,
+  },
+  h3Heavy: {
+    fontSize: 18,
+    fontWeight: "700" as const,
+  },
+  nano: {
+    fontSize: 9,
+    fontWeight: "400" as const,
+  },
+  micro: {
+    fontSize: 10,
+    fontWeight: "400" as const,
+  },
+  microBold: {
+    fontSize: 10,
+    fontWeight: "600" as const,
+  },
+  microHeavy: {
+    fontSize: 10,
+    fontWeight: "700" as const,
+  },
+  labelLight: {
+    fontSize: 13,
+    fontWeight: "400" as const,
+  },
+  bodySmall: {
+    fontSize: 15,
+    fontWeight: "400" as const,
+  },
+  bodySmallBold: {
+    fontSize: 15,
+    fontWeight: "600" as const,
+  },
+  bodySmallHeavy: {
+    fontSize: 15,
+    fontWeight: "700" as const,
+  },
+  bodySmallMedium: {
+    fontSize: 15,
+    fontWeight: "500" as const,
+  },
+  bodyLarge: {
+    fontSize: 17,
+    fontWeight: "400" as const,
+  },
+  bodyLargeBold: {
+    fontSize: 17,
+    fontWeight: "600" as const,
+  },
+  bodyLargeHeavy: {
+    fontSize: 17,
+    fontWeight: "700" as const,
+  },
+  xl: {
+    fontSize: 20,
+    fontWeight: "400" as const,
+  },
+  xlBold: {
+    fontSize: 20,
+    fontWeight: "600" as const,
+  },
+  xlHeavy: {
+    fontSize: 20,
+    fontWeight: "700" as const,
+  },
+  xxl: {
+    fontSize: 24,
+    fontWeight: "400" as const,
+  },
+  xxlBold: {
+    fontSize: 24,
+    fontWeight: "600" as const,
+  },
+  xxlHeavy: {
+    fontSize: 24,
+    fontWeight: "700" as const,
+  },
 };
 
 export const Shadows = {
   card: Platform.select({
     ios: {
-      shadowColor: "#000",
+      shadowColor: Colors.black,
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.08,
       shadowRadius: 8,
@@ -138,7 +314,7 @@ export const Shadows = {
   }),
   bottomSheet: Platform.select({
     ios: {
-      shadowColor: "#000",
+      shadowColor: Colors.black,
       shadowOffset: { width: 0, height: -4 },
       shadowOpacity: 0.1,
       shadowRadius: 12,
@@ -150,7 +326,7 @@ export const Shadows = {
   }),
   fab: Platform.select({
     ios: {
-      shadowColor: "#000",
+      shadowColor: Colors.black,
       shadowOffset: { width: 0, height: 2 },
       shadowOpacity: 0.15,
       shadowRadius: 4,

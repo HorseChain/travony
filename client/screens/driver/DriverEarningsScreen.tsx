@@ -306,7 +306,7 @@ export default function DriverEarningsScreen() {
                   onPress={() => setWithdrawModalVisible(true)}
                   disabled={balance < 50}
                 >
-                  <Ionicons name="arrow-down-circle-outline" size={18} color="#fff" />
+                  <Ionicons name="arrow-down-circle-outline" size={18} color={theme.textOnPrimary} />
                   <ThemedText style={styles.withdrawButtonText}>Withdraw</ThemedText>
                 </Pressable>
               </View>
@@ -336,8 +336,8 @@ export default function DriverEarningsScreen() {
             <View style={[styles.cryptoCard, { backgroundColor: theme.backgroundElevated }]}>
               <View style={styles.cryptoHeader}>
                 <View style={styles.cryptoTitleRow}>
-                  <View style={[styles.cryptoIcon, { backgroundColor: "#26A17B20" }]}>
-                    <ThemedText style={styles.cryptoIconText}>USDT</ThemedText>
+                  <View style={[styles.cryptoIcon, { backgroundColor: theme.crypto + "20" }]}>
+                    <ThemedText style={[styles.cryptoIconText, { color: theme.crypto }]}>USDT</ThemedText>
                   </View>
                   <View>
                     <ThemedText style={styles.cryptoTitle}>Crypto Yield</ThemedText>
@@ -346,7 +346,7 @@ export default function DriverEarningsScreen() {
                     </ThemedText>
                   </View>
                 </View>
-                <ThemedText style={[styles.cryptoBalance, { color: "#26A17B" }]}>
+                <ThemedText style={[styles.cryptoBalance, { color: theme.crypto }]}>
                   {usdtBalance.toFixed(2)} USDT
                 </ThemedText>
               </View>
@@ -364,21 +364,21 @@ export default function DriverEarningsScreen() {
                       </Pressable>
                     </View>
                     <Pressable
-                      style={[styles.cryptoWithdrawBtn, { backgroundColor: "#26A17B" }]}
+                      style={[styles.cryptoWithdrawBtn, { backgroundColor: theme.crypto }]}
                       onPress={() => setCryptoModalVisible(true)}
                       disabled={usdtBalance <= 0}
                     >
-                      <Ionicons name="arrow-up-circle-outline" size={18} color="#fff" />
+                      <Ionicons name="arrow-up-circle-outline" size={18} color={theme.textOnPrimary} />
                       <ThemedText style={styles.cryptoWithdrawText}>Withdraw USDT</ThemedText>
                     </Pressable>
                   </>
                 ) : (
                   <Pressable
-                    style={[styles.setupWalletBtn, { borderColor: "#26A17B" }]}
+                    style={[styles.setupWalletBtn, { borderColor: theme.crypto }]}
                     onPress={() => setWalletAddressModalVisible(true)}
                   >
-                    <Ionicons name="wallet-outline" size={18} color="#26A17B" />
-                    <ThemedText style={[styles.setupWalletText, { color: "#26A17B" }]}>
+                    <Ionicons name="wallet-outline" size={18} color={theme.crypto} />
+                    <ThemedText style={[styles.setupWalletText, { color: theme.crypto }]}>
                       Set Up USDT Wallet
                     </ThemedText>
                   </Pressable>
@@ -471,7 +471,7 @@ export default function DriverEarningsScreen() {
               disabled={withdrawMutation.isPending}
             >
               {withdrawMutation.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.textOnPrimary} />
               ) : (
                 <ThemedText style={styles.confirmButtonText}>Request Withdrawal</ThemedText>
               )}
@@ -496,11 +496,11 @@ export default function DriverEarningsScreen() {
               </Pressable>
             </View>
 
-            <View style={[styles.balanceInfo, { backgroundColor: "#26A17B10" }]}>
+            <View style={[styles.balanceInfo, { backgroundColor: theme.crypto + "10" }]}>
               <ThemedText style={[styles.availableLabel, { color: theme.textSecondary }]}>
                 Available USDT Balance
               </ThemedText>
-              <ThemedText style={[styles.availableAmount, { color: "#26A17B" }]}>
+              <ThemedText style={[styles.availableAmount, { color: theme.crypto }]}>
                 {usdtBalance.toFixed(2)} USDT
               </ThemedText>
             </View>
@@ -529,12 +529,12 @@ export default function DriverEarningsScreen() {
             </View>
 
             <Pressable
-              style={[styles.confirmButton, { backgroundColor: "#26A17B" }]}
+              style={[styles.confirmButton, { backgroundColor: theme.crypto }]}
               onPress={handleCryptoWithdraw}
               disabled={cryptoWithdrawMutation.isPending}
             >
               {cryptoWithdrawMutation.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.textOnPrimary} />
               ) : (
                 <ThemedText style={styles.confirmButtonText}>Withdraw USDT</ThemedText>
               )}
@@ -567,7 +567,7 @@ export default function DriverEarningsScreen() {
                 backgroundColor: theme.backgroundDefault,
                 color: theme.textPrimary,
                 borderColor: theme.border,
-                fontSize: 14,
+                ...Typography.bodyMedium,
               }]}
               placeholder="0x..."
               placeholderTextColor={theme.textMuted}
@@ -582,12 +582,12 @@ export default function DriverEarningsScreen() {
             </ThemedText>
 
             <Pressable
-              style={[styles.confirmButton, { backgroundColor: "#26A17B" }]}
+              style={[styles.confirmButton, { backgroundColor: theme.crypto }]}
               onPress={handleSaveWalletAddress}
               disabled={updateWalletAddressMutation.isPending}
             >
               {updateWalletAddressMutation.isPending ? (
-                <ActivityIndicator color="#fff" />
+                <ActivityIndicator color={theme.textOnPrimary} />
               ) : (
                 <ThemedText style={styles.confirmButtonText}>Save Wallet Address</ThemedText>
               )}
@@ -626,8 +626,8 @@ const styles = StyleSheet.create({
   },
   balanceAmount: {
     fontSize: 42,
-    fontWeight: "700",
-    color: "#fff",
+    fontWeight: "700" as const,
+    color: Colors.light.textOnPrimary,
     marginBottom: Spacing.md,
   },
   withdrawButton: {
@@ -640,9 +640,8 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   withdrawButtonText: {
-    ...Typography.body,
-    color: "#fff",
-    fontWeight: "600",
+    ...Typography.h4,
+    color: Colors.light.textOnPrimary,
   },
   statsRow: {
     flexDirection: "row",
@@ -657,9 +656,8 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
   },
   statValue: {
-    ...Typography.body,
-    fontWeight: "700",
-    color: "#fff",
+    ...Typography.h4Heavy,
+    color: Colors.light.textOnPrimary,
   },
   statLabel: {
     ...Typography.caption,
@@ -685,8 +683,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   vehicleWalletInfo: { flex: 1 },
-  vehicleWalletTitle: { fontSize: 16, fontWeight: "700" },
-  vehicleWalletSubtitle: { fontSize: 13, marginTop: 2 },
+  vehicleWalletTitle: { ...Typography.h4Heavy },
+  vehicleWalletSubtitle: { ...Typography.labelLight, marginTop: 2 },
   emptyState: {
     padding: Spacing["2xl"],
     borderRadius: BorderRadius.xl,
@@ -694,8 +692,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   emptyText: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   emptySubtext: {
     ...Typography.small,
@@ -720,8 +717,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   dateText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     textTransform: "capitalize",
   },
   tripsText: {
@@ -733,8 +729,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   earningsAmount: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
   statusText: {
     ...Typography.small,
@@ -795,7 +790,7 @@ const styles = StyleSheet.create({
   },
   confirmButtonText: {
     ...Typography.button,
-    color: "#fff",
+    color: Colors.light.textOnPrimary,
   },
   cryptoCard: {
     borderRadius: BorderRadius.xl,
@@ -821,21 +816,17 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   cryptoIconText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: "#26A17B",
+    ...Typography.smallHeavy,
   },
   cryptoTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
   },
   cryptoSubtitle: {
     ...Typography.small,
     marginTop: 2,
   },
   cryptoBalance: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   cryptoActions: {
     gap: Spacing.md,
@@ -859,9 +850,8 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
   },
   cryptoWithdrawText: {
-    ...Typography.body,
-    color: "#fff",
-    fontWeight: "600",
+    ...Typography.h4,
+    color: Colors.light.textOnPrimary,
   },
   setupWalletBtn: {
     flexDirection: "row",
@@ -873,8 +863,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   setupWalletText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   walletDestination: {
     flexDirection: "row",

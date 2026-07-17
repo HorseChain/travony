@@ -191,7 +191,7 @@ export default function FeedbackScreen() {
             styles.submitButton,
             {
               backgroundColor: theme.primary,
-              opacity: pressed || mutation.isPending ? 0.7 : 1,
+              opacity: pressed || mutation.isPending ? 0.8 : 1,
             },
           ]}
           onPress={handleSubmit}
@@ -231,8 +231,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.xl,
   },
   chipText: {
-    ...Typography.bodyMedium,
-    fontWeight: "500",
+    ...Typography.bodyMediumMedium,
   },
   starsContainer: {
     flexDirection: "row",

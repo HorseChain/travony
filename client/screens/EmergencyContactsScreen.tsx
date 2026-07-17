@@ -19,7 +19,7 @@ import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 interface EmergencyContact {
   id: string;
@@ -127,7 +127,7 @@ export default function EmergencyContactsScreen() {
             <Pressable
               style={({ pressed }) => [
                 styles.addButton,
-                { borderColor: theme.primary, opacity: pressed ? 0.7 : 1 },
+                { borderColor: theme.primary, opacity: pressed ? 0.8 : 1 },
               ]}
               onPress={() => setShowAddForm(!showAddForm)}
             >
@@ -166,14 +166,14 @@ export default function EmergencyContactsScreen() {
                     styles.saveButton,
                     {
                       backgroundColor: theme.primary,
-                      opacity: addContactMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+                      opacity: addContactMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
                     },
                   ]}
                   onPress={handleAddContact}
                   disabled={addContactMutation.isPending}
                 >
                   {addContactMutation.isPending ? (
-                    <ActivityIndicator color="#FFFFFF" size="small" />
+                    <ActivityIndicator color={theme.textOnPrimary} size="small" />
                   ) : (
                     <ThemedText style={styles.saveButtonText}>Add Contact</ThemedText>
                   )}
@@ -273,7 +273,7 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   contactCard: {
     marginBottom: Spacing.md,
@@ -295,8 +295,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contactName: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   contactPhone: {
     ...Typography.bodyMedium,

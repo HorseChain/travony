@@ -13,7 +13,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 export default function EditProfileScreen() {
   const insets = useSafeAreaInsets();
@@ -115,7 +115,7 @@ export default function EditProfileScreen() {
               </View>
             )}
             <View style={[styles.editBadge, { backgroundColor: theme.primary }]}>
-              <Ionicons name="camera-outline" size={14} color="#FFFFFF" />
+              <Ionicons name="camera-outline" size={14} color={Colors.light.textOnPrimary} />
             </View>
           </Pressable>
           <ThemedText style={[styles.changePhotoText, { color: theme.primary }]}>
@@ -217,14 +217,14 @@ export default function EditProfileScreen() {
             styles.saveButton,
             {
               backgroundColor: theme.primary,
-              opacity: updateProfileMutation.isPending ? 0.7 : pressed ? 0.9 : 1,
+              opacity: updateProfileMutation.isPending ? 0.5 : pressed ? 0.8 : 1,
             },
           ]}
           onPress={handleSave}
           disabled={updateProfileMutation.isPending}
         >
           {updateProfileMutation.isPending ? (
-            <ActivityIndicator color="#FFFFFF" />
+            <ActivityIndicator color={Colors.light.textOnPrimary} />
           ) : (
             <ThemedText style={styles.saveButtonText}>Save Changes</ThemedText>
           )}
@@ -271,9 +271,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   changePhotoText: {
-    ...Typography.body,
+    ...Typography.bodySmallMedium,
     marginTop: Spacing.md,
-    fontWeight: "500",
   },
   form: {
     marginBottom: Spacing["2xl"],
@@ -282,8 +281,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   label: {
-    ...Typography.bodyMedium,
-    fontWeight: "600",
+    ...Typography.bodyBold,
     marginBottom: Spacing.sm,
   },
   inputContainer: {
@@ -311,6 +309,6 @@ const styles = StyleSheet.create({
   },
   saveButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
 });

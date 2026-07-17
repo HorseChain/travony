@@ -304,8 +304,8 @@ export default function DriverVehicleDetailsScreen() {
     const badgeConfig: Record<string, { color: string; icon: keyof typeof Feather.glyphMap; text: string }> = {
       ai_verified: { color: Colors.travonyGreen, icon: "check-circle", text: "AI Verified" },
       admin_verified: { color: Colors.travonyGreen, icon: "shield", text: "Admin Verified" },
-      pending: { color: "#F59E0B", icon: "clock", text: "Pending Review" },
-      rejected: { color: "#EF4444", icon: "x-circle", text: "Rejected" },
+      pending: { color: theme.warning, icon: "clock", text: "Pending Review" },
+      rejected: { color: theme.error, icon: "x-circle", text: "Rejected" },
     };
 
     const config = badgeConfig[verificationStatus];
@@ -343,7 +343,7 @@ export default function DriverVehicleDetailsScreen() {
                 ]}
                 onPress={() => setVehicleType(vt.value)}
               >
-                <ThemedText style={[styles.typeChipText, { color: vehicleType === vt.value ? "#FFFFFF" : theme.text }]}>
+                <ThemedText style={[styles.typeChipText, { color: vehicleType === vt.value ? theme.textOnPrimary : theme.text }]}>
                   {vt.label}
                 </ThemedText>
               </TouchableOpacity>
@@ -440,7 +440,7 @@ export default function DriverVehicleDetailsScreen() {
             <ThemedText style={styles.activationTitle}>{activation.carName} is now a business</ThemedText>
             {activation.seconds > 0 ? (
               <View style={[styles.activationTimeChip, { backgroundColor: Colors.travonyGreen }]}>
-                <Feather name="clock" size={16} color="#FFFFFF" />
+                <Feather name="clock" size={16} color={Colors.light.textOnPrimary} />
                 <ThemedText style={styles.activationTimeText}>
                   Activated in {activation.seconds} {activation.seconds === 1 ? "second" : "seconds"}
                 </ThemedText>
@@ -569,9 +569,9 @@ export default function DriverVehicleDetailsScreen() {
         {!activation && showManual ? (
           <>
             {missingFields.length > 0 ? (
-              <View style={[styles.infoCard, { backgroundColor: "#F59E0B20" }]}>
-                <ThemedText style={[styles.infoTitle, { color: "#B45309" }]}>Just a couple more details</ThemedText>
-                <ThemedText style={[styles.infoText, { color: "#B45309" }]}>
+              <View style={[styles.infoCard, { backgroundColor: theme.warning + "20" }]}>
+                <ThemedText style={[styles.infoTitle, { color: theme.warning }]}>Just a couple more details</ThemedText>
+                <ThemedText style={[styles.infoText, { color: theme.warning }]}>
                   We found your car but couldn't read everything from the photo. Please complete the highlighted fields.
                 </ThemedText>
               </View>
@@ -641,7 +641,7 @@ function FieldInput({
 }) {
   return (
     <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
-      <ThemedText style={[styles.sectionTitle, { color: highlight ? "#B45309" : theme.textSecondary }]}>
+      <ThemedText style={[styles.sectionTitle, { color: highlight ? theme.warning : theme.textSecondary }]}>
         {label}
       </ThemedText>
       <TextInput
@@ -650,7 +650,7 @@ function FieldInput({
           {
             backgroundColor: theme.backgroundRoot,
             color: theme.text,
-            borderColor: highlight ? "#F59E0B" : theme.border,
+            borderColor: highlight ? theme.warning : theme.border,
           },
         ]}
         value={value}
@@ -682,8 +682,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   infoTitle: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
     textAlign: "center",
     marginBottom: Spacing.xs,
   },
@@ -701,8 +700,7 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   badgeText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   foundCard: {
     borderRadius: BorderRadius.xl,
@@ -718,8 +716,7 @@ const styles = StyleSheet.create({
     padding: Spacing.lg,
   },
   foundTitle: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   foundMeta: {
     ...Typography.small,
@@ -734,8 +731,7 @@ const styles = StyleSheet.create({
     marginTop: Spacing.md,
   },
   plateText: {
-    ...Typography.body,
-    fontWeight: "700",
+    ...Typography.h4Heavy,
     letterSpacing: 1,
   },
   captureBox: {
@@ -750,8 +746,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   captureTitle: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     marginTop: Spacing.sm,
   },
   previewImage: {
@@ -767,8 +762,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
   },
   sectionTitle: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
     marginBottom: Spacing.sm,
     textTransform: "uppercase",
   },
@@ -783,8 +777,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   typeChipText: {
-    ...Typography.small,
-    fontWeight: "500",
+    ...Typography.smallMedium,
   },
   input: {
     ...Typography.body,
@@ -827,9 +820,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   activationTimeText: {
-    ...Typography.small,
-    color: "#FFFFFF",
-    fontWeight: "700",
+    ...Typography.smallHeavy,
+    color: Colors.light.textOnPrimary,
   },
   activationSub: {
     ...Typography.body,

@@ -85,7 +85,7 @@ export default function HelpScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.contactRow,
-            { opacity: pressed ? 0.7 : 1 },
+            { opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={handleEmail}
         >
@@ -106,7 +106,7 @@ export default function HelpScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.contactRow,
-            { opacity: pressed ? 0.7 : 1 },
+            { opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={handleWebsite}
         >
@@ -203,8 +203,7 @@ const styles = StyleSheet.create({
     opacity: 0.7,
   },
   contactValue: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
     marginTop: Spacing.xs,
   },
   divider: {
@@ -226,8 +225,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   faqQuestion: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
     paddingRight: Spacing.md,
   },
   faqAnswer: {

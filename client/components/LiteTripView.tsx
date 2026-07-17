@@ -128,8 +128,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   liteTag: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   statusTitle: {
     ...Typography.h4,
@@ -161,8 +160,7 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
   routeText: {
-    ...Typography.body,
-    fontWeight: "500",
+    ...Typography.bodySmallMedium,
   },
   connector: {
     width: 2,
@@ -183,7 +181,6 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   metaText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
 });

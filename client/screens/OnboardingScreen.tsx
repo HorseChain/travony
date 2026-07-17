@@ -254,7 +254,7 @@ export default function OnboardingScreen() {
           <Pressable
             style={({ pressed }) => [
               styles.perspectiveButton,
-              { opacity: pressed ? 0.6 : 1 },
+              { opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={() => handlePerspectiveSelect("driver")}
           >
@@ -266,7 +266,7 @@ export default function OnboardingScreen() {
             style={({ pressed }) => [
               styles.perspectiveButton,
               APP_VARIANT === 'unified' ? styles.perspectiveButtonSecondary : {},
-              { opacity: pressed ? 0.6 : 1 },
+              { opacity: pressed ? 0.8 : 1 },
             ]}
             onPress={() => handlePerspectiveSelect("customer")}
           >
@@ -292,18 +292,18 @@ export default function OnboardingScreen() {
         <Pressable
           style={({ pressed }) => [
             styles.roleButton,
-            { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.9 : 1 },
+            { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={() => handleRoleSelect("customer")}
         >
-          <Ionicons name="person" size={32} color="#FFFFFF" style={{ marginBottom: 8 }} />
+          <Ionicons name="person" size={32} color={Colors.light.textOnPrimary} style={{ marginBottom: 8 }} />
           <ThemedText style={styles.roleButtonTitle}>Access the Network</ThemedText>
           <ThemedText style={styles.roleButtonSubtitle}>Intelligent mobility</ThemedText>
         </Pressable>
         <Pressable
           style={({ pressed }) => [
             styles.roleButton,
-            { backgroundColor: theme.backgroundElevated, borderWidth: 2, borderColor: Colors.travonyGreen, opacity: pressed ? 0.9 : 1 },
+            { backgroundColor: theme.backgroundElevated, borderWidth: 2, borderColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
           ]}
           onPress={() => handleRoleSelect("driver")}
         >
@@ -327,13 +327,13 @@ export default function OnboardingScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.primaryButton,
-          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.9 : 1 },
+          { backgroundColor: Colors.travonyGreen, opacity: pressed ? 0.8 : 1 },
         ]}
         onPress={handleLocationPermission}
         disabled={isLoading}
       >
         {isLoading ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={Colors.light.textOnPrimary} />
         ) : (
           <ThemedText style={styles.primaryButtonText}>Enable Location</ThemedText>
         )}
@@ -444,13 +444,13 @@ export default function OnboardingScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.primaryButton,
-          { backgroundColor: Colors.travonyGreen, opacity: pressed || !phone ? 0.6 : 1 },
+          { backgroundColor: Colors.travonyGreen, opacity: pressed || !phone ? 0.5 : 1 },
         ]}
         onPress={handleSendOTP}
         disabled={isLoading || !phone}
       >
         {isLoading ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={Colors.light.textOnPrimary} />
         ) : (
           <ThemedText style={styles.primaryButtonText}>Send Code</ThemedText>
         )}
@@ -535,13 +535,13 @@ export default function OnboardingScreen() {
       <Pressable
         style={({ pressed }) => [
           styles.primaryButton,
-          { backgroundColor: Colors.travonyGreen, opacity: pressed || !name.trim() ? 0.6 : 1 },
+          { backgroundColor: Colors.travonyGreen, opacity: pressed || !name.trim() ? 0.5 : 1 },
         ]}
         onPress={handleNameSubmit}
         disabled={isLoading || !name.trim()}
       >
         {isLoading ? (
-          <ActivityIndicator color="#FFFFFF" />
+          <ActivityIndicator color={Colors.light.textOnPrimary} />
         ) : (
           <ThemedText style={styles.primaryButtonText}>Continue</ThemedText>
         )}
@@ -550,7 +550,7 @@ export default function OnboardingScreen() {
   );
 
   return (
-    <ThemedView style={[styles.container, step === "perspective" && { backgroundColor: "#000000" }]}>
+    <ThemedView style={[styles.container, step === "perspective" && { backgroundColor: Colors.black }]}>
       <View style={[styles.content, { paddingTop: insets.top + Spacing["3xl"], paddingBottom: insets.bottom + Spacing["2xl"] }]}>
         {canGoBack() && step !== "perspective" && (
           <Pressable 
@@ -668,7 +668,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     ...Typography.button,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
   },
   phoneInputContainer: {
     flexDirection: "row",
@@ -687,8 +687,7 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   countryCodeText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   modalOverlay: {
     flex: 1,
@@ -732,8 +731,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   countryPhoneCode: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   phoneInput: {
     flex: 1,
@@ -761,8 +759,7 @@ const styles = StyleSheet.create({
     padding: Spacing.md,
   },
   resendText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   nameInput: {
     width: "100%",
@@ -806,7 +803,7 @@ const styles = StyleSheet.create({
   },
   roleButtonTitle: {
     ...Typography.h3,
-    color: "#FFFFFF",
+    color: Colors.light.textOnPrimary,
     marginBottom: Spacing.xs,
   },
   roleButtonSubtitle: {
@@ -827,16 +824,15 @@ const styles = StyleSheet.create({
   },
   perspectiveHeadline: {
     fontSize: 32,
-    fontWeight: "200",
-    color: "#FFFFFF",
+    fontWeight: "200" as const,
+    color: Colors.light.textOnPrimary,
     textAlign: "center",
     letterSpacing: 1.5,
     lineHeight: 44,
     marginBottom: Spacing["2xl"],
   },
   perspectiveSubtext: {
-    fontSize: 13,
-    fontWeight: "400",
+    ...Typography.labelLight,
     color: "rgba(255, 255, 255, 0.35)",
     textAlign: "center",
     letterSpacing: 2,
@@ -857,18 +853,16 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255, 255, 255, 0.15)",
   },
   perspectiveButtonText: {
-    fontSize: 13,
-    fontWeight: "500",
-    color: "#FFFFFF",
+    ...Typography.label,
+    color: Colors.light.textOnPrimary,
     letterSpacing: 1,
-    textTransform: "uppercase",
+    textTransform: "uppercase" as const,
   },
   perspectiveButtonSecondary: {
     borderColor: "rgba(255, 255, 255, 0.06)",
   },
   perspectiveButtonTextSecondary: {
-    fontSize: 13,
-    fontWeight: "400",
+    ...Typography.labelLight,
     color: "rgba(255, 255, 255, 0.45)",
     letterSpacing: 1,
     textTransform: "uppercase",

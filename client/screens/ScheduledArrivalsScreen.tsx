@@ -17,7 +17,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius, Colors } from "@/constants/theme";
+import { Typography, Spacing, BorderRadius, Colors } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 
 type Category = "mall" | "university" | "airport" | "hotel" | "other";
@@ -270,7 +270,7 @@ export default function ScheduledArrivalsScreen() {
   ];
   const chipText = (active: boolean) => [
     styles.chipText,
-    { color: active ? "#fff" : theme.text },
+    { color: active ? Colors.light.textOnPrimary : theme.text },
   ];
 
   const renderForm = () => (
@@ -431,12 +431,12 @@ export default function ScheduledArrivalsScreen() {
           <ThemedText style={{ color: theme.text }}>Cancel</ThemedText>
         </Pressable>
         <Pressable
-          style={[styles.primaryButton, { opacity: createMutation.isPending ? 0.6 : 1 }]}
+          style={[styles.primaryButton, { opacity: createMutation.isPending ? 0.5 : 1 }]}
           onPress={() => createMutation.mutate()}
           disabled={createMutation.isPending}
         >
           {createMutation.isPending ? (
-            <ActivityIndicator size="small" color="#fff" />
+            <ActivityIndicator size="small" color={Colors.light.textOnPrimary} />
           ) : (
             <ThemedText style={styles.primaryButtonText}>Schedule it</ThemedText>
           )}
@@ -545,7 +545,7 @@ export default function ScheduledArrivalsScreen() {
           renderForm()
         ) : (
           <Pressable style={styles.primaryButton} onPress={() => setCreating(true)}>
-            <Ionicons name="add" size={18} color="#fff" />
+            <Ionicons name="add" size={18} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.primaryButtonText}>Schedule an arrival</ThemedText>
           </Pressable>
         )}
@@ -577,20 +577,20 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     alignItems: "flex-start",
   },
-  heroTitle: { fontSize: 15, fontWeight: "700", marginBottom: 2 },
-  heroText: { fontSize: 12, lineHeight: 17 },
+  heroTitle: { ...Typography.bodySmallHeavy, marginBottom: 2 },
+  heroText: { ...Typography.small, lineHeight: 17 },
   formCard: {
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
     padding: Spacing.lg,
   },
-  sectionLabel: { fontSize: 13, fontWeight: "700", marginTop: Spacing.md, marginBottom: Spacing.sm },
+  sectionLabel: { ...Typography.labelHeavy, marginTop: Spacing.md, marginBottom: Spacing.sm },
   input: {
     borderWidth: 1,
     borderRadius: BorderRadius.md,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.sm + 2,
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   hubList: { marginTop: Spacing.sm },
   hubRow: {
@@ -608,9 +608,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: BorderRadius.md,
   },
-  hubName: { fontSize: 14, fontWeight: "600" },
-  hubMeta: { fontSize: 12 },
-  changeLink: { fontSize: 12, fontWeight: "700" },
+  hubName: { ...Typography.bodyBold },
+  hubMeta: { ...Typography.small },
+  changeLink: { ...Typography.smallHeavy },
   chipRow: { flexDirection: "row", flexWrap: "wrap", gap: Spacing.sm },
   chip: {
     paddingHorizontal: Spacing.md,
@@ -618,7 +618,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     borderWidth: 1,
   },
-  chipText: { fontSize: 12, fontWeight: "600" },
+  chipText: { ...Typography.smallBold },
   pickupRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -627,10 +627,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: BorderRadius.md,
   },
-  pickupText: { fontSize: 14, flex: 1 },
+  pickupText: { ...Typography.bodyMedium, flex: 1 },
   timeRow: { flexDirection: "row", gap: Spacing.md, marginTop: Spacing.md },
-  fieldLabel: { fontSize: 11, fontWeight: "600", marginBottom: 4 },
-  bufferHint: { fontSize: 11, marginTop: Spacing.sm, lineHeight: 15 },
+  fieldLabel: { ...Typography.captionBold, marginBottom: 4 },
+  bufferHint: { ...Typography.caption, marginTop: Spacing.sm, lineHeight: 15 },
   formActions: { flexDirection: "row", gap: Spacing.md, marginTop: Spacing.lg },
   secondaryButton: {
     flex: 1,
@@ -649,7 +649,7 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
     alignItems: "center",
   },
-  primaryButtonText: { color: "#fff", fontWeight: "700", fontSize: 14 },
+  primaryButtonText: { ...Typography.bodyMedium, color: Colors.light.textOnPrimary, fontWeight: "700" as const },
   itemCard: {
     borderRadius: BorderRadius.lg,
     borderWidth: 1,
@@ -664,14 +664,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  itemTitle: { fontSize: 15, fontWeight: "700" },
+  itemTitle: { ...Typography.bodySmallHeavy },
   nextBlock: {
     marginTop: Spacing.md,
     paddingTop: Spacing.md,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
-  nextLine: { fontSize: 13 },
-  nextStrong: { fontSize: 13, fontWeight: "700" },
+  nextLine: { ...Typography.labelLight },
+  nextStrong: { ...Typography.labelHeavy },
   itemActions: { flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.md },
   smallButton: {
     borderWidth: 1,
@@ -679,6 +679,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: 6,
   },
-  smallButtonText: { fontSize: 12, fontWeight: "600" },
-  emptyText: { fontSize: 13, textAlign: "center", marginTop: Spacing.xl, lineHeight: 18 },
+  smallButtonText: { ...Typography.smallBold },
+  emptyText: { ...Typography.labelLight, textAlign: "center", marginTop: Spacing.xl, lineHeight: 18 },
 });

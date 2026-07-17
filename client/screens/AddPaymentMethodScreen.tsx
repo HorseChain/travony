@@ -31,7 +31,7 @@ export default function AddPaymentMethodScreen() {
       title: "USDT (Crypto)",
       subtitle: "Pay with USDT stablecoin. Low fees (0.5%), fast transactions, powered by NOWPayments.",
       icon: "logo-usd" as const,
-      color: "#26A17B",
+      color: theme.crypto,
       status: "Available",
     },
   ];
@@ -128,8 +128,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   infoTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
     marginBottom: Spacing.xs,
   },
   infoSubtitle: {
@@ -156,8 +155,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   optionTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
     marginBottom: Spacing.xs,
   },
   optionSubtitle: {
@@ -180,16 +178,14 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   statusText: {
-    ...Typography.small,
-    fontWeight: "600",
+    ...Typography.smallBold,
   },
   feeSection: {
     marginTop: Spacing.lg,
     marginBottom: Spacing["2xl"],
   },
   feeSectionTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
     marginBottom: Spacing.md,
   },
   feeRow: {
@@ -202,8 +198,7 @@ const styles = StyleSheet.create({
     ...Typography.body,
   },
   feeValue: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   backButton: {
     flexDirection: "row",
@@ -213,7 +208,6 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.md,
   },
   backButtonText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
 });

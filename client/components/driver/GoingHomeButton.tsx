@@ -269,7 +269,7 @@ export function GoingHomeButton({ isOnline, currentLocation, cardMode = false }:
         <View style={[styles.pmgthCard, { backgroundColor: theme.backgroundRoot }]}>
           <View style={styles.pmgthCardContent}>
             <View style={[styles.pmgthCardIcon, { backgroundColor: isActive ? Colors.travonyGreen : Colors.travonyGreen + "15" }]}>
-              <Ionicons name="home" size={22} color={isActive ? "#fff" : Colors.travonyGreen} />
+              <Ionicons name="home" size={22} color={isActive ? Colors.light.textOnPrimary : Colors.travonyGreen} />
             </View>
             <View style={{ flex: 1 }}>
               {isActive && stats ? (
@@ -298,7 +298,7 @@ export function GoingHomeButton({ isOnline, currentLocation, cardMode = false }:
               onPress={handlePress}
               disabled={isPending}
             >
-              <ThemedText style={[styles.pmgthCardButtonText, { color: isActive ? theme.error : "#fff" }]}>
+              <ThemedText style={[styles.pmgthCardButtonText, { color: isActive ? theme.error : Colors.light.textOnPrimary }]}>
                 {isPending ? "..." : isActive ? "Deactivate" : "Activate"}
               </ThemedText>
             </Pressable>
@@ -397,17 +397,17 @@ export function GoingHomeButton({ isOnline, currentLocation, cardMode = false }:
             styles.button,
             {
               backgroundColor: isActive ? Colors.travonyGreen : theme.backgroundRoot,
-              opacity: isPending ? 0.7 : 1,
+              opacity: isPending ? 0.5 : 1,
             },
           ]}
           onPress={handlePress}
           disabled={isPending}
         >
-          <View style={[styles.iconCircle, { backgroundColor: isActive ? "#fff" : Colors.travonyGreen }]}>
+          <View style={[styles.iconCircle, { backgroundColor: isActive ? Colors.light.backgroundRoot : Colors.travonyGreen }]}>
             <Ionicons 
               name="home" 
               size={20} 
-              color={isActive ? Colors.travonyGreen : "#fff"} 
+              color={isActive ? Colors.travonyGreen : Colors.light.textOnPrimary} 
             />
           </View>
 
@@ -531,7 +531,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.15,
         shadowRadius: 6,
@@ -557,9 +557,8 @@ const styles = StyleSheet.create({
     gap: Spacing.sm,
   },
   activeEarnings: {
-    ...Typography.bodyMedium,
-    color: "#fff",
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
+    color: Colors.light.textOnPrimary,
   },
   activeTime: {
     ...Typography.caption,
@@ -577,8 +576,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing.md,
   },
   modalTitle: {
-    ...Typography.h3,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
   },
   closeButton: {
     padding: Spacing.xs,
@@ -599,8 +597,7 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   currentLocationText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   divider: {
     height: 1,
@@ -662,15 +659,14 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   savingText: {
-    ...Typography.body,
-    fontWeight: "600",
+    ...Typography.h4,
   },
   pmgthCard: {
     borderRadius: BorderRadius.xl,
     padding: Spacing.lg,
     ...Platform.select({
       ios: {
-        shadowColor: "#000",
+        shadowColor: Colors.black,
         shadowOffset: { width: 0, height: 2 },
         shadowOpacity: 0.1,
         shadowRadius: 8,
@@ -691,8 +687,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   pmgthCardTitle: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
     marginBottom: 2,
   },
   pmgthCardSub: {
@@ -704,7 +699,6 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   pmgthCardButtonText: {
-    ...Typography.bodyMedium,
-    fontWeight: "700",
+    ...Typography.bodyHeavy,
   },
 });

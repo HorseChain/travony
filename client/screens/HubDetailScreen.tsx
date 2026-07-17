@@ -78,9 +78,9 @@ interface HubEvStatus {
 
 const CATEGORY_CONFIG: Record<MessageCategory, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = {
   demand_insight: { label: "Demand", icon: "trending-up", color: Colors.travonyGreen },
-  traffic_alert: { label: "Traffic", icon: "warning-outline", color: "#FF6B6B" },
-  event_signal: { label: "Event", icon: "calendar-outline", color: "#7C4DFF" },
-  availability_update: { label: "Available", icon: "checkmark-circle-outline", color: "#2196F3" },
+  traffic_alert: { label: "Traffic", icon: "warning-outline", color: Colors.light.error },
+  event_signal: { label: "Event", icon: "calendar-outline", color: Colors.eventPurple },
+  availability_update: { label: "Available", icon: "checkmark-circle-outline", color: Colors.light.info },
 };
 
 const CATEGORIES: MessageCategory[] = ["demand_insight", "traffic_alert", "event_signal", "availability_update"];
@@ -272,11 +272,11 @@ export default function HubDetailScreen() {
               <ThemedText style={[styles.yieldAmount, { color: Colors.travonyGreen }]}>
                 ${intel.predictedYield.amount?.toFixed(0) || "0"}
               </ThemedText>
-              <ThemedText style={[{ fontSize: 13 }, { color: theme.textSecondary }]}>
+              <ThemedText style={[{ ...Typography.labelLight }, { color: theme.textSecondary }]}>
                 / {intel.predictedYield.window || "hour"}
               </ThemedText>
             </View>
-            <ThemedText style={[{ fontSize: 12, marginTop: 4 }, { color: theme.textMuted }]}>
+            <ThemedText style={[{ ...Typography.small, marginTop: 4 }, { color: theme.textMuted }]}>
               {Math.round((intel.predictedYield.confidence || 0) * 100)}% confidence
             </ThemedText>
           </View>
@@ -290,7 +290,7 @@ export default function HubDetailScreen() {
                 {intel.aiRecommendation.title || "AI Recommendation"}
               </ThemedText>
             </View>
-            <ThemedText style={[{ fontSize: 13, marginTop: Spacing.sm, lineHeight: 18 }, { color: theme.textSecondary }]}>
+            <ThemedText style={[{ ...Typography.labelLight, marginTop: Spacing.sm, lineHeight: 18 }, { color: theme.textSecondary }]}>
               {intel.aiRecommendation.message || ""}
             </ThemedText>
           </View>
@@ -304,12 +304,12 @@ export default function HubDetailScreen() {
                 <Ionicons
                   name={item.type === "arrival" ? "arrow-down-circle-outline" : "arrow-up-circle-outline"}
                   size={16}
-                  color={item.type === "arrival" ? Colors.travonyGreen : "#FF6B6B"}
+                  color={item.type === "arrival" ? Colors.travonyGreen : theme.error}
                 />
-                <ThemedText style={[{ fontSize: 13, flex: 1, marginLeft: Spacing.sm }, { color: theme.text }]}>
+                <ThemedText style={[{ ...Typography.labelLight, flex: 1, marginLeft: Spacing.sm }, { color: theme.text }]}>
                   {item.vehicleType} {item.type === "arrival" ? "arrived" : "departed"}
                 </ThemedText>
-                <ThemedText style={[{ fontSize: 11 }, { color: theme.textMuted }]}>{item.timeAgo}</ThemedText>
+                <ThemedText style={[{ ...Typography.caption }, { color: theme.textMuted }]}>{item.timeAgo}</ThemedText>
               </View>
             ))}
           </View>
@@ -330,12 +330,12 @@ export default function HubDetailScreen() {
                 <ThemedText style={[styles.cardTitle, { color: theme.text, marginBottom: 0, flex: 1 }]}>Demand Trend</ThemedText>
                 {/* Explicit demand-level badge (Low/Medium/High) */}
                 <View style={[styles.demandBadge, { backgroundColor: demandBadgeColor + "20", borderColor: demandBadgeColor + "40" }]}>
-                  <ThemedText style={{ fontSize: 12, fontWeight: "700", color: demandBadgeColor }}>
+                  <ThemedText style={{ ...Typography.smallHeavy, color: demandBadgeColor }}>
                     {demandLevel}
                   </ThemedText>
                 </View>
               </View>
-              <ThemedText style={{ fontSize: 12, color: theme.textMuted, marginBottom: Spacing.md }}>
+              <ThemedText style={{ ...Typography.small, color: theme.textMuted, marginBottom: Spacing.md }}>
                 {totalRidesLast2h} rides in last 2 hours
               </ThemedText>
               <View style={{ flexDirection: "row", alignItems: "flex-end", gap: 4, height: 48 }}>
@@ -355,10 +355,10 @@ export default function HubDetailScreen() {
                 })}
               </View>
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 4 }}>
-                <ThemedText style={{ fontSize: 10, color: theme.textMuted }}>
+                <ThemedText style={{ ...Typography.micro, color: theme.textMuted }}>
                   {intel.demandTrend[0]?.time || ""}
                 </ThemedText>
-                <ThemedText style={{ fontSize: 10, color: theme.textMuted }}>
+                <ThemedText style={{ ...Typography.micro, color: theme.textMuted }}>
                   {intel.demandTrend[intel.demandTrend.length - 1]?.time || "Now"}
                 </ThemedText>
               </View>
@@ -369,19 +369,19 @@ export default function HubDetailScreen() {
         {intel.seasonalBehavior ? (
           <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
             <ThemedText style={[styles.cardTitle, { color: theme.text }]}>Seasonal Patterns</ThemedText>
-            <ThemedText style={[{ fontSize: 13, color: theme.textSecondary }]}>
+            <ThemedText style={[{ ...Typography.labelLight, color: theme.textSecondary }]}>
               {intel.seasonalBehavior.currentTrend || "Normal"}
             </ThemedText>
             <View style={{ flexDirection: "row", gap: Spacing.lg, marginTop: Spacing.sm }}>
               <View>
-                <ThemedText style={[{ fontSize: 11 }, { color: theme.textMuted }]}>Peak Day</ThemedText>
-                <ThemedText style={[{ fontSize: 13, fontWeight: "600" }, { color: theme.text }]}>
+                <ThemedText style={[{ ...Typography.caption }, { color: theme.textMuted }]}>Peak Day</ThemedText>
+                <ThemedText style={[{ ...Typography.labelBold }, { color: theme.text }]}>
                   {intel.seasonalBehavior.peakDay || "-"}
                 </ThemedText>
               </View>
               <View>
-                <ThemedText style={[{ fontSize: 11 }, { color: theme.textMuted }]}>Peak Hour</ThemedText>
-                <ThemedText style={[{ fontSize: 13, fontWeight: "600" }, { color: theme.text }]}>
+                <ThemedText style={[{ ...Typography.caption }, { color: theme.textMuted }]}>Peak Hour</ThemedText>
+                <ThemedText style={[{ ...Typography.labelBold }, { color: theme.text }]}>
                   {intel.seasonalBehavior.peakHour || "-"}
                 </ThemedText>
               </View>
@@ -421,7 +421,7 @@ export default function HubDetailScreen() {
                   ]}
                 >
                   <Ionicons name={cfg.icon} size={12} color={selected ? cfg.color : theme.textMuted} />
-                  <ThemedText style={{ fontSize: 11, color: selected ? cfg.color : theme.textMuted }}>
+                  <ThemedText style={{ ...Typography.caption, color: selected ? cfg.color : theme.textMuted }}>
                     {cfg.label}
                   </ThemedText>
                 </Pressable>
@@ -444,7 +444,7 @@ export default function HubDetailScreen() {
               }}
               style={[styles.sendBtn, { backgroundColor: theme.primary, opacity: messageText.trim() ? 1 : 0.5 }]}
             >
-              <Ionicons name="send" size={16} color="#FFFFFF" />
+              <Ionicons name="send" size={16} color={Colors.light.textOnPrimary} />
             </Pressable>
           </View>
         </View>
@@ -463,26 +463,26 @@ export default function HubDetailScreen() {
               <View key={msg.id} style={[styles.msgCard, { backgroundColor: theme.backgroundDefault }]}>
                 <View style={styles.msgHeader}>
                   <View style={[styles.msgAvatar, { backgroundColor: theme.primary + "20" }]}>
-                    <ThemedText style={{ fontSize: 12, fontWeight: "700", color: theme.primary }}>
+                    <ThemedText style={{ ...Typography.smallHeavy, color: theme.primary }}>
                       {(msg.authorName || "?")[0].toUpperCase()}
                     </ThemedText>
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText style={[{ fontSize: 13, fontWeight: "600" }, { color: theme.text }]}>
+                    <ThemedText style={[{ ...Typography.labelBold }, { color: theme.text }]}>
                       {msg.authorName || "Anonymous"}
                     </ThemedText>
-                    <ThemedText style={[{ fontSize: 11 }, { color: theme.textMuted }]}>
+                    <ThemedText style={[{ ...Typography.caption }, { color: theme.textMuted }]}>
                       {getTimeAgo(msg.createdAt)}
                     </ThemedText>
                   </View>
                   {cat ? (
                     <View style={[styles.msgCatBadge, { backgroundColor: cat.color + "15" }]}>
                       <Ionicons name={cat.icon} size={10} color={cat.color} />
-                      <ThemedText style={{ fontSize: 10, color: cat.color }}>{cat.label}</ThemedText>
+                      <ThemedText style={{ ...Typography.micro, color: cat.color }}>{cat.label}</ThemedText>
                     </View>
                   ) : null}
                 </View>
-                <ThemedText style={[{ fontSize: 14, lineHeight: 20, marginTop: Spacing.sm }, { color: theme.text }]}>
+                <ThemedText style={[{ ...Typography.bodyMedium, lineHeight: 20, marginTop: Spacing.sm }, { color: theme.text }]}>
                   {msg.content}
                 </ThemedText>
                 <View style={styles.msgFooter}>
@@ -493,16 +493,16 @@ export default function HubDetailScreen() {
                     <Ionicons
                       name={msg.hasLiked ? "heart" : "heart-outline"}
                       size={14}
-                      color={msg.hasLiked ? "#FF6B6B" : theme.textMuted}
+                      color={msg.hasLiked ? theme.error : theme.textMuted}
                     />
-                    <ThemedText style={[{ fontSize: 12 }, { color: theme.textMuted }]}>
+                    <ThemedText style={[{ ...Typography.small }, { color: theme.textMuted }]}>
                       {msg.likesCount || 0}
                     </ThemedText>
                   </Pressable>
                   {msg.aiScore != null && msg.aiScore > 0.7 ? (
                     <View style={styles.aiScoreBadge}>
                       <Ionicons name="sparkles" size={10} color={Colors.travonyGold} />
-                      <ThemedText style={{ fontSize: 10, color: Colors.travonyGold }}>AI Curated</ThemedText>
+                      <ThemedText style={{ ...Typography.micro, color: Colors.travonyGold }}>AI Curated</ThemedText>
                     </View>
                   ) : null}
                 </View>
@@ -572,7 +572,7 @@ export default function HubDetailScreen() {
             <ThemedText style={[styles.yieldAmount, { color: theme.primary }]}>
               {Math.round(insights.contributionScore * 100)}%
             </ThemedText>
-            <ThemedText style={[{ fontSize: 12 }, { color: theme.textMuted }]}>Community contribution score</ThemedText>
+            <ThemedText style={[{ ...Typography.small }, { color: theme.textMuted }]}>Community contribution score</ThemedText>
           </View>
         ) : null}
 
@@ -582,7 +582,7 @@ export default function HubDetailScreen() {
             {insights.bestActivationTimes.map((time, i) => (
               <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: Spacing.xs }}>
                 <Ionicons name="time-outline" size={14} color={theme.primary} />
-                <ThemedText style={[{ fontSize: 13 }, { color: theme.text }]}>{time}</ThemedText>
+                <ThemedText style={[{ ...Typography.labelLight }, { color: theme.text }]}>{time}</ThemedText>
               </View>
             ))}
           </View>
@@ -617,7 +617,7 @@ export default function HubDetailScreen() {
     const portsFree = evStatus?.availablePorts ?? hubDetail?.availablePorts ?? 0;
     const portsTotal = evStatus?.totalChargingPorts ?? hubDetail?.totalChargingPorts ?? 0;
     const portsInUse = portsTotal - portsFree;
-    const portColor = portsFree === 0 ? "#FF6B6B" : portsFree <= 2 ? Colors.travonyGold : Colors.travonyGreen;
+    const portColor = portsFree === 0 ? theme.error : portsFree <= 2 ? Colors.travonyGold : Colors.travonyGreen;
     const occupancyPct = portsTotal > 0 ? Math.round((portsInUse / portsTotal) * 100) : 0;
 
     return (
@@ -632,23 +632,21 @@ export default function HubDetailScreen() {
           <View style={{ flexDirection: "row", gap: Spacing.md, marginBottom: Spacing.md }}>
             <View style={[styles.portSideCard, { backgroundColor: Colors.travonyGreen + "15", borderColor: Colors.travonyGreen + "40", flex: 1 }]}>
               <Ionicons name="checkmark-circle-outline" size={22} color={Colors.travonyGreen} />
-              <ThemedText style={{ fontSize: 28, fontWeight: "800", color: Colors.travonyGreen, marginTop: 4 }}>
+              <ThemedText style={{ ...Typography.h1, fontWeight: "800", color: Colors.travonyGreen, marginTop: 4 }}>
                 {portsFree}
               </ThemedText>
-              <ThemedText style={{ fontSize: 12, color: Colors.travonyGreen, fontWeight: "600", marginTop: 2 }}>Available</ThemedText>
+              <ThemedText style={{ ...Typography.smallBold, color: Colors.travonyGreen, marginTop: 2 }}>Available</ThemedText>
             </View>
-            <View style={[styles.portSideCard, { backgroundColor: "#2196F315", borderColor: "#2196F340", flex: 1 }]}>
-              <Ionicons name="battery-charging-outline" size={22} color="#2196F3" />
-              <ThemedText style={{ fontSize: 28, fontWeight: "800", color: "#2196F3", marginTop: 4 }}>
+            <View style={[styles.portSideCard, { backgroundColor: theme.info + "15", borderColor: theme.info + "40", flex: 1 }]}>
+              <Ionicons name="battery-charging-outline" size={22} color={theme.info} />
+              <ThemedText style={{ ...Typography.h1, fontWeight: "800", color: theme.info, marginTop: 4 }}>
                 {portsInUse}
               </ThemedText>
-              <ThemedText style={{ fontSize: 12, color: "#2196F3", fontWeight: "600", marginTop: 2 }}>Charging In Use</ThemedText>
             </View>
           </View>
 
           <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: Spacing.sm }}>
-            <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>{portsTotal} total ports</ThemedText>
-            <ThemedText style={{ fontSize: 12, color: portColor, fontWeight: "600" }}>{occupancyPct}% occupied</ThemedText>
+            <ThemedText style={{ ...Typography.smallBold, color: theme.textMuted }}>{portsTotal} total ports</ThemedText>
           </View>
           <View style={[styles.portBar]}>
             {/* Use flex-based fill to avoid string percentage types */}
@@ -660,14 +658,14 @@ export default function HubDetailScreen() {
         {evStatus ? (
           <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
             <ThemedText style={[styles.cardTitle, { color: theme.text }]}>EV Driver Staging</ThemedText>
-            <ThemedText style={[{ fontSize: 12, color: theme.textMuted, marginBottom: Spacing.md }]}>
+            <ThemedText style={[{ ...Typography.small, color: theme.textMuted, marginBottom: Spacing.md }]}>
               {evStatus.evDriversPresent} EV driver{evStatus.evDriversPresent !== 1 ? "s" : ""} present in last 2 hours
             </ThemedText>
 
             <View style={styles.stagingGrid}>
-              <View style={[styles.stagingItem, { backgroundColor: "#2196F320" }]}>
-                <Ionicons name="battery-charging-outline" size={20} color="#2196F3" />
-                <ThemedText style={[styles.stagingCount, { color: "#2196F3" }]}>
+              <View style={[styles.stagingItem, { backgroundColor: theme.info + "20" }]}>
+                <Ionicons name="battery-charging-outline" size={20} color={theme.info} />
+                <ThemedText style={[styles.stagingCount, { color: theme.info }]}>
                   {evStatus.evStagingBreakdown.charging}
                 </ThemedText>
                 <ThemedText style={[styles.stagingLabel, { color: theme.textMuted }]}>Charging</ThemedText>
@@ -693,13 +691,13 @@ export default function HubDetailScreen() {
         {evStatus && evStatus.evStagingBreakdown.charging > 0 ? (
           <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
             <ThemedText style={[styles.cardTitle, { color: theme.text }]}>Estimated Ready Times</ThemedText>
-            <ThemedText style={[{ fontSize: 12, color: theme.textMuted, marginBottom: Spacing.md }]}>
+            <ThemedText style={[{ ...Typography.smallBold, color: theme.textMuted, marginBottom: Spacing.md }]}>
               Based on each driver's real battery level and charging speed
             </ThemedText>
             {evStatus.nearestReadyMinutes !== null ? (
               <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
-                <Ionicons name="time-outline" size={18} color="#2196F3" />
-                <ThemedText style={{ fontSize: 14, color: theme.text, fontWeight: "600" }}>
+                <Ionicons name="time-outline" size={18} color={theme.info} />
+                <ThemedText style={{ ...Typography.bodyBold, color: theme.info }}>
                   {evStatus.nearestReadyMinutes === 0
                     ? "Ready now"
                     : `Next EV ready in ~${evStatus.nearestReadyMinutes} min`}
@@ -709,8 +707,8 @@ export default function HubDetailScreen() {
             <View style={{ marginTop: Spacing.sm, gap: 6 }}>
               {evStatus.estimatedReadyTimes.map((e, i) => (
                 <View key={i} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Ionicons name="battery-charging-outline" size={14} color="#2196F3" />
-                  <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>
+                  <Ionicons name="battery-charging-outline" size={14} color={theme.info} />
+                  <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>
                     {`EV ${i + 1}: ${e.minutesRemaining === 0 ? "Ready now" : `~${e.minutesRemaining} min remaining`}`}
                   </ThemedText>
                 </View>
@@ -722,11 +720,11 @@ export default function HubDetailScreen() {
         <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
           <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: Spacing.sm }}>
             <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
-              <Ionicons name="battery-charging" size={18} color="#0EA5A4" />
+              <Ionicons name="battery-charging" size={18} color={Colors.evCharger} />
               <ThemedText style={[styles.cardTitle, { color: theme.text, marginBottom: 0 }]}>Nearby Public Chargers</ThemedText>
             </View>
             {hubChargers ? (
-              <ThemedText style={{ fontSize: 11, color: theme.textMuted, fontWeight: "600" }}>
+              <ThemedText style={{ ...Typography.captionBold, color: theme.textMuted }}>
                 {hubChargers.source === "simulated"
                   ? "Demo list"
                   : hubChargers.source === "unavailable"
@@ -741,15 +739,15 @@ export default function HubDetailScreen() {
                 <View key={c.id} style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
                   <View style={{
                     width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center",
-                    backgroundColor: (c.isOperational ? "#0EA5A4" : "#9CA3AF") + "20",
+                    backgroundColor: (c.isOperational ? Colors.evCharger : theme.textMuted) + "20",
                   }}>
-                    <Ionicons name="battery-charging" size={15} color={c.isOperational ? "#0EA5A4" : "#9CA3AF"} />
+                    <Ionicons name="battery-charging" size={15} color={c.isOperational ? Colors.evCharger : theme.textMuted} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <ThemedText style={{ fontSize: 13, color: theme.text, fontWeight: "600" }} numberOfLines={1}>
+                    <ThemedText style={{ ...Typography.labelBold, color: theme.text }} numberOfLines={1}>
                       {c.name}
                     </ThemedText>
-                    <ThemedText style={{ fontSize: 11, color: theme.textMuted }} numberOfLines={1}>
+                    <ThemedText style={{ ...Typography.caption, color: theme.textMuted }} numberOfLines={1}>
                       {c.distanceKm} km
                       {c.maxPowerKw ? ` · ${c.maxPowerKw} kW` : ""}
                       {c.connectorTypes?.length ? ` · ${c.connectorTypes[0]}` : ""}
@@ -760,7 +758,7 @@ export default function HubDetailScreen() {
               ))}
             </View>
           ) : (
-            <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>
+            <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>
               {hubChargers ? "No public chargers found nearby." : "Loading nearby chargers..."}
             </ThemedText>
           )}
@@ -771,7 +769,7 @@ export default function HubDetailScreen() {
             onPress={() => setShowCheckInModal(true)}
             style={[styles.checkInBtn, { backgroundColor: Colors.travonyGreen }]}
           >
-            <Ionicons name="flash" size={18} color="#FFFFFF" />
+            <Ionicons name="flash" size={18} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.checkInBtnText}>EV Check-In at This Hub</ThemedText>
           </Pressable>
         ) : null}
@@ -779,7 +777,7 @@ export default function HubDetailScreen() {
         <View style={[styles.intelCard, { backgroundColor: theme.backgroundDefault }]}>
           <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
             <Ionicons name="information-circle-outline" size={16} color={theme.textMuted} />
-            <ThemedText style={[{ fontSize: 12, color: theme.textMuted, flex: 1, lineHeight: 18 }]}>
+            <ThemedText style={[{ ...Typography.small, color: theme.textMuted, flex: 1, lineHeight: 18 }]}>
               EV drivers checking in at this hub automatically update port availability. Charging sessions are tracked and released on checkout.
             </ThemedText>
           </View>
@@ -854,7 +852,7 @@ export default function HubDetailScreen() {
                 onPress={() => setShowCheckInModal(true)}
                 style={[styles.floatingCheckIn, { backgroundColor: Colors.travonyGreen }]}
               >
-                <Ionicons name="flash" size={16} color="#FFFFFF" />
+                <Ionicons name="flash" size={16} color={Colors.light.textOnPrimary} />
                 <ThemedText style={styles.checkInBtnText}>Check In Here</ThemedText>
               </Pressable>
             ) : null}
@@ -885,13 +883,13 @@ export default function HubDetailScreen() {
               <Ionicons name="flash" size={22} color={Colors.travonyGreen} />
               <ThemedText style={[styles.modalTitle, { color: theme.text }]}>Check In at {hubName}</ThemedText>
             </View>
-            <ThemedText style={[{ fontSize: 13, marginBottom: Spacing.lg }, { color: theme.textSecondary }]}>
+            <ThemedText style={[{ ...Typography.labelLight, marginBottom: Spacing.lg }, { color: theme.textSecondary }]}>
               Select your EV status to let the system know your staging intent.
             </ThemedText>
             <View style={{ gap: Spacing.sm }}>
               {(
                 [
-                  { status: "charging" as const, label: "Charging", sub: "Need to charge before rides", icon: "battery-charging-outline" as keyof typeof Ionicons.glyphMap, color: "#2196F3" },
+                  { status: "charging" as const, label: "Charging", sub: "Need to charge before rides", icon: "battery-charging-outline" as keyof typeof Ionicons.glyphMap, color: theme.info },
                   { status: "ready" as const, label: "Ready", sub: "Charged and ready for pick-ups", icon: "checkmark-circle-outline" as keyof typeof Ionicons.glyphMap, color: Colors.travonyGreen },
                   { status: "departing" as const, label: "Departing", sub: "Heading out soon", icon: "navigate-outline" as keyof typeof Ionicons.glyphMap, color: Colors.travonyGold },
                 ]
@@ -903,8 +901,8 @@ export default function HubDetailScreen() {
                 >
                   <Ionicons name={icon} size={22} color={color} />
                   <View style={{ flex: 1 }}>
-                    <ThemedText style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>{label}</ThemedText>
-                    <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>{sub}</ThemedText>
+                    <ThemedText style={{ ...Typography.bodyBold, color: theme.text }}>{label}</ThemedText>
+                    <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>{sub}</ThemedText>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color={color} />
                 </Pressable>
@@ -915,13 +913,13 @@ export default function HubDetailScreen() {
               >
                 <Ionicons name="log-in-outline" size={22} color={theme.textMuted} />
                 <View style={{ flex: 1 }}>
-                  <ThemedText style={{ fontSize: 14, fontWeight: "600", color: theme.text }}>Standard Check-In</ThemedText>
-                  <ThemedText style={{ fontSize: 12, color: theme.textMuted }}>Check in without EV status</ThemedText>
+                  <ThemedText style={{ ...Typography.bodyBold, color: theme.text }}>Standard Check-In</ThemedText>
+                  <ThemedText style={{ ...Typography.small, color: theme.textMuted }}>Check in without EV status</ThemedText>
                 </View>
               </Pressable>
             </View>
             <Pressable style={{ marginTop: Spacing.lg, alignItems: "center" }} onPress={() => setShowCheckInModal(false)}>
-              <ThemedText style={{ fontSize: 14, color: theme.textMuted }}>Cancel</ThemedText>
+              <ThemedText style={{ ...Typography.bodyMedium, color: theme.textMuted }}>Cancel</ThemedText>
             </Pressable>
           </View>
         </View>
@@ -933,7 +931,8 @@ export default function HubDetailScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   centerWrap: { alignItems: "center", paddingVertical: Spacing["2xl"], gap: Spacing.md },
-  emptyText: { fontSize: 14, textAlign: "center" },
+  emptyText: { ...Typography.bodyMedium, textAlign: "center" },
+  yieldAmount: { ...Typography.xxlHeavy },
   tabBar: {
     flexDirection: "row",
     marginBottom: Spacing.lg,
@@ -946,18 +945,17 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: Spacing.md,
   },
-  tabLabel: { fontSize: 13, fontWeight: "600" },
+  tabLabel: { ...Typography.labelBold },
   intelCard: {
     padding: Spacing.lg,
     borderRadius: BorderRadius.xl,
     marginBottom: Spacing.md,
   },
-  cardTitle: { fontSize: 15, fontWeight: "600", marginBottom: Spacing.sm },
+  cardTitle: { ...Typography.bodySmallBold, marginBottom: Spacing.sm },
   intelGrid: { flexDirection: "row", justifyContent: "space-around" },
   intelItem: { alignItems: "center", gap: 4 },
-  intelValue: { fontSize: 22, fontWeight: "700" },
-  intelLabel: { fontSize: 11 },
-  yieldAmount: { fontSize: 28, fontWeight: "700" },
+  intelValue: { ...Typography.h2Heavy },
+  intelLabel: { ...Typography.captionBold },
   tickerRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -983,7 +981,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.md,
     paddingVertical: Platform.OS === "ios" ? 10 : 8,
     borderRadius: BorderRadius.sm,
-    fontSize: 14,
+    ...Typography.bodyMedium,
   },
   sendBtn: {
     width: 40,
@@ -1051,7 +1049,7 @@ const styles = StyleSheet.create({
   portBar: {
     height: 6,
     borderRadius: 3,
-    backgroundColor: "#E0E0E0",
+    backgroundColor: Colors.surfaceGray,
     overflow: "hidden",
     flexDirection: "row",
   },
@@ -1071,11 +1069,10 @@ const styles = StyleSheet.create({
     gap: Spacing.xs,
   },
   stagingCount: {
-    fontSize: 20,
-    fontWeight: "700",
+    ...Typography.xlHeavy,
   },
   stagingLabel: {
-    fontSize: 11,
+    ...Typography.caption,
   },
   checkInBtn: {
     flexDirection: "row",
@@ -1087,9 +1084,8 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   checkInBtnText: {
-    color: "#FFFFFF",
-    fontSize: 15,
-    fontWeight: "700",
+    color: Colors.light.textOnPrimary,
+    ...Typography.bodySmallHeavy,
   },
   floatingCheckIn: {
     flexDirection: "row",
@@ -1112,8 +1108,7 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing["2xl"] || 40,
   },
   modalTitle: {
-    fontSize: 18,
-    fontWeight: "700",
+    ...Typography.h3Heavy,
     flex: 1,
   },
   stagingOption: {

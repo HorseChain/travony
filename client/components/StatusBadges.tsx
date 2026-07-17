@@ -4,7 +4,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
-import { Spacing, BorderRadius } from "@/constants/theme";
+import { Spacing, BorderRadius, Colors } from "@/constants/theme";
 
 export interface StatusBadge {
   kind: string;
@@ -14,13 +14,13 @@ export interface StatusBadge {
 // These only render existing trust/reputation state supplied by the server —
 // the app never invents badge types here.
 const BADGE_META: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  verified: { icon: "checkmark-circle", color: "#00B14F" },
-  rating: { icon: "star", color: "#F5A623" },
-  top_rated: { icon: "trophy", color: "#F5A623" },
-  founding_driver: { icon: "flag", color: "#4285F4" },
-  city_champion: { icon: "ribbon", color: "#8E44AD" },
-  prestige: { icon: "shield-checkmark", color: "#00A3A3" },
-  prayer_volunteer: { icon: "heart", color: "#E0518F" },
+  verified: { icon: "checkmark-circle", color: Colors.travonyGreen },
+  rating: { icon: "star", color: Colors.travonyGold },
+  top_rated: { icon: "trophy", color: Colors.travonyGold },
+  founding_driver: { icon: "flag", color: Colors.reactionLike },
+  city_champion: { icon: "ribbon", color: Colors.cityChampion },
+  prestige: { icon: "shield-checkmark", color: Colors.prestige },
+  prayer_volunteer: { icon: "heart", color: Colors.reactionLove },
 };
 
 export function StatusBadges({
