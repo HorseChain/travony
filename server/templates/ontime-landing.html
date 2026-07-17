@@ -87,6 +87,15 @@
     .nv.cta { background: rgba(255,255,255,0.16); backdrop-filter: blur(6px); }
     nav.solid .nv.cta { background: var(--ink); color: #fff; }
     @media (max-width: 720px) { .nav-links .hide-m { display: none; } nav { padding: 0 1rem; } }
+    #navAuth.authed { color: #7ef0c0; }
+    nav.solid #navAuth.authed { color: #0b7a4b; }
+    .auth-toast {
+      position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(140%);
+      background: rgba(17,19,24,0.95); border: 1px solid rgba(255,255,255,0.18); border-radius: 999px;
+      color: #fff; padding: 0.75rem 1.4rem; font-size: 0.88rem; z-index: 60; max-width: 92vw;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.45); transition: transform 0.35s ease; text-align: center;
+    }
+    .auth-toast.show { transform: translateX(-50%) translateY(0); }
 
     /* ---------- Full-screen panels ---------- */
     .panel {
@@ -298,6 +307,82 @@
       transition: border-color 0.25s, color 0.25s;
     }
     .bc-close:hover { border-color: rgba(255,255,255,0.55); color: #fff; }
+    .bc-note {
+      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 1rem; text-align: center; color: rgba(255,255,255,0.65); font-size: 0.88rem;
+    }
+    .bc-video { position: absolute; inset: 0; }
+    .bc-video video { width: 100%; height: 100%; object-fit: contain; }
+
+    /* ---------- Trending (Travony Live) ---------- */
+    .live-pill.gold { border-color: rgba(255,176,32,0.55); color: #ffb020; }
+    .live-pill.gold .live-dot { background: #ffb020; animation: trPulse 2s ease-in-out infinite; }
+    @keyframes trPulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,176,32,0.5); } 50% { box-shadow: 0 0 0 7px rgba(255,176,32,0); } }
+
+    #top .panel-actions { padding-bottom: 15.5vh; }
+    .ticker {
+      position: absolute; left: 0; right: 0; bottom: 7vh; z-index: 2;
+      display: none; overflow: hidden; cursor: pointer;
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+      mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+    }
+    .ticker.show { display: block; }
+    .ticker-track {
+      display: inline-flex; align-items: center; gap: 2.6rem; white-space: nowrap;
+      padding: 0.55rem 0; will-change: transform;
+      animation: tickerMove 36s linear infinite;
+    }
+    .ticker:hover .ticker-track { animation-play-state: paused; }
+    @keyframes tickerMove { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    @media (prefers-reduced-motion: reduce) { .ticker-track { animation: none; } }
+    .ticker-item {
+      display: inline-flex; align-items: center; gap: 0.55rem;
+      color: rgba(255,255,255,0.88); font-size: 0.82rem; font-weight: 600;
+      text-shadow: 0 1px 10px rgba(0,0,0,0.55);
+    }
+    .ticker-item .tk-up { color: #ffb020; font-weight: 800; }
+    .ticker-item .tk-tag {
+      font-size: 0.62rem; font-weight: 800; letter-spacing: 0.18em; text-transform: uppercase;
+      color: #ffb020; border: 1px solid rgba(255,176,32,0.5); border-radius: 999px; padding: 0.14rem 0.55rem;
+    }
+
+    .bc-chip.gold-on { border-color: rgba(255,176,32,0.8); color: #ffb020; }
+    .trend-cards { width: 100%; max-width: 1020px; display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 0.9rem; }
+    .tcard {
+      position: relative; background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 14px; padding: 1.05rem 1.15rem 1rem; text-align: left; color: #fff;
+      cursor: pointer; font-family: inherit; transition: transform 0.18s ease, border-color 0.25s, box-shadow 0.25s;
+    }
+    .tcard:hover { transform: translateY(-3px); border-color: rgba(255,176,32,0.55); }
+    .tcard.on { border-color: #ffb020; box-shadow: 0 0 26px rgba(255,176,32,0.18); }
+    .tcard.dim { opacity: 0.35; }
+    .tcard .tr-top { display: flex; align-items: baseline; gap: 0.6rem; }
+    .tcard .tr-rank {
+      font-size: 0.66rem; font-weight: 800; letter-spacing: 0.14em; color: #ffb020;
+      border: 1px solid rgba(255,176,32,0.45); border-radius: 6px; padding: 0.14rem 0.42rem; flex: none;
+    }
+    .tcard .tr-route { font-size: 0.97rem; font-weight: 600; line-height: 1.35; overflow-wrap: break-word; }
+    .tcard .tr-meta { font-size: 0.76rem; color: rgba(255,255,255,0.6); margin-top: 0.5rem; }
+    .tcard .tr-meta b { color: var(--accent); font-weight: 700; }
+    .tcard .tr-rise {
+      position: absolute; top: 0.8rem; right: 0.9rem; font-size: 0.62rem; font-weight: 800;
+      letter-spacing: 0.16em; text-transform: uppercase; color: #ffb020;
+    }
+    .trend-posts { width: 100%; max-width: 1020px; display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.9rem; }
+    .pcard {
+      background: rgba(255,255,255,0.035); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px;
+      padding: 1rem 1.1rem; text-align: left; color: #fff; font-family: inherit; cursor: pointer;
+      transition: transform 0.18s ease, border-color 0.25s;
+    }
+    .pcard:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.4); }
+    .pcard .pc-label { font-size: 0.92rem; font-weight: 600; line-height: 1.4; display: flex; align-items: center; gap: 0.5rem; }
+    .pcard .pc-meta { font-size: 0.76rem; color: rgba(255,255,255,0.6); margin-top: 0.45rem; }
+    .trend-cta {
+      display: inline-flex; align-items: center; gap: 0.4rem; margin-left: 0.6rem;
+      background: none; border: 0; color: #ffb020; font: inherit; font-size: inherit;
+      font-weight: 700; cursor: pointer; text-decoration: underline; text-underline-offset: 3px;
+    }
+    .trend-cta:hover { color: #ffc95c; }
 
     /* ---------- Try it (light form section) ---------- */
     .try {
@@ -425,11 +510,15 @@
     <button class="nv hide-m" data-go="mall">Mall</button>
     <button class="nv hide-m" data-go="hotel">Hotel</button>
     <button class="nv hide-m" data-go="prayer">Prayer</button>
+    <button class="nv hide-m" data-go="trending">Trending</button>
     <button class="nv hide-m" data-go="network">Network</button>
     <button class="nv hide-m" data-go="live">Live</button>
+    <button class="nv" id="navAuth" type="button">Sign up</button>
     <button class="nv cta" data-go="try">Schedule</button>
   </div>
 </nav>
+
+<div class="auth-toast" id="authToast" role="status"></div>
 
 <!-- HERO -->
 <section class="panel" id="top" style="background-image:url('/landing/hero.jpg')">
@@ -440,6 +529,9 @@
   <div class="panel-actions">
     <button class="btn btn-light fx d1" data-go="try">Schedule Arrival</button>
     <button class="btn btn-dark fx d2" data-go="how">Learn More</button>
+  </div>
+  <div class="ticker" id="heroTicker" role="button" aria-label="See what is trending on the network" title="Tap to see what is trending">
+    <div class="ticker-track" id="heroTickerTrack"></div>
   </div>
   <div class="tagline">Live on the Travony network</div>
 </section>
@@ -537,6 +629,24 @@
   </div>
 </section>
 
+<!-- TRENDING NOW (Travony Live) -->
+<section class="net" id="trending">
+  <div class="net-head">
+    <span class="live-pill gold fx"><span class="live-dot"></span>Trending now</span>
+    <h2 class="fx d1">Where the city is moving.</h2>
+    <p class="fx d1">Hot routes, live searches and talked-about journeys — straight from the real network. Tap anything to explore it.</p>
+  </div>
+
+  <div class="bc-chips fx d1" id="trChips"></div>
+  <div class="trend-cards fx d1" id="trRoutes"><span class="net-empty">Reading the pulse of the network…</span></div>
+  <div class="net-tip" id="trTip"></div>
+
+  <div class="net-sub fx d2" id="trPostsHead" style="display:none">Talked about on the network</div>
+  <div class="trend-posts fx d2" id="trPosts" style="display:none"></div>
+
+  <div class="net-stamp" id="trStamp"></div>
+</section>
+
 <!-- LIVE NETWORK DASHBOARD -->
 <section class="net" id="network">
   <div class="net-head">
@@ -562,7 +672,7 @@
   <div class="net-head">
     <span class="live-pill red fx"><span class="live-dot"></span>Live broadcasts</span>
     <h2 class="fx d1">Rides, broadcast live.</h2>
-    <p class="fx d1">Riders and drivers streaming their Travony journeys on Twitch right now — grouped by country and city.</p>
+    <p class="fx d1">Riders and drivers streaming their Travony journeys right now — on Twitch or straight from the app — grouped by country and city.</p>
   </div>
 
   <div class="bc-chips fx d1" id="bcChips"></div>
@@ -1067,6 +1177,7 @@
     ["nsPoly", "Polygon transactions", "poly", "Ride records sealed on the Polygon blockchain — permanent and tamper-proof."],
     ["nsOntime", "On-time arrivals", "", "Rides scheduled backwards from a moment — walk in exactly on time."],
     ["nsCoffee", "Coffee orders", "", "Coffee ordered, picked up or gifted through Travony."],
+    ["nsLadder", "Drivers climbing the ladder", "acc", "Drivers whose completed rides are quietly building toward their next, better vehicle."],
     ["nsHubs", "Community hubs", "", "Gathering points across the network — malls, airports, universities and more."],
     ["nsMosques", "Mosque hubs", "", "Mosques on the network serving free prayer rides."],
     ["nsEv", "EV hubs", "", "Hubs with charging ports for electric drivers."],
@@ -1156,6 +1267,7 @@
         setNum("nsPoly", d.blockchain.transactions);
         setNum("nsOntime", d.network.onTimeArrivalsScheduled);
         setNum("nsCoffee", d.network.coffeeOrders);
+        setNum("nsLadder", d.network.driversClimbing);
         setNum("nsHubs", d.network.hubs);
         setNum("nsMosques", d.network.mosques);
         setNum("nsEv", d.network.evHubs);
@@ -1207,7 +1319,102 @@
 
   var bcStreams = [];
   var bcFilter = "ALL";
-  var bcOpen = null; /* twitch channel currently playing */
+  var bcOpen = null; /* stream key currently playing (see skey) */
+
+  /* One stable key per stream, across both providers. */
+  function skey(s) {
+    return s.provider === "agora" ? "a:" + s.postId : "t:" + s.twitchChannel;
+  }
+
+  /* ---------- In-app (Agora) playback ---------- */
+  var agoraSdkPromise = null;
+  var agClient = null;
+
+  function loadAgoraSdk() {
+    if (window.AgoraRTC) return Promise.resolve(window.AgoraRTC);
+    if (agoraSdkPromise) return agoraSdkPromise;
+    agoraSdkPromise = new Promise(function (resolve, reject) {
+      var sc = document.createElement("script");
+      sc.src = "https://cdn.jsdelivr.net/npm/agora-rtc-sdk-ng@4.20.2/AgoraRTC_N-production.min.js";
+      sc.onload = function () {
+        if (window.AgoraRTC) resolve(window.AgoraRTC);
+        else { agoraSdkPromise = null; reject(new Error("sdk missing")); }
+      };
+      sc.onerror = function () { agoraSdkPromise = null; reject(new Error("sdk load failed")); };
+      document.head.appendChild(sc);
+    });
+    return agoraSdkPromise;
+  }
+
+  function stopAgoraPlayback() {
+    if (agClient) {
+      var c = agClient;
+      agClient = null;
+      try { c.removeAllListeners(); } catch (e) {}
+      try { c.leave(); } catch (e) {}
+    }
+  }
+
+  function frameNote(frame, text) {
+    frame.innerHTML = "";
+    var d = document.createElement("div");
+    d.className = "bc-note";
+    d.textContent = text;
+    frame.appendChild(d);
+  }
+
+  function openAgoraPlayer(stream, frame) {
+    var myKey = skey(stream);
+    frameNote(frame, "Connecting to the live stream\u2026");
+    Promise.all([
+      loadAgoraSdk(),
+      fetch("/api/agora/web-viewer-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId: stream.postId })
+      }).then(function (r) {
+        if (!r.ok) throw new Error("token");
+        return r.json();
+      })
+    ]).then(function (parts) {
+      if (bcOpen !== myKey) return; /* viewer moved on while we connected */
+      var AgoraRTC = parts[0];
+      var t = parts[1];
+      try { AgoraRTC.setLogLevel(3); } catch (e) {}
+      var client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+      agClient = client;
+      client.setClientRole("audience");
+      client.on("user-published", function (user, mediaType) {
+        client.subscribe(user, mediaType).then(function () {
+          if (bcOpen !== myKey || agClient !== client) return;
+          if (mediaType === "video" && user.videoTrack) {
+            frame.innerHTML = "";
+            var v = document.createElement("div");
+            v.className = "bc-video";
+            frame.appendChild(v);
+            user.videoTrack.play(v);
+          }
+          if (mediaType === "audio" && user.audioTrack) {
+            user.audioTrack.play();
+          }
+        }).catch(function () {});
+      });
+      client.on("user-unpublished", function (user, mediaType) {
+        if (mediaType === "video" && bcOpen === myKey && agClient === client) {
+          frameNote(frame, "The camera is off right now \u2014 hang tight.");
+        }
+      });
+      return client.join(t.appId, t.channel, t.rtcToken, t.uid).then(function () {
+        if (bcOpen === myKey && agClient === client && !frame.querySelector(".bc-video")) {
+          frameNote(frame, "Live \u2014 waiting for the camera\u2026");
+        }
+      });
+    }).catch(function () {
+      if (bcOpen === myKey) {
+        frameNote(frame, "Could not connect to this stream. It may have just ended.");
+      }
+    });
+  }
 
   function renderChips() {
     var wrap = $("bcChips");
@@ -1236,29 +1443,36 @@
 
   function closePlayer() {
     bcOpen = null;
+    stopAgoraPlayback();
     $("bcFrame").innerHTML = "";
     $("bcPlayer").classList.remove("show");
     document.querySelectorAll("#bcGroups .bcard.on").forEach(function (x) { x.classList.remove("on"); });
   }
 
   function openPlayer(stream) {
-    bcOpen = stream.twitchChannel;
+    stopAgoraPlayback();
+    bcOpen = skey(stream);
     var frame = $("bcFrame");
     frame.innerHTML = "";
-    var iframe = document.createElement("iframe");
-    iframe.src = "https://player.twitch.tv/?channel=" + encodeURIComponent(stream.twitchChannel) +
-      "&parent=" + encodeURIComponent(location.hostname) + "&muted=true";
-    iframe.allowFullscreen = true;
-    iframe.setAttribute("allow", "autoplay; fullscreen");
-    frame.appendChild(iframe);
+    if (stream.provider === "agora") {
+      openAgoraPlayer(stream, frame);
+    } else {
+      var iframe = document.createElement("iframe");
+      iframe.src = "https://player.twitch.tv/?channel=" + encodeURIComponent(stream.twitchChannel) +
+        "&parent=" + encodeURIComponent(location.hostname) + "&muted=true";
+      iframe.allowFullscreen = true;
+      iframe.setAttribute("allow", "autoplay; fullscreen");
+      frame.appendChild(iframe);
+    }
     var w = $("bcWatching");
     w.innerHTML = "";
     var b = document.createElement("b");
-    b.textContent = stream.name || stream.twitchChannel;
+    b.textContent = stream.name || stream.twitchChannel || "Travony ride";
     w.appendChild(document.createTextNode("Watching "));
     w.appendChild(b);
     var place = [stream.city, countryName(stream.country)].filter(function (x) { return x && x !== "Other"; }).join(", ");
     if (place) w.appendChild(document.createTextNode(" — live from " + place));
+    w.appendChild(document.createTextNode(stream.provider === "agora" ? " · streamed from the Travony app" : " · on Twitch"));
     $("bcPlayer").classList.add("show");
     $("bcPlayer").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -1310,20 +1524,25 @@
         byCountry[code][city].forEach(function (stream) {
           var card = document.createElement("button");
           card.type = "button";
-          card.className = "bcard" + (bcOpen === stream.twitchChannel ? " on" : "");
+          card.className = "bcard" + (bcOpen === skey(stream) ? " on" : "");
           var bn = document.createElement("div");
           bn.className = "bn";
           var dot = document.createElement("span");
           dot.className = "bc-dot";
           bn.appendChild(dot);
-          bn.appendChild(document.createTextNode(stream.name || stream.twitchChannel));
+          bn.appendChild(document.createTextNode(stream.name || stream.twitchChannel || "Travony ride"));
           var bs = document.createElement("div");
           bs.className = "bs";
-          bs.textContent = "Live on Twitch · tap to watch";
+          if (stream.provider === "agora") {
+            var viewers = stream.viewerCount > 0 ? " · " + stream.viewerCount + " watching" : "";
+            bs.textContent = "Live from the app" + viewers + " · tap to watch";
+          } else {
+            bs.textContent = "Live on Twitch · tap to watch";
+          }
           card.appendChild(bn);
           card.appendChild(bs);
           card.addEventListener("click", function () {
-            if (bcOpen === stream.twitchChannel) {
+            if (bcOpen === skey(stream)) {
               closePlayer();
               return;
             }
@@ -1346,13 +1565,13 @@
       .then(function (d) {
         bcStreams = (d && d.streams) || [];
         /* If the stream being watched ended, close the player. */
-        if (bcOpen && !bcStreams.some(function (s) { return s.twitchChannel === bcOpen; })) {
+        if (bcOpen && !bcStreams.some(function (s) { return skey(s) === bcOpen; })) {
           closePlayer();
         }
         renderChips();
         renderGroups();
         var t = new Date();
-        $("bcStamp").textContent = "Updated " + t.toLocaleTimeString() + " · refreshes automatically · streams play on Twitch";
+        $("bcStamp").textContent = "Updated " + t.toLocaleTimeString() + " · refreshes automatically · streams play right here";
       })
       .catch(function () {
         $("bcStamp").textContent = "Reconnecting to the network…";
@@ -1402,6 +1621,370 @@
     });
   }, { rootMargin: '200px 0px' });
   panels.forEach(function (el) { obs.observe(el); });
+})();
+</script>
+
+<script>
+/* ---------- Trending now (Travony Live, public /api/trending) ---------- */
+(function () {
+  function $(id) { return document.getElementById(id); }
+
+  var trRoutes = [];
+  var trPosts = [];
+  var trSearches = [];
+  var trFilter = null;       /* active search-chip term, or null */
+  var trLoaded = false;
+
+  function fmtHour(h) {
+    if (h === null || h === undefined || isNaN(h)) return null;
+    var n = parseInt(h, 10);
+    if (n === 0) return "12 AM";
+    if (n < 12) return n + " AM";
+    if (n === 12) return "12 PM";
+    return (n - 12) + " PM";
+  }
+
+  function goTry() {
+    var t = document.getElementById("try");
+    if (t) t.scrollIntoView({ behavior: "smooth" });
+  }
+
+  function matchesFilter(route) {
+    if (!trFilter) return true;
+    return (route.label || "").toLowerCase().indexOf(trFilter.toLowerCase()) !== -1;
+  }
+
+  /* ---- hero ticker ---- */
+  function renderTicker() {
+    var wrap = $("heroTicker");
+    var track = $("heroTickerTrack");
+    if (!wrap || !track) return;
+    var items = [];
+    trRoutes.slice(0, 6).forEach(function (r) {
+      items.push({ kind: "route", text: r.label, rising: !!r.rising });
+    });
+    trSearches.slice(0, 4).forEach(function (s) {
+      items.push({ kind: "search", text: "\u201C" + s + "\u201D" });
+    });
+    if (!items.length) { wrap.classList.remove("show"); return; }
+
+    track.innerHTML = "";
+    /* Duplicate the sequence so the marquee loops seamlessly (track slides -50%). */
+    [0, 1].forEach(function () {
+      items.forEach(function (it) {
+        var el = document.createElement("span");
+        el.className = "ticker-item";
+        var tag = document.createElement("span");
+        tag.className = "tk-tag";
+        tag.textContent = it.kind === "search" ? "Searched" : (it.rising ? "Rising" : "Hot route");
+        el.appendChild(tag);
+        var txt = document.createElement("span");
+        txt.textContent = it.text;
+        el.appendChild(txt);
+        if (it.rising) {
+          var up = document.createElement("span");
+          up.className = "tk-up";
+          up.textContent = "\u25B2";
+          el.appendChild(up);
+        }
+        track.appendChild(el);
+      });
+    });
+    wrap.classList.add("show");
+  }
+  var heroTicker = $("heroTicker");
+  if (heroTicker) {
+    heroTicker.addEventListener("click", function () {
+      var t = document.getElementById("trending");
+      if (t) t.scrollIntoView({ behavior: "smooth" });
+    });
+  }
+
+  /* ---- search chips ---- */
+  function renderTrChips() {
+    var wrap = $("trChips");
+    wrap.innerHTML = "";
+    if (!trSearches.length) return;
+    var lead = document.createElement("span");
+    lead.className = "net-empty";
+    lead.textContent = "People are searching:";
+    wrap.appendChild(lead);
+    trSearches.slice(0, 8).forEach(function (term) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "bc-chip" + (trFilter === term ? " gold-on" : "");
+      b.textContent = term;
+      b.addEventListener("click", function () {
+        trFilter = trFilter === term ? null : term;
+        renderTrChips();
+        renderTrRoutes();
+        if (trFilter) {
+          var hits = trRoutes.filter(matchesFilter).length;
+          $("trTip").innerHTML = hits
+            ? "<b>\u201C" + escapeHtml(trFilter) + "\u201D</b> lights up " + hits + " trending route" + (hits === 1 ? "" : "s") + " below."
+            : "<b>\u201C" + escapeHtml(trFilter) + "\u201D</b> is being searched right now \u2014 open the T Ride app to search the live network.";
+        } else {
+          $("trTip").textContent = "";
+        }
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function escapeHtml(s) {
+    var d = document.createElement("div");
+    d.textContent = String(s == null ? "" : s);
+    return d.innerHTML;
+  }
+
+  /* ---- route cards ---- */
+  function renderTrRoutes() {
+    var wrap = $("trRoutes");
+    wrap.innerHTML = "";
+    if (!trRoutes.length) {
+      var e = document.createElement("span");
+      e.className = "net-empty";
+      e.textContent = "The pulse is warming up \u2014 trending routes appear as the network moves.";
+      wrap.appendChild(e);
+      return;
+    }
+    trRoutes.slice(0, 9).forEach(function (r, i) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "tcard" + (trFilter && !matchesFilter(r) ? " dim" : "");
+      var top = document.createElement("div");
+      top.className = "tr-top";
+      var rank = document.createElement("span");
+      rank.className = "tr-rank";
+      rank.textContent = "#" + (i + 1);
+      top.appendChild(rank);
+      var route = document.createElement("span");
+      route.className = "tr-route";
+      route.textContent = r.label;
+      top.appendChild(route);
+      b.appendChild(top);
+      if (r.rising) {
+        var rise = document.createElement("span");
+        rise.className = "tr-rise";
+        rise.textContent = "\u25B2 Rising";
+        b.appendChild(rise);
+      }
+      var meta = document.createElement("div");
+      meta.className = "tr-meta";
+      var bits = [];
+      if (r.driversLive > 0) bits.push("<b>" + r.driversLive + "</b> driver" + (r.driversLive === 1 ? "" : "s") + " live");
+      if (r.openRequests > 0) bits.push("<b>" + r.openRequests + "</b> rider" + (r.openRequests === 1 ? "" : "s") + " waiting");
+      var ph = fmtHour(r.peakHour);
+      if (ph) bits.push("peaks around " + ph);
+      if (!bits.length) bits.push("heat score " + (r.score || 0));
+      meta.innerHTML = bits.join(" \u00B7 ");
+      b.appendChild(meta);
+
+      b.addEventListener("click", function () {
+        var was = b.classList.contains("on");
+        wrap.querySelectorAll(".tcard.on").forEach(function (x) { x.classList.remove("on"); });
+        var tip = $("trTip");
+        if (was) { tip.textContent = ""; return; }
+        b.classList.add("on");
+        var parts = ["<b>" + escapeHtml(r.label) + "</b> is moving"];
+        if (r.driversLive > 0) parts.push(r.driversLive + " driver" + (r.driversLive === 1 ? "" : "s") + " on it right now");
+        if (r.openRequests > 0) parts.push(r.openRequests + " rider" + (r.openRequests === 1 ? "" : "s") + " asking for it");
+        if (ph) parts.push("busiest around " + ph);
+        tip.innerHTML = parts.join(" \u00B7 ") + ".";
+        var cta = document.createElement("button");
+        cta.type = "button";
+        cta.className = "trend-cta";
+        cta.textContent = "Schedule an arrival like this \u2192";
+        cta.addEventListener("click", goTry);
+        tip.appendChild(cta);
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  /* ---- talked-about posts ---- */
+  function renderTrPosts() {
+    var head = $("trPostsHead");
+    var wrap = $("trPosts");
+    wrap.innerHTML = "";
+    if (!trPosts.length) { head.style.display = "none"; wrap.style.display = "none"; return; }
+    head.style.display = "";
+    wrap.style.display = "";
+    trPosts.slice(0, 6).forEach(function (p) {
+      var b = document.createElement("button");
+      b.type = "button";
+      b.className = "pcard";
+      var label = document.createElement("div");
+      label.className = "pc-label";
+      if (p.isLive) {
+        var dot = document.createElement("span");
+        dot.className = "bc-dot";
+        label.appendChild(dot);
+      }
+      var cap = document.createElement("span");
+      cap.textContent = p.label;
+      label.appendChild(cap);
+      b.appendChild(label);
+      var meta = document.createElement("div");
+      meta.className = "pc-meta";
+      var bits = [];
+      if (p.city) bits.push(p.city);
+      if (p.reactions > 0) bits.push(p.reactions + " reaction" + (p.reactions === 1 ? "" : "s"));
+      if (p.comments > 0) bits.push(p.comments + " comment" + (p.comments === 1 ? "" : "s"));
+      if (p.isLive) bits.push("live now");
+      meta.textContent = bits.join(" \u00B7 ");
+      b.appendChild(meta);
+      b.addEventListener("click", function () {
+        $("trTip").innerHTML = "This journey is being talked about on the network. <b>Open T Ride</b> to join the conversation \u2014 or" ;
+        var cta = document.createElement("button");
+        cta.type = "button";
+        cta.className = "trend-cta";
+        cta.textContent = "try the network yourself \u2192";
+        cta.addEventListener("click", goTry);
+        $("trTip").appendChild(cta);
+      });
+      wrap.appendChild(b);
+    });
+  }
+
+  function loadTrending() {
+    fetch("/api/trending")
+      .then(function (r) { if (!r.ok) throw new Error("bad"); return r.json(); })
+      .then(function (d) {
+        trRoutes = Array.isArray(d.routes) ? d.routes : [];
+        trPosts = Array.isArray(d.posts) ? d.posts : [];
+        trSearches = Array.isArray(d.searches) ? d.searches : [];
+        if (trFilter && trSearches.indexOf(trFilter) === -1) trFilter = null;
+        renderTicker();
+        renderTrChips();
+        renderTrRoutes();
+        renderTrPosts();
+        trLoaded = true;
+        var t = new Date();
+        $("trStamp").textContent = "Updated " + t.toLocaleTimeString() + " \u00B7 refreshes automatically \u00B7 coarse areas only, never exact addresses";
+      })
+      .catch(function () {
+        if (!trLoaded) $("trStamp").textContent = "Reconnecting to the pulse\u2026";
+      });
+  }
+
+  /* First load right away (feeds the hero ticker), then poll while visible. */
+  loadTrending();
+  var trTimer = null;
+  function startTrPolling() {
+    if (trTimer) return;
+    trTimer = setInterval(function () {
+      if (!document.hidden) loadTrending();
+    }, 30000);
+  }
+  var noMotion = /(^|[?&])static=1/.test(location.search) ||
+    (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
+  if ("IntersectionObserver" in window && !noMotion) {
+    new IntersectionObserver(function (entries, obs) {
+      if (entries[0].isIntersecting) {
+        startTrPolling();
+        obs.disconnect();
+      }
+    }, { rootMargin: "300px" }).observe(document.getElementById("trending"));
+  } else {
+    startTrPolling();
+  }
+})();
+</script>
+
+<script>
+/* ---------- Google sign-up / sign-in (landing) ---------- */
+(function () {
+  var AUTH_KEY = "travonyWebToken";
+  var btn = document.getElementById("navAuth");
+  var toastEl = document.getElementById("authToast");
+  var toastTimer = null;
+
+  function toast(msg) {
+    if (!toastEl) return;
+    toastEl.textContent = msg;
+    toastEl.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { toastEl.classList.remove("show"); }, 6000);
+  }
+
+  function getToken() {
+    try { return localStorage.getItem(AUTH_KEY) || ""; } catch (e) { return ""; }
+  }
+  function setToken(t) {
+    try {
+      if (t) localStorage.setItem(AUTH_KEY, t);
+      else localStorage.removeItem(AUTH_KEY);
+    } catch (e) {}
+  }
+
+  var currentUser = null;
+  function setUi(user) {
+    currentUser = user;
+    if (!btn) return;
+    if (user) {
+      var first = (user.name || "").trim().split(/\s+/)[0] || "You";
+      btn.textContent = "Hi, " + first;
+      btn.classList.add("authed");
+      btn.title = "Signed in as " + (user.name || user.email || "you") + " — tap to sign out";
+    } else {
+      btn.textContent = "Sign up";
+      btn.classList.remove("authed");
+      btn.title = "Sign up with Google";
+    }
+  }
+
+  function startGoogle() {
+    var back = location.origin + location.pathname;
+    location.href = "/api/auth/google/start?role=customer&redirect_uri=" + encodeURIComponent(back);
+  }
+
+  function loadMe() {
+    var token = getToken();
+    if (!token) { setUi(null); return; }
+    fetch("/api/auth/me", { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) { setToken(""); return null; }
+        if (!r.ok) return null;
+        return r.json();
+      })
+      .then(function (d) { setUi(d && d.user ? d.user : null); })
+      .catch(function () { /* network hiccup: keep token, show default */ setUi(null); });
+  }
+
+  if (btn) {
+    btn.addEventListener("click", function () {
+      if (currentUser) {
+        if (window.confirm("Sign out of Travony on this browser?")) {
+          setToken("");
+          setUi(null);
+          toast("Signed out.");
+        }
+      } else {
+        startGoogle();
+      }
+    });
+  }
+
+  /* Handle the bounce back from Google. */
+  var qp = new URLSearchParams(location.search);
+  var gauth = qp.get("gauth");
+  if (gauth) {
+    if (gauth === "success" && qp.get("token")) {
+      setToken(qp.get("token"));
+      var isNew = qp.get("isNewUser") === "1";
+      toast(isNew
+        ? "Welcome to Travony! Your account is ready — get the app to book your first ride."
+        : "Welcome back — you're signed in.");
+    } else if (gauth === "error") {
+      toast(qp.get("message") || "Google sign-in didn't finish. Please try again.");
+    }
+    qp.delete("gauth"); qp.delete("token"); qp.delete("isNewUser"); qp.delete("message");
+    var rest = qp.toString();
+    history.replaceState({}, "", location.pathname + (rest ? "?" + rest : "") + location.hash);
+  }
+
+  loadMe();
 })();
 </script>
 

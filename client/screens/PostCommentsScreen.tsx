@@ -11,6 +11,7 @@ import {
   Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -69,6 +70,7 @@ function Avatar({ uri, name, size }: { uri: string | null; name: string; size: n
 
 export default function PostCommentsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
@@ -160,7 +162,7 @@ export default function PostCommentsScreen() {
           {
             backgroundColor: theme.backgroundDefault,
             borderTopColor: theme.border,
-            paddingBottom: insets.bottom + Spacing.sm,
+            paddingBottom: tabBarInset + Spacing.sm,
           },
         ]}
       >

@@ -9,6 +9,7 @@ import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 
 const CATEGORIES = [
@@ -24,6 +25,7 @@ export default function FeedbackScreen() {
   const { theme } = useTheme();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
 
   const [category, setCategory] = useState<string>("");
   const [rating, setRating] = useState(0);
@@ -113,10 +115,10 @@ export default function FeedbackScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing.xl,
+        paddingBottom: tabBarInset + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
+      scrollIndicatorInsets={{ bottom: tabBarInset }}
     >
       <View>
         <ThemedText style={styles.sectionTitle}>Category</ThemedText>

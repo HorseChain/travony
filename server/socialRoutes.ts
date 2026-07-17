@@ -14,8 +14,10 @@ import {
   communityPrestige,
   prayerRideDispatches,
 } from "@shared/schema";
-import { eq, and, or, desc, inArray, isNull, count } from "drizzle-orm";
+import { eq, ne, and, or, desc, gte, inArray, isNull, count, ilike, sql } from "drizzle-orm";
 import { verifyTwitchChannel, getLiveChannels } from "./twitchClient";
+import { getAgoraViewerCount } from "./agoraStreaming";
+import { scorePeopleMatches, recordImpressions, type ScoredMatch } from "./matchAgent";
 
 // Social layer: follows between users + rides published or live-streamed to
 // the feed via Twitch. Privacy rules: social payloads only ever expose
@@ -100,6 +102,52 @@ function coarsenCoord(v: number): number | null {
 
 function publicUser(u: { id: string; name: string; avatar: string | null; twitchChannel: string | null }) {
   return { id: u.id, name: u.name, avatar: u.avatar, twitchChannel: u.twitchChannel };
+}
+
+// Display-only @handle derived deterministically from name + id — no new
+// column, no uniqueness contract. Shown on the TikTok-style profile.
+function handleFor(u: { id: string; name: string | null }) {
+  const slug = String(u.name || "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 16) || "rider";
+  const suffix = String(u.id || "").replace(/[^a-z0-9]/gi, "").slice(0, 4).toLowerCase();
+  return `${slug}${suffix}`;
+}
+
+// Batch-decorate a set of user ids into "people cards" for search / contact
+// sync / QR preview: follower count, published-ride count, whether the viewer
+// already follows them, and trust badges. Only public fields, never contact info.
+async function buildPeopleMeta(ids: string[], viewerId: string) {
+  const uniq = Array.from(new Set(ids.filter(Boolean)));
+  const meta = new Map<string, { followers: number; rides: number; isFollowing: boolean; badges: Badge[] }>();
+  if (uniq.length === 0) return meta;
+  const [followerRows, postRows, followingRows, badgeMap] = await Promise.all([
+    db
+      .select({ id: userFollows.followingId, n: count() })
+      .from(userFollows)
+      .where(inArray(userFollows.followingId, uniq))
+      .groupBy(userFollows.followingId),
+    db
+      .select({ id: ridePosts.userId, n: count() })
+      .from(ridePosts)
+      .where(inArray(ridePosts.userId, uniq))
+      .groupBy(ridePosts.userId),
+    db
+      .select({ id: userFollows.followingId })
+      .from(userFollows)
+      .where(and(eq(userFollows.followerId, viewerId), inArray(userFollows.followingId, uniq))),
+    computeBadges(uniq),
+  ]);
+  const followersById = new Map(followerRows.map((r) => [r.id, Number(r.n)]));
+  const postsById = new Map(postRows.map((r) => [r.id, Number(r.n)]));
+  const followingSet = new Set(followingRows.map((r) => r.id));
+  for (const id of uniq) {
+    meta.set(id, {
+      followers: followersById.get(id) || 0,
+      rides: postsById.get(id) || 0,
+      isFollowing: followingSet.has(id),
+      badges: badgeMap.get(id) || [],
+    });
+  }
+  return meta;
 }
 
 // ---------------------------------------------------------------------------
@@ -384,15 +432,26 @@ socialRouter.get("/api/social/counts", async (req, res) => {
   try {
     const session = await getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
-    const [[followers], [following], me] = await Promise.all([
+    const [[followers], [following], [likes], [postCount], me] = await Promise.all([
       db.select({ n: count() }).from(userFollows).where(eq(userFollows.followingId, session.userId)),
       db.select({ n: count() }).from(userFollows).where(eq(userFollows.followerId, session.userId)),
+      // "Likes" = total reactions received across all of my published posts.
+      db
+        .select({ n: count() })
+        .from(ridePostReactions)
+        .innerJoin(ridePosts, eq(ridePosts.id, ridePostReactions.postId))
+        .where(eq(ridePosts.userId, session.userId)),
+      db.select({ n: count() }).from(ridePosts).where(eq(ridePosts.userId, session.userId)),
       storage.getUser(session.userId),
     ]);
     res.json({
       followers: Number(followers.n),
       following: Number(following.n),
+      likes: Number(likes.n),
+      posts: Number(postCount.n),
       twitchChannel: me?.twitchChannel || null,
+      bio: me?.bio || null,
+      handle: me ? handleFor(me) : null,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
@@ -600,6 +659,7 @@ const POST_FIELDS = {
   id: ridePosts.id,
   type: ridePosts.type,
   twitchChannel: ridePosts.twitchChannel,
+  streamProvider: ridePosts.streamProvider,
   caption: ridePosts.caption,
   photoUrl: ridePosts.photoUrl,
   cityName: ridePosts.cityName,
@@ -638,27 +698,186 @@ async function withLiveStatus<T extends { id: string; type: string; twitchChanne
   return posts;
 }
 
+// tab=following (default): me + people I follow, newest first.
+// tab=foryou: network-wide ranked feed — engagement (reactions/comments/live)
+// with time decay, so fresh + talked-about rides surface first. All numbers
+// are real counts; ranking is deterministic server code.
 socialRouter.get("/api/social/feed", async (req, res) => {
   try {
     const session = await getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const tab = req.query.tab === "foryou" ? "foryou" : "following";
 
-    const followed = await db
-      .select({ id: userFollows.followingId })
-      .from(userFollows)
-      .where(eq(userFollows.followerId, session.userId));
-    const authorIds = [session.userId, ...followed.map((f) => f.id)];
-
-    const posts = await db
-      .select(POST_FIELDS)
-      .from(ridePosts)
-      .innerJoin(users, eq(users.id, ridePosts.userId))
-      .where(inArray(ridePosts.userId, authorIds))
-      .orderBy(desc(ridePosts.createdAt))
-      .limit(50);
+    let posts: any[];
+    if (tab === "foryou") {
+      const since = new Date(Date.now() - 14 * 24 * 3600 * 1000);
+      posts = await db
+        .select(POST_FIELDS)
+        .from(ridePosts)
+        .innerJoin(users, eq(users.id, ridePosts.userId))
+        .where(gte(ridePosts.createdAt, since))
+        .orderBy(desc(ridePosts.createdAt))
+        .limit(120);
+      if (posts.length < 20) {
+        // Thin network: widen to the latest posts overall so the page is
+        // never artificially empty while the 14-day window is quiet.
+        posts = await db
+          .select(POST_FIELDS)
+          .from(ridePosts)
+          .innerJoin(users, eq(users.id, ridePosts.userId))
+          .orderBy(desc(ridePosts.createdAt))
+          .limit(120);
+      }
+    } else {
+      const followed = await db
+        .select({ id: userFollows.followingId })
+        .from(userFollows)
+        .where(eq(userFollows.followerId, session.userId));
+      const authorIds = [session.userId, ...followed.map((f) => f.id)];
+      posts = await db
+        .select(POST_FIELDS)
+        .from(ridePosts)
+        .innerJoin(users, eq(users.id, ridePosts.userId))
+        .where(inArray(ridePosts.userId, authorIds))
+        .orderBy(desc(ridePosts.createdAt))
+        .limit(50);
+    }
 
     const withLive = await withLiveStatus(posts as any);
-    res.json({ posts: await attachSocialMeta(withLive as any, session.userId) });
+    let full: any[] = await attachSocialMeta(withLive as any, session.userId);
+
+    if (tab === "foryou") {
+      const now = Date.now();
+      full = full
+        .map((p: any) => {
+          const hours = Math.max(0, (now - new Date(p.createdAt).getTime()) / 3600000);
+          const engagement =
+            p.reactionCount * 5 +
+            p.commentCount * 8 +
+            (p.isLive ? 60 : 0) +
+            (p.photoUrl ? 3 : 0) +
+            (p.caption ? 2 : 0);
+          return { post: p, score: (engagement + 1) / Math.pow(hours + 2, 1.3) };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 50)
+        .map((s) => s.post);
+    }
+
+    res.json({ posts: full, tab });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Trending creators — the accounts most worth following right now, ranked by
+// real follower counts + published-ride activity. Excludes the viewer and
+// anyone already followed. Powers the TikTok-style suggestion cards.
+socialRouter.get("/api/social/suggested-creators", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const [followedRows, followerCounts, authorRows] = await Promise.all([
+      db
+        .select({ id: userFollows.followingId })
+        .from(userFollows)
+        .where(eq(userFollows.followerId, session.userId)),
+      db
+        .select({ id: userFollows.followingId, n: count() })
+        .from(userFollows)
+        .groupBy(userFollows.followingId),
+      db
+        .select({ id: ridePosts.userId, n: count() })
+        .from(ridePosts)
+        .groupBy(ridePosts.userId),
+    ]);
+
+    const excluded = new Set([session.userId, ...followedRows.map((f) => f.id)]);
+    const followersById = new Map(followerCounts.map((r) => [r.id, Number(r.n)]));
+    const postsById = new Map(authorRows.map((r) => [r.id, Number(r.n)]));
+    const candidateIds = Array.from(
+      new Set([...followersById.keys(), ...postsById.keys()]),
+    ).filter((id) => id && !excluded.has(id));
+
+    if (candidateIds.length === 0) return res.json({ creators: [] });
+
+    // Rank with the self-learning match agent; fall back to the original
+    // popularity score if the engine ever fails.
+    let scored: { id: string; score: number }[];
+    const reasonById = new Map<string, string>();
+    try {
+      const matches: ScoredMatch[] = await scorePeopleMatches(
+        session.userId,
+        candidateIds.map((id) => ({
+          id,
+          followers: followersById.get(id) || 0,
+          posts: postsById.get(id) || 0,
+        })),
+      );
+      scored = matches.slice(0, 8);
+      for (const m of matches.slice(0, 8)) reasonById.set(m.id, m.reason);
+      recordImpressions(session.userId, matches.slice(0, 8));
+    } catch (err: any) {
+      console.error("[social] match engine failed, using popularity fallback:", err?.message || err);
+      scored = candidateIds
+        .map((id) => ({
+          id,
+          score: (followersById.get(id) || 0) * 3 + (postsById.get(id) || 0) * 2,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8);
+    }
+    const ids = scored.map((s) => s.id);
+
+    const [userRows, badgeMap, recentPosts] = await Promise.all([
+      db
+        .select({ id: users.id, name: users.name, avatar: users.avatar, twitchChannel: users.twitchChannel })
+        .from(users)
+        .where(inArray(users.id, ids)),
+      computeBadges(ids),
+      db
+        .select({
+          userId: ridePosts.userId,
+          photoUrl: ridePosts.photoUrl,
+          cityName: ridePosts.cityName,
+          createdAt: ridePosts.createdAt,
+        })
+        .from(ridePosts)
+        .where(inArray(ridePosts.userId, ids))
+        .orderBy(desc(ridePosts.createdAt))
+        .limit(60),
+    ]);
+
+    // Most recent published photo + city per candidate (card backdrop).
+    const photoBy = new Map<string, string>();
+    const cityBy = new Map<string, string>();
+    for (const p of recentPosts) {
+      if (p.photoUrl && !photoBy.has(p.userId)) photoBy.set(p.userId, p.photoUrl);
+      if (p.cityName && !cityBy.has(p.userId)) cityBy.set(p.userId, p.cityName);
+    }
+
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+    const creators = scored
+      .map((s) => {
+        const u = byId.get(s.id);
+        if (!u) return null;
+        return {
+          id: u.id,
+          name: u.name,
+          avatar: u.avatar,
+          twitchChannel: u.twitchChannel,
+          followers: followersById.get(u.id) || 0,
+          rides: postsById.get(u.id) || 0,
+          photoUrl: photoBy.get(u.id) || null,
+          cityName: cityBy.get(u.id) || null,
+          badges: badgeMap.get(u.id) || [],
+          reason: reasonById.get(u.id) || null,
+        };
+      })
+      .filter(Boolean);
+
+    res.json({ creators });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -684,11 +903,22 @@ socialRouter.get("/api/network/live-streams", async (_req, res) => {
       .select(POST_FIELDS)
       .from(ridePosts)
       .innerJoin(users, eq(users.id, ridePosts.userId))
-      .where(and(eq(ridePosts.type, "stream"), isNull(ridePosts.endedAt)))
+      // Twitch broadcasts + in-app (Agora) streams, both watchable on the
+      // landing page. Twitch live status is re-derived from the Twitch API;
+      // Agora lifecycle is server-managed (host-grace loop), so the DB row
+      // is authoritative for those.
+      .where(and(
+        eq(ridePosts.type, "stream"),
+        isNull(ridePosts.endedAt),
+        inArray(ridePosts.streamProvider, ["twitch", "agora"]),
+      ))
       .orderBy(desc(ridePosts.createdAt))
       .limit(100);
 
-    const live = (await withLiveStatus(posts as any)).filter((p: any) => p.isLive);
+    const twitchPosts = posts.filter((p: any) => p.streamProvider === "twitch");
+    const agoraPosts = posts.filter((p: any) => p.streamProvider === "agora" && p.isLive);
+    const liveTwitch = (await withLiveStatus(twitchPosts as any)).filter((p: any) => p.isLive);
+    const live = [...liveTwitch, ...agoraPosts];
 
     // Map the stored city name to its country via the cities table.
     let countryByCity = new Map<string, string>();
@@ -702,9 +932,14 @@ socialRouter.get("/api/network/live-streams", async (_req, res) => {
     }
 
     const streams = live.map((p: any) => ({
+      provider: p.streamProvider === "agora" ? "agora" : "twitch",
       name: p.authorName,
       avatar: p.authorAvatar,
-      twitchChannel: p.twitchChannel,
+      twitchChannel: p.streamProvider === "twitch" ? p.twitchChannel : null,
+      // postId is only needed (and only exposed) for in-app streams — the
+      // landing page trades it for an audience-only viewer token.
+      postId: p.streamProvider === "agora" ? p.id : undefined,
+      viewerCount: p.streamProvider === "agora" ? getAgoraViewerCount(p.id) : undefined,
       city: p.cityName || null,
       country: (p.cityName && countryByCity.get(p.cityName)) || null,
       startedAt: p.createdAt,
@@ -1032,6 +1267,254 @@ socialRouter.get("/api/social/badges/:userId", async (req, res) => {
     if (!session) return res.status(401).json({ error: "Unauthorized" });
     const map = await computeBadges([req.params.userId]);
     res.json({ badges: map.get(req.params.userId) || [] });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// TikTok-style profile: my published posts grid + posts I liked.
+// ---------------------------------------------------------------------------
+
+socialRouter.get("/api/social/my-posts", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const posts = await db
+      .select(POST_FIELDS)
+      .from(ridePosts)
+      .innerJoin(users, eq(users.id, ridePosts.userId))
+      .where(eq(ridePosts.userId, session.userId))
+      .orderBy(desc(ridePosts.createdAt))
+      .limit(60);
+    const withLive = await withLiveStatus(posts as any);
+    const full = await attachSocialMeta(withLive as any, session.userId);
+    res.json({ posts: full });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+socialRouter.get("/api/social/liked-posts", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const posts = await db
+      .select(POST_FIELDS)
+      .from(ridePostReactions)
+      .innerJoin(ridePosts, eq(ridePosts.id, ridePostReactions.postId))
+      .innerJoin(users, eq(users.id, ridePosts.userId))
+      .where(eq(ridePostReactions.userId, session.userId))
+      .orderBy(desc(ridePostReactions.createdAt))
+      .limit(60);
+    const withLive = await withLiveStatus(posts as any);
+    const full = await attachSocialMeta(withLive as any, session.userId);
+    res.json({ posts: full });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Find friends: people search, contact sync and QR profile preview.
+// Privacy: responses only ever carry public fields (id / name / avatar /
+// counts / badges) — phone numbers sent for matching are matched and
+// discarded, never stored or echoed back.
+// ---------------------------------------------------------------------------
+
+socialRouter.get("/api/social/user-search", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) return res.json({ users: [] });
+    const rows = await db
+      .select({ id: users.id, name: users.name, avatar: users.avatar })
+      .from(users)
+      .where(
+        and(
+          ilike(users.name, `%${q.replace(/[%_]/g, "")}%`),
+          ne(users.id, session.userId),
+          or(eq(users.isGuest, false), isNull(users.isGuest)),
+        ),
+      )
+      .limit(20);
+    const meta = await buildPeopleMeta(rows.map((r) => r.id), session.userId);
+    res.json({
+      users: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        avatar: r.avatar,
+        handle: handleFor(r),
+        ...(meta.get(r.id) || { followers: 0, rides: 0, isFollowing: false, badges: [] }),
+      })),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Contact sync: the client sends phone numbers from the device address book,
+// we match them against registered accounts by digit suffix (tolerant of
+// country-code formatting differences) and return only public people cards.
+socialRouter.post("/api/social/find-contacts", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const raw = Array.isArray(req.body?.phones) ? req.body.phones : [];
+    const suffixes = Array.from(
+      new Set(
+        raw
+          .slice(0, 2000)
+          .map((p: any) => String(p || "").replace(/[^0-9]/g, ""))
+          .filter((d: string) => d.length >= 7)
+          .map((d: string) => d.slice(-9)),
+      ),
+    ) as string[];
+    if (suffixes.length === 0) return res.json({ matches: [] });
+
+    const phoneSuffix = sql<string>`right(regexp_replace(coalesce(${users.phone}, ''), '[^0-9]', '', 'g'), 9)`;
+    const rows = await db
+      .select({ id: users.id, name: users.name, avatar: users.avatar })
+      .from(users)
+      .where(
+        and(
+          inArray(phoneSuffix, suffixes),
+          ne(users.id, user.id),
+          or(eq(users.isGuest, false), isNull(users.isGuest)),
+        ),
+      )
+      .limit(100);
+    const meta = await buildPeopleMeta(rows.map((r) => r.id), user.id);
+    res.json({
+      matches: rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        avatar: r.avatar,
+        handle: handleFor(r),
+        ...(meta.get(r.id) || { followers: 0, rides: 0, isFollowing: false, badges: [] }),
+      })),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// QR scan / profile preview — one public people card for a given user id.
+socialRouter.get("/api/social/users/:userId/preview", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const [target] = await db
+      .select({ id: users.id, name: users.name, avatar: users.avatar, bio: users.bio, isGuest: users.isGuest })
+      .from(users)
+      .where(eq(users.id, req.params.userId));
+    if (!target || target.isGuest) return res.status(404).json({ error: "User not found" });
+    const meta = await buildPeopleMeta([target.id], session.userId);
+    res.json({
+      id: target.id,
+      name: target.name,
+      avatar: target.avatar,
+      bio: target.bio,
+      handle: handleFor(target),
+      isSelf: target.id === session.userId,
+      ...(meta.get(target.id) || { followers: 0, rides: 0, isFollowing: false, badges: [] }),
+    });
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Activity centre — recent social activity aimed at me: new followers,
+// reactions and comments on my posts. All real rows, newest first.
+// ---------------------------------------------------------------------------
+
+socialRouter.get("/api/social/activity", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+    const meId = session.userId;
+    const [followRows, reactionRows, commentRows] = await Promise.all([
+      db
+        .select({
+          id: userFollows.id,
+          createdAt: userFollows.createdAt,
+          userId: users.id,
+          userName: users.name,
+          userAvatar: users.avatar,
+        })
+        .from(userFollows)
+        .innerJoin(users, eq(users.id, userFollows.followerId))
+        .where(eq(userFollows.followingId, meId))
+        .orderBy(desc(userFollows.createdAt))
+        .limit(30),
+      db
+        .select({
+          id: ridePostReactions.id,
+          createdAt: ridePostReactions.createdAt,
+          reaction: ridePostReactions.type,
+          postId: ridePostReactions.postId,
+          cityName: ridePosts.cityName,
+          userId: users.id,
+          userName: users.name,
+          userAvatar: users.avatar,
+        })
+        .from(ridePostReactions)
+        .innerJoin(ridePosts, eq(ridePosts.id, ridePostReactions.postId))
+        .innerJoin(users, eq(users.id, ridePostReactions.userId))
+        .where(and(eq(ridePosts.userId, meId), ne(ridePostReactions.userId, meId)))
+        .orderBy(desc(ridePostReactions.createdAt))
+        .limit(30),
+      db
+        .select({
+          id: ridePostComments.id,
+          createdAt: ridePostComments.createdAt,
+          body: ridePostComments.body,
+          postId: ridePostComments.postId,
+          cityName: ridePosts.cityName,
+          userId: users.id,
+          userName: users.name,
+          userAvatar: users.avatar,
+        })
+        .from(ridePostComments)
+        .innerJoin(ridePosts, eq(ridePosts.id, ridePostComments.postId))
+        .innerJoin(users, eq(users.id, ridePostComments.userId))
+        .where(and(eq(ridePosts.userId, meId), ne(ridePostComments.userId, meId)))
+        .orderBy(desc(ridePostComments.createdAt))
+        .limit(30),
+    ]);
+
+    const items = [
+      ...followRows.map((r) => ({
+        id: `follow-${r.id}`,
+        kind: "follow" as const,
+        user: { id: r.userId, name: r.userName, avatar: r.userAvatar },
+        createdAt: r.createdAt,
+      })),
+      ...reactionRows.map((r) => ({
+        id: `reaction-${r.id}`,
+        kind: "reaction" as const,
+        user: { id: r.userId, name: r.userName, avatar: r.userAvatar },
+        reaction: r.reaction,
+        postId: r.postId,
+        cityName: r.cityName,
+        createdAt: r.createdAt,
+      })),
+      ...commentRows.map((r) => ({
+        id: `comment-${r.id}`,
+        kind: "comment" as const,
+        user: { id: r.userId, name: r.userName, avatar: r.userAvatar },
+        body: String(r.body || "").slice(0, 120),
+        postId: r.postId,
+        cityName: r.cityName,
+        createdAt: r.createdAt,
+      })),
+    ]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .slice(0, 40);
+
+    res.json({ items });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

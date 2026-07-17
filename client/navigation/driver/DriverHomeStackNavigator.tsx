@@ -3,6 +3,7 @@ import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 import DriverHomeScreen from "@/screens/driver/DriverHomeScreen";
 import DriverActiveRideScreen from "@/screens/driver/DriverActiveRideScreen";
+import GoLiveScreen from "@/screens/GoLiveScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
 import DriverCoffeeOrdersScreen from "@/screens/driver/DriverCoffeeOrdersScreen";
@@ -11,6 +12,7 @@ import EvDriverScreen from "@/screens/driver/EvDriverScreen";
 export type DriverHomeStackParamList = {
   DriverHome: undefined;
   DriverActiveRide: { rideId: string };
+  GoLive: { rideId: string };
   OpenClaw: { variant: "driver" };
   HubDetail: { hubId: string; hubName: string };
   DriverCoffeeOrders: undefined;
@@ -33,6 +35,11 @@ export default function DriverHomeStackNavigator() {
         name="DriverActiveRide"
         component={DriverActiveRideScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="GoLive"
+        component={GoLiveScreen}
+        options={{ headerShown: false, presentation: "fullScreenModal" }}
       />
       <Stack.Screen
         name="OpenClaw"

@@ -1,5 +1,27 @@
-import { View, StyleSheet, TextInput, Alert, Platform, TouchableOpacity, Image, ActivityIndicator, ScrollView, Switch } from "react-native";
+import {
+  View,
+  StyleSheet,
+  TextInput,
+  Alert,
+  Platform,
+  TouchableOpacity,
+  Image,
+  ScrollView,
+  Switch,
+} from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withRepeat,
+  withSequence,
+  withTiming,
+  withDelay,
+  Easing,
+  cancelAnimation,
+  runOnJS,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect, useRef } from "react";
@@ -56,11 +78,91 @@ function notify(title: string, message: string) {
   }
 }
 
+/* ---- AI Scanning overlay ---- */
+function ScanningOverlay({ photo }: { photo: string }) {
+  const ring1 = useSharedValue(0.6);
+  const ring2 = useSharedValue(0.6);
+  const scanLine = useSharedValue(0);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 300 });
+    ring1.value = withRepeat(
+      withSequence(
+        withTiming(1.3, { duration: 1000, easing: Easing.out(Easing.ease) }),
+        withTiming(0.6, { duration: 1000, easing: Easing.in(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+    ring2.value = withDelay(
+      400,
+      withRepeat(
+        withSequence(
+          withTiming(1.5, { duration: 1000, easing: Easing.out(Easing.ease) }),
+          withTiming(0.6, { duration: 1000, easing: Easing.in(Easing.ease) }),
+        ),
+        -1,
+        false,
+      ),
+    );
+    scanLine.value = withRepeat(
+      withSequence(
+        withTiming(1, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+        withTiming(0, { duration: 1600, easing: Easing.inOut(Easing.quad) }),
+      ),
+      -1,
+      false,
+    );
+    return () => {
+      cancelAnimation(ring1);
+      cancelAnimation(ring2);
+      cancelAnimation(scanLine);
+    };
+  }, []);
+
+  const ring1Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring1.value }],
+    opacity: (1.3 - ring1.value) * 0.6,
+  }));
+  const ring2Style = useAnimatedStyle(() => ({
+    transform: [{ scale: ring2.value }],
+    opacity: (1.5 - ring2.value) * 0.4,
+  }));
+  const scanLineStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: scanLine.value * 220 - 110 }],
+  }));
+  const wrapStyle = useAnimatedStyle(() => ({ opacity: opacity.value }));
+
+  return (
+    <Animated.View style={[StyleSheet.absoluteFill, styles.scanOverlay, wrapStyle]}>
+      <Image source={{ uri: photo }} style={[StyleSheet.absoluteFill, styles.scanBg]} blurRadius={2} />
+      <View style={styles.scanDim} />
+
+      <View style={styles.scanCenter}>
+        <View style={styles.scanRingWrap}>
+          <Animated.View style={[styles.scanRing, styles.scanRing2, ring2Style]} />
+          <Animated.View style={[styles.scanRing, styles.scanRing1, ring1Style]} />
+          <View style={styles.scanIcon}>
+            <Feather name="cpu" size={30} color={Colors.travonyGreen} />
+          </View>
+          <Animated.View style={[styles.scanLineBar, scanLineStyle]} />
+        </View>
+        <ThemedText style={styles.scanTitle}>AI scanning your vehicle</ThemedText>
+        <ThemedText style={styles.scanSub}>
+          Reading make · model · colour · plate number
+        </ThemedText>
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function DriverVehicleDetailsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const queryClient = useQueryClient();
 
   const [make, setMake] = useState("");
@@ -74,17 +176,14 @@ export default function DriverVehicleDetailsScreen() {
   const [verificationStatus, setVerificationStatus] = useState<string | null>(null);
   const [isElectric, setIsElectric] = useState(false);
 
-  // UI flow state
   const [pendingPhoto, setPendingPhoto] = useState<string | null>(null);
+  const [isScanning, setIsScanning] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [missingFields, setMissingFields] = useState<string[]>([]);
-  const [actionLabel, setActionLabel] = useState<string>("");
   const [rescan, setRescan] = useState(false);
-
-  // Instant activation: measure the time from "Find my car" to activation so we
-  // can show the driver exactly how fast their car became a business.
-  const scanStartRef = useRef<number | null>(null);
   const [activation, setActivation] = useState<{ seconds: number; carName: string } | null>(null);
+
+  const scanStartRef = useRef<number | null>(null);
 
   const userRegion = (user as any)?.regionCode || "BD";
 
@@ -112,54 +211,8 @@ export default function DriverVehicleDetailsScreen() {
   }, [existingVehicle]);
 
   const filteredVehicleTypes = VEHICLE_TYPES.filter(
-    (vt) => vt.regions.includes(userRegion) || vt.regions.length === 0
+    (vt) => vt.regions.includes(userRegion) || vt.regions.length === 0,
   );
-
-  const applyPhoto = (result: ImagePicker.ImagePickerResult) => {
-    if (!result.canceled && result.assets[0]?.base64) {
-      const base64Image = `data:image/jpeg;base64,${result.assets[0].base64}`;
-      setPendingPhoto(base64Image);
-      setShowManual(false);
-      setMissingFields([]);
-    }
-  };
-
-  const takePhoto = async () => {
-    try {
-      const perm = await ImagePicker.requestCameraPermissionsAsync();
-      if (!perm.granted) {
-        notify(
-          "Camera access needed",
-          "Please allow camera access to photograph your car, or upload a photo from your gallery instead."
-        );
-        return;
-      }
-      const result = await ImagePicker.launchCameraAsync({
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.6,
-        base64: true,
-      });
-      applyPhoto(result);
-    } catch (e) {
-      notify("Camera unavailable", "Couldn't open the camera here. Please upload a photo from your gallery instead.");
-    }
-  };
-
-  const uploadPhoto = async () => {
-    try {
-      const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.6,
-        base64: true,
-      });
-      applyPhoto(result);
-    } catch (e) {
-      notify("Couldn't open gallery", "Please try again.");
-    }
-  };
 
   const saveMutation = useMutation({
     mutationFn: async (data: Record<string, any>) => {
@@ -170,18 +223,15 @@ export default function DriverVehicleDetailsScreen() {
       });
     },
     onSuccess: (data: any) => {
+      setIsScanning(false);
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/me"] });
       setPendingPhoto(null);
       setShowManual(false);
       setMissingFields([]);
       setRescan(false);
 
-      if (data?.verificationStatus) {
-        setVerificationStatus(data.verificationStatus);
-      }
+      if (data?.verificationStatus) setVerificationStatus(data.verificationStatus);
 
-      // Instant activation: the AI scan approved the car AND the driver in one
-      // pass. Show the celebration with the real elapsed time.
       if (data?.driverActivated) {
         const elapsedMs = scanStartRef.current ? Date.now() - scanStartRef.current : null;
         scanStartRef.current = null;
@@ -197,17 +247,35 @@ export default function DriverVehicleDetailsScreen() {
 
       const message =
         data?.verificationStatus === "ai_verified"
-          ? "Your car was found and verified. You're all set."
+          ? "Your car was verified by AI. You are all set."
           : data?.verificationStatus === "pending"
-          ? "Your car was saved. We'll finish checking it shortly."
-          : "Your car details were saved.";
+            ? "Your car was saved. We will finish checking it shortly."
+            : "Your car details were saved.";
       notify("Done", message);
     },
     onError: (error: any) => {
+      setIsScanning(false);
+      scanStartRef.current = null;
+
+      if (error?.isAuthError || error?.statusCode === 401 || error?.statusCode === 403) {
+        Alert.alert(
+          "Session expired",
+          "Your session has timed out. Please sign in again to continue.",
+          [
+            {
+              text: "Sign in",
+              onPress: () => {
+                logout?.();
+              },
+            },
+          ],
+        );
+        return;
+      }
+
       const status = error?.statusCode;
       const details = error?.details;
       if (status === 422 && details) {
-        // AI found the car but couldn't read every required detail.
         const detected = details.detected || {};
         if (detected.make) setMake(detected.make);
         if (detected.model) setModel(detected.model);
@@ -219,21 +287,65 @@ export default function DriverVehicleDetailsScreen() {
         setShowManual(true);
         notify(
           "Almost there",
-          error?.message || "We found your car but need a couple of details. Please fill them in and save."
+          error?.message || "We found your car but need a couple of details. Please fill them in below.",
         );
         return;
       }
-      notify("Couldn't add your car", error?.message || "Please try again.");
+      notify("Could not add your car", error?.message || "Please try again.");
     },
   });
 
   const isBusy = saveMutation.isPending;
 
-  const handleFindMyCar = () => {
-    if (!pendingPhoto) return;
-    setActionLabel("Finding your car...");
+  /* Auto-scans the moment a photo is selected — no extra button needed */
+  const triggerScan = (base64Image: string) => {
+    setPendingPhoto(base64Image);
+    setShowManual(false);
+    setMissingFields([]);
+    setIsScanning(true);
     scanStartRef.current = Date.now();
-    saveMutation.mutate({ photoFront: pendingPhoto, autoVerify: true });
+    saveMutation.mutate({ photoFront: base64Image, autoVerify: true });
+  };
+
+  const takePhoto = async () => {
+    try {
+      const perm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!perm.granted) {
+        notify(
+          "Camera access needed",
+          "Please allow camera access to photograph your car, or upload a photo from your gallery.",
+        );
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.6,
+        base64: true,
+      });
+      if (!result.canceled && result.assets[0]?.base64) {
+        triggerScan(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      }
+    } catch {
+      notify("Camera unavailable", "Please upload a photo from your gallery instead.");
+    }
+  };
+
+  const uploadPhoto = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.6,
+        base64: true,
+      });
+      if (!result.canceled && result.assets[0]?.base64) {
+        triggerScan(`data:image/jpeg;base64,${result.assets[0].base64}`);
+      }
+    } catch {
+      notify("Could not open gallery", "Please try again.");
+    }
   };
 
   const handleSaveManual = () => {
@@ -241,10 +353,8 @@ export default function DriverVehicleDetailsScreen() {
       notify("Missing information", "Please fill in the make, model, and plate number.");
       return;
     }
-    setActionLabel("Saving your car...");
-    if (pendingPhoto || photoFront) {
-      scanStartRef.current = Date.now();
-    }
+    setIsScanning(false);
+    if (pendingPhoto || photoFront) scanStartRef.current = Date.now();
     saveMutation.mutate({
       make,
       model,
@@ -263,7 +373,7 @@ export default function DriverVehicleDetailsScreen() {
       notify("Missing information", "Please fill in the make, model, and plate number.");
       return;
     }
-    setActionLabel("Saving changes...");
+    setIsScanning(false);
     saveMutation.mutate({
       make,
       model,
@@ -278,39 +388,30 @@ export default function DriverVehicleDetailsScreen() {
     });
   };
 
-  // Clears the chosen photo but stays in the capture step ("use a different photo").
-  const clearPendingPhoto = () => {
-    setPendingPhoto(null);
-    setShowManual(false);
-    setMissingFields([]);
-  };
-
-  // Existing-vehicle owners scanning a brand new photo to re-verify.
   const startReScan = () => {
     setRescan(true);
     setPendingPhoto(null);
     setShowManual(false);
     setMissingFields([]);
+    setIsScanning(false);
   };
 
   const cancelReScan = () => {
     setRescan(false);
     setPendingPhoto(null);
+    setIsScanning(false);
   };
 
   const getVerificationBadge = () => {
     if (!verificationStatus) return null;
-
     const badgeConfig: Record<string, { color: string; icon: keyof typeof Feather.glyphMap; text: string }> = {
       ai_verified: { color: Colors.travonyGreen, icon: "check-circle", text: "AI Verified" },
       admin_verified: { color: Colors.travonyGreen, icon: "shield", text: "Admin Verified" },
       pending: { color: theme.warning, icon: "clock", text: "Pending Review" },
       rejected: { color: theme.error, icon: "x-circle", text: "Rejected" },
     };
-
     const config = badgeConfig[verificationStatus];
     if (!config) return null;
-
     return (
       <View style={[styles.verificationBadge, { backgroundColor: config.color + "20" }]}>
         <Feather name={config.icon} size={16} color={config.color} />
@@ -324,7 +425,7 @@ export default function DriverVehicleDetailsScreen() {
     .filter(Boolean)
     .join(" ");
 
-  const renderManualForm = (missingOnly = false) => {
+  const renderManualForm = () => {
     const isMissing = (f: string) => missingFields.includes(f);
     return (
       <>
@@ -343,7 +444,12 @@ export default function DriverVehicleDetailsScreen() {
                 ]}
                 onPress={() => setVehicleType(vt.value)}
               >
-                <ThemedText style={[styles.typeChipText, { color: vehicleType === vt.value ? theme.textOnPrimary : theme.text }]}>
+                <ThemedText
+                  style={[
+                    styles.typeChipText,
+                    { color: vehicleType === vt.value ? theme.textOnPrimary : theme.text },
+                  ]}
+                >
                   {vt.label}
                 </ThemedText>
               </TouchableOpacity>
@@ -351,55 +457,17 @@ export default function DriverVehicleDetailsScreen() {
           </ScrollView>
         </View>
 
-        <FieldInput
-          label="Make"
-          value={make}
-          onChangeText={setMake}
-          placeholder="e.g., Toyota, Honda, Bajaj"
-          theme={theme}
-          highlight={isMissing("make")}
-        />
-        <FieldInput
-          label="Model"
-          value={model}
-          onChangeText={setModel}
-          placeholder="e.g., Camry, Civic, RE"
-          theme={theme}
-          highlight={isMissing("model")}
-        />
-        <FieldInput
-          label="Year"
-          value={year}
-          onChangeText={setYear}
-          placeholder="e.g., 2022"
-          keyboardType="numeric"
-          maxLength={4}
-          theme={theme}
-        />
-        <FieldInput
-          label="Color"
-          value={color}
-          onChangeText={setColor}
-          placeholder="e.g., White, Black, Silver"
-          theme={theme}
-        />
-        <FieldInput
-          label="Plate Number"
-          value={plateNumber}
-          onChangeText={setPlateNumber}
-          placeholder="e.g., DHAKA METRO-GA 12-3456"
-          autoCapitalize="characters"
-          theme={theme}
-          highlight={isMissing("plateNumber")}
-        />
+        <FieldInput label="Make" value={make} onChangeText={setMake} placeholder="e.g., Toyota, Honda" theme={theme} highlight={isMissing("make")} />
+        <FieldInput label="Model" value={model} onChangeText={setModel} placeholder="e.g., Camry, Civic" theme={theme} highlight={isMissing("model")} />
+        <FieldInput label="Year" value={year} onChangeText={setYear} placeholder="e.g., 2022" keyboardType="numeric" maxLength={4} theme={theme} />
+        <FieldInput label="Colour" value={color} onChangeText={setColor} placeholder="e.g., White, Black, Silver" theme={theme} />
+        <FieldInput label="Plate Number" value={plateNumber} onChangeText={setPlateNumber} placeholder="e.g., A 12345" autoCapitalize="characters" theme={theme} highlight={isMissing("plateNumber")} />
 
         <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
           <View style={styles.evToggleRow}>
             <View style={styles.evToggleInfo}>
               <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>Electric Vehicle (EV)</ThemedText>
-              <ThemedText style={[styles.hint, { color: theme.textMuted, marginTop: 2 }]}>
-                Mark this vehicle as fully electric
-              </ThemedText>
+              <ThemedText style={[styles.hint, { color: theme.textMuted, marginTop: 2 }]}>Mark this vehicle as fully electric</ThemedText>
             </View>
             <Switch
               value={isElectric}
@@ -413,11 +481,13 @@ export default function DriverVehicleDetailsScreen() {
     );
   };
 
-  // ---- Loading ----
   if (isLoading) {
     return (
       <ThemedView style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" color={Colors.travonyGreen} />
+        <Animated.View style={styles.loadingDot}>
+          <Feather name="cpu" size={36} color={Colors.travonyGreen} />
+          <ThemedText style={[styles.scanSub, { marginTop: Spacing.md }]}>Loading your vehicle info…</ThemedText>
+        </Animated.View>
       </ThemedView>
     );
   }
@@ -427,11 +497,11 @@ export default function DriverVehicleDetailsScreen() {
       <KeyboardAwareScrollViewCompat
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: tabBarInset + 100 },
         ]}
         showsVerticalScrollIndicator={false}
       >
-        {/* ============ INSTANT ACTIVATION CELEBRATION ============ */}
+        {/* ====== ACTIVATION CELEBRATION ====== */}
         {activation ? (
           <View style={styles.activationWrap}>
             <View style={[styles.activationIconCircle, { backgroundColor: Colors.travonyGreen + "20" }]}>
@@ -440,34 +510,29 @@ export default function DriverVehicleDetailsScreen() {
             <ThemedText style={styles.activationTitle}>{activation.carName} is now a business</ThemedText>
             {activation.seconds > 0 ? (
               <View style={[styles.activationTimeChip, { backgroundColor: Colors.travonyGreen }]}>
-                <Feather name="clock" size={16} color={Colors.light.textOnPrimary} />
+                <Feather name="clock" size={16} color="#fff" />
                 <ThemedText style={styles.activationTimeText}>
                   Activated in {activation.seconds} {activation.seconds === 1 ? "second" : "seconds"}
                 </ThemedText>
               </View>
             ) : null}
             <ThemedText style={[styles.activationSub, { color: theme.textSecondary }]}>
-              Verified by AI and approved to earn. No paperwork, no waiting for review.
+              Verified by AI and approved to earn. No paperwork, no waiting.
             </ThemedText>
             <View style={[styles.activationEarnCard, { backgroundColor: theme.backgroundElevated }]}>
-              <ThemedText style={[styles.activationEarnBig, { color: Colors.travonyGreen }]}>
-                It keeps 90%
-              </ThemedText>
+              <ThemedText style={[styles.activationEarnBig, { color: Colors.travonyGreen }]}>It keeps 90%</ThemedText>
               <ThemedText style={[styles.activationEarnSmall, { color: theme.textSecondary }]}>
                 of everything it earns. Travony takes 10%. That's it.
               </ThemedText>
             </View>
-            <Button onPress={() => setActivation(null)} style={styles.saveButton}>
-              Start earning
-            </Button>
+            <Button onPress={() => setActivation(null)} style={styles.saveButton}>Start earning</Button>
           </View>
         ) : null}
 
-        {/* ============ MANAGE EXISTING VEHICLE ============ */}
+        {/* ====== EXISTING VEHICLE VIEW ====== */}
         {!activation && hasVehicle && !showManual && !rescan ? (
           <>
             {getVerificationBadge()}
-
             <View style={[styles.foundCard, { backgroundColor: theme.backgroundElevated }]}>
               {existingVehicle?.photoFront ? (
                 <Image source={{ uri: existingVehicle.photoFront }} style={styles.foundImage} />
@@ -479,53 +544,48 @@ export default function DriverVehicleDetailsScreen() {
                 ) : null}
                 {existingVehicle?.plateNumber ? (
                   <View style={[styles.plateChip, { borderColor: theme.border }]}>
-                    <ThemedText style={[styles.plateText, { color: theme.text }]}>
-                      {existingVehicle.plateNumber}
-                    </ThemedText>
+                    <ThemedText style={[styles.plateText, { color: theme.text }]}>{existingVehicle.plateNumber}</ThemedText>
                   </View>
                 ) : null}
                 {isElectric ? (
                   <View style={[styles.evBadgeInline, { backgroundColor: Colors.travonyGreen + "15" }]}>
                     <Feather name="zap" size={14} color={Colors.travonyGreen} />
-                    <ThemedText style={[styles.hint, { color: Colors.travonyGreen, marginTop: 0, marginLeft: 6 }]}>
-                      Electric vehicle
-                    </ThemedText>
+                    <ThemedText style={[styles.hint, { color: Colors.travonyGreen, marginTop: 0, marginLeft: 6 }]}>Electric vehicle</ThemedText>
                   </View>
                 ) : null}
               </View>
             </View>
-
-            <Button onPress={() => setShowManual(true)} style={styles.saveButton}>
-              Edit details
-            </Button>
+            <Button onPress={() => setShowManual(true)} style={styles.saveButton}>Edit details</Button>
             <TouchableOpacity onPress={startReScan} style={styles.skipButton} disabled={isBusy}>
-              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>
-                Scan a new photo to re-verify
-              </ThemedText>
+              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Re-scan with a new photo</ThemedText>
             </TouchableOpacity>
           </>
         ) : null}
 
-        {/* ============ ADD FLOW: STEP 1 — PHOTO ============ */}
+        {/* ====== ADD FLOW: PHOTO CAPTURE ====== */}
         {!activation && (!hasVehicle || rescan) && !pendingPhoto && !showManual ? (
           <>
             <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
-              <ThemedText style={[styles.infoTitle, { color: Colors.travonyGreen }]}>Add your car in two steps</ThemedText>
+              <View style={styles.aiHeader}>
+                <Feather name="cpu" size={20} color={Colors.travonyGreen} />
+                <ThemedText style={[styles.infoTitle, { color: Colors.travonyGreen }]}>One photo. Done.</ThemedText>
+              </View>
               <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
-                Step 1: Take one clear photo of your car (show the number plate). Step 2: We find the make, model and
-                details automatically. You just confirm.
+                Take one clear photo of your car showing the number plate. Our AI reads the make, model, colour and plate number instantly — no typing needed.
               </ThemedText>
             </View>
 
             <TouchableOpacity
-              style={[styles.captureBox, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
+              style={[styles.captureBox, { backgroundColor: theme.backgroundElevated, borderColor: Colors.travonyGreen + "60" }]}
               onPress={takePhoto}
               disabled={isBusy}
             >
-              <Feather name="camera" size={40} color={Colors.travonyGreen} />
-              <ThemedText style={[styles.captureTitle, { color: theme.text }]}>Take a photo of your car</ThemedText>
+              <View style={[styles.cameraIconWrap, { backgroundColor: Colors.travonyGreen + "15" }]}>
+                <Feather name="camera" size={36} color={Colors.travonyGreen} />
+              </View>
+              <ThemedText style={[styles.captureTitle, { color: theme.text }]}>Take a photo</ThemedText>
               <ThemedText style={[styles.hint, { color: theme.textMuted, textAlign: "center" }]}>
-                Stand in front, make sure the number plate is visible
+                Stand in front of the car — make the plate clearly visible
               </ThemedText>
             </TouchableOpacity>
 
@@ -539,51 +599,23 @@ export default function DriverVehicleDetailsScreen() {
               </TouchableOpacity>
             ) : (
               <TouchableOpacity onPress={() => setShowManual(true)} style={styles.skipButton} disabled={isBusy}>
-                <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Enter details manually instead</ThemedText>
+                <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Enter details manually</ThemedText>
               </TouchableOpacity>
             )}
           </>
         ) : null}
 
-        {/* ============ ADD FLOW: STEP 2 — FIND MY CAR ============ */}
-        {!activation && (!hasVehicle || rescan) && pendingPhoto && !showManual ? (
-          <>
-            <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
-              <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
-                Step 2: Tap "Find my car" and we'll detect the make, model, color and plate from your photo.
-              </ThemedText>
-            </View>
-
-            <Image source={{ uri: pendingPhoto }} style={styles.previewImage} />
-
-            <Button onPress={handleFindMyCar} disabled={isBusy} style={styles.saveButton}>
-              {isBusy ? "Finding your car..." : "Find my car"}
-            </Button>
-            <TouchableOpacity onPress={clearPendingPhoto} style={styles.skipButton} disabled={isBusy}>
-              <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Use a different photo</ThemedText>
-            </TouchableOpacity>
-          </>
-        ) : null}
-
-        {/* ============ MANUAL FORM (fallback / edit / missing fields) ============ */}
+        {/* ====== MANUAL FORM (fallback / edit / missing fields) ====== */}
         {!activation && showManual ? (
           <>
             {missingFields.length > 0 ? (
               <View style={[styles.infoCard, { backgroundColor: theme.warning + "20" }]}>
                 <ThemedText style={[styles.infoTitle, { color: theme.warning }]}>Just a couple more details</ThemedText>
                 <ThemedText style={[styles.infoText, { color: theme.warning }]}>
-                  We found your car but couldn't read everything from the photo. Please complete the highlighted fields.
+                  The AI found your car but could not read every detail from the photo. Fill in the highlighted fields and save.
                 </ThemedText>
               </View>
-            ) : (
-              <View style={[styles.infoCard, { backgroundColor: Colors.travonyGreen + "15" }]}>
-                <ThemedText style={[styles.infoText, { color: Colors.travonyGreen }]}>
-                  {hasVehicle ? "Update your vehicle details below." : "Enter your vehicle details below."}
-                </ThemedText>
-              </View>
-            )}
-
-            {pendingPhoto ? <Image source={{ uri: pendingPhoto }} style={styles.previewImage} /> : null}
+            ) : null}
 
             {renderManualForm()}
 
@@ -592,13 +624,10 @@ export default function DriverVehicleDetailsScreen() {
               disabled={isBusy}
               style={styles.saveButton}
             >
-              {isBusy ? "Saving..." : hasVehicle ? "Save changes" : "Save car"}
+              {isBusy ? "Saving…" : hasVehicle ? "Save changes" : "Save car"}
             </Button>
             <TouchableOpacity
-              onPress={() => {
-                setShowManual(false);
-                setMissingFields([]);
-              }}
+              onPress={() => { setShowManual(false); setMissingFields([]); }}
               style={styles.skipButton}
               disabled={isBusy}
             >
@@ -606,14 +635,12 @@ export default function DriverVehicleDetailsScreen() {
             </TouchableOpacity>
           </>
         ) : null}
-
-        {isBusy ? (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={Colors.travonyGreen} />
-            <ThemedText style={{ marginTop: Spacing.md }}>{actionLabel || "Working..."}</ThemedText>
-          </View>
-        ) : null}
       </KeyboardAwareScrollViewCompat>
+
+      {/* ====== AI SCANNING OVERLAY (shown while AI processes) ====== */}
+      {isScanning && pendingPhoto ? (
+        <ScanningOverlay photo={pendingPhoto} />
+      ) : null}
     </ThemedView>
   );
 }
@@ -647,11 +674,7 @@ function FieldInput({
       <TextInput
         style={[
           styles.input,
-          {
-            backgroundColor: theme.backgroundRoot,
-            color: theme.text,
-            borderColor: highlight ? theme.warning : theme.border,
-          },
+          { backgroundColor: theme.backgroundRoot, color: theme.text, borderColor: highlight ? theme.warning : theme.border },
         ]}
         value={value}
         onChangeText={onChangeText}
@@ -666,210 +689,74 @@ function FieldInput({
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  centered: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  scrollContent: {
-    paddingHorizontal: Spacing.lg,
-  },
-  infoCard: {
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.xl,
-    marginBottom: Spacing.lg,
-  },
-  infoTitle: {
-    ...Typography.h4Heavy,
-    textAlign: "center",
-    marginBottom: Spacing.xs,
-  },
-  infoText: {
-    ...Typography.small,
-    textAlign: "center",
-  },
-  verificationBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.lg,
-    gap: Spacing.sm,
-  },
-  badgeText: {
-    ...Typography.smallBold,
-  },
-  foundCard: {
-    borderRadius: BorderRadius.xl,
-    overflow: "hidden",
-    marginBottom: Spacing.lg,
-  },
-  foundImage: {
-    width: "100%",
-    height: 180,
-    resizeMode: "cover",
-  },
-  foundBody: {
-    padding: Spacing.lg,
-  },
-  foundTitle: {
-    ...Typography.h3Heavy,
-  },
-  foundMeta: {
-    ...Typography.small,
-    marginTop: Spacing.xs,
-  },
-  plateChip: {
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    borderRadius: BorderRadius.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
-    marginTop: Spacing.md,
-  },
-  plateText: {
-    ...Typography.h4Heavy,
-    letterSpacing: 1,
-  },
-  captureBox: {
-    borderRadius: BorderRadius.xl,
-    borderWidth: 1,
-    borderStyle: "dashed",
-    alignItems: "center",
-    justifyContent: "center",
-    paddingVertical: Spacing.xl * 1.5,
-    paddingHorizontal: Spacing.lg,
-    gap: Spacing.sm,
-    marginBottom: Spacing.lg,
-  },
-  captureTitle: {
-    ...Typography.h4,
-    marginTop: Spacing.sm,
-  },
-  previewImage: {
-    width: "100%",
-    aspectRatio: 4 / 3,
-    borderRadius: BorderRadius.lg,
-    marginBottom: Spacing.lg,
-    resizeMode: "cover",
-  },
-  section: {
-    padding: Spacing.lg,
-    borderRadius: BorderRadius.xl,
-    marginBottom: Spacing.lg,
-  },
-  sectionTitle: {
-    ...Typography.smallBold,
-    marginBottom: Spacing.sm,
-    textTransform: "uppercase",
-  },
-  typeScroll: {
-    marginHorizontal: -Spacing.sm,
-  },
-  typeChip: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.full,
-    marginHorizontal: Spacing.xs,
-    borderWidth: 1,
-  },
-  typeChipText: {
-    ...Typography.smallMedium,
-  },
-  input: {
-    ...Typography.body,
-    padding: Spacing.md,
-    borderRadius: BorderRadius.lg,
-    borderWidth: 1,
-  },
-  hint: {
-    ...Typography.caption,
-    marginTop: Spacing.sm,
-  },
-  loadingOverlay: {
-    alignItems: "center",
-    paddingVertical: Spacing.xl,
-  },
-  activationWrap: {
-    alignItems: "center",
-    paddingTop: Spacing.xl,
-  },
-  activationIconCircle: {
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing.lg,
-  },
-  activationTitle: {
-    ...Typography.h2,
-    textAlign: "center",
-    marginBottom: Spacing.md,
-  },
-  activationTimeChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.full,
-    marginBottom: Spacing.md,
-  },
-  activationTimeText: {
-    ...Typography.smallHeavy,
-    color: Colors.light.textOnPrimary,
-  },
-  activationSub: {
-    ...Typography.body,
-    textAlign: "center",
-    marginBottom: Spacing.lg,
-    paddingHorizontal: Spacing.md,
-  },
-  activationEarnCard: {
-    alignSelf: "stretch",
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    alignItems: "center",
-    marginBottom: Spacing.lg,
-  },
-  activationEarnBig: {
-    ...Typography.h1,
-  },
-  activationEarnSmall: {
-    ...Typography.small,
-    textAlign: "center",
-    marginTop: 4,
-  },
-  saveButton: {
-    marginTop: Spacing.sm,
-  },
-  skipButton: {
-    alignItems: "center",
-    paddingVertical: Spacing.lg,
-  },
-  skipText: {
-    ...Typography.small,
-  },
-  evToggleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  evToggleInfo: {
-    flex: 1,
-    marginRight: Spacing.md,
-  },
-  evBadgeInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginTop: Spacing.md,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
-    alignSelf: "flex-start",
-  },
+  container: { flex: 1 },
+  centered: { justifyContent: "center", alignItems: "center" },
+  scrollContent: { paddingHorizontal: Spacing.lg },
+  loadingDot: { alignItems: "center" },
+
+  /* Info card */
+  infoCard: { padding: Spacing.lg, borderRadius: BorderRadius.xl, marginBottom: Spacing.lg },
+  aiHeader: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: Spacing.sm, marginBottom: Spacing.xs },
+  infoTitle: { ...Typography.h4Heavy, textAlign: "center" },
+  infoText: { ...Typography.small, textAlign: "center" },
+
+  /* Verification badge */
+  verificationBadge: { flexDirection: "row", alignItems: "center", justifyContent: "center", padding: Spacing.md, borderRadius: BorderRadius.lg, marginBottom: Spacing.lg, gap: Spacing.sm },
+  badgeText: { ...Typography.smallBold },
+
+  /* Existing vehicle card */
+  foundCard: { borderRadius: BorderRadius.xl, overflow: "hidden", marginBottom: Spacing.lg },
+  foundImage: { width: "100%", height: 180, resizeMode: "cover" },
+  foundBody: { padding: Spacing.lg },
+  foundTitle: { ...Typography.h3Heavy },
+  foundMeta: { ...Typography.small, marginTop: Spacing.xs },
+  plateChip: { alignSelf: "flex-start", borderWidth: 1, borderRadius: BorderRadius.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.xs, marginTop: Spacing.md },
+  plateText: { ...Typography.h4Heavy, letterSpacing: 1 },
+  evBadgeInline: { flexDirection: "row", alignItems: "center", marginTop: Spacing.md, paddingHorizontal: Spacing.md, paddingVertical: Spacing.sm, borderRadius: BorderRadius.md, alignSelf: "flex-start" },
+
+  /* Capture box */
+  captureBox: { borderRadius: BorderRadius.xl, borderWidth: 1.5, borderStyle: "dashed", alignItems: "center", justifyContent: "center", paddingVertical: Spacing.xl * 2, paddingHorizontal: Spacing.lg, gap: Spacing.sm, marginBottom: Spacing.lg },
+  cameraIconWrap: { width: 72, height: 72, borderRadius: 36, alignItems: "center", justifyContent: "center", marginBottom: Spacing.sm },
+  captureTitle: { ...Typography.h4, marginTop: Spacing.xs },
+
+  /* Form */
+  section: { padding: Spacing.lg, borderRadius: BorderRadius.xl, marginBottom: Spacing.lg },
+  sectionTitle: { ...Typography.smallBold, marginBottom: Spacing.sm, textTransform: "uppercase" },
+  typeScroll: { marginHorizontal: -Spacing.sm },
+  typeChip: { paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm, borderRadius: BorderRadius.full, marginHorizontal: Spacing.xs, borderWidth: 1 },
+  typeChipText: { ...Typography.smallMedium },
+  input: { ...Typography.body, padding: Spacing.md, borderRadius: BorderRadius.lg, borderWidth: 1 },
+  hint: { ...Typography.caption, marginTop: Spacing.sm },
+  evToggleRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  evToggleInfo: { flex: 1, marginRight: Spacing.md },
+
+  /* Buttons */
+  saveButton: { marginTop: Spacing.sm },
+  skipButton: { alignItems: "center", paddingVertical: Spacing.lg },
+  skipText: { ...Typography.small },
+
+  /* Activation */
+  activationWrap: { alignItems: "center", paddingTop: Spacing.xl },
+  activationIconCircle: { width: 96, height: 96, borderRadius: 48, alignItems: "center", justifyContent: "center", marginBottom: Spacing.lg },
+  activationTitle: { ...Typography.h2, textAlign: "center", marginBottom: Spacing.md },
+  activationTimeChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: Spacing.md, paddingVertical: 8, borderRadius: BorderRadius.full, marginBottom: Spacing.md },
+  activationTimeText: { ...Typography.smallHeavy, color: "#fff" },
+  activationSub: { ...Typography.body, textAlign: "center", marginBottom: Spacing.lg, paddingHorizontal: Spacing.md },
+  activationEarnCard: { alignSelf: "stretch", borderRadius: BorderRadius.lg, padding: Spacing.lg, alignItems: "center", marginBottom: Spacing.lg },
+  activationEarnBig: { ...Typography.h1 },
+  activationEarnSmall: { ...Typography.small, textAlign: "center", marginTop: 4 },
+
+  /* AI scanning overlay */
+  scanOverlay: { zIndex: 100, alignItems: "center", justifyContent: "center" },
+  scanBg: { resizeMode: "cover" },
+  scanDim: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.72)" },
+  scanCenter: { alignItems: "center", paddingHorizontal: Spacing.xl },
+  scanRingWrap: { width: 120, height: 120, alignItems: "center", justifyContent: "center", marginBottom: Spacing.xl, overflow: "visible" },
+  scanRing: { position: "absolute", width: 120, height: 120, borderRadius: 60, borderWidth: 2, borderColor: Colors.travonyGreen },
+  scanRing1: { borderColor: Colors.travonyGreen },
+  scanRing2: { borderColor: Colors.travonyGreen + "80" },
+  scanIcon: { width: 60, height: 60, borderRadius: 30, backgroundColor: Colors.travonyGreen + "20", alignItems: "center", justifyContent: "center" },
+  scanLineBar: { position: "absolute", left: -10, right: -10, height: 2, backgroundColor: Colors.travonyGreen + "cc", borderRadius: 1 },
+  scanTitle: { ...Typography.h3Heavy, color: "#fff", textAlign: "center", marginBottom: Spacing.sm },
+  scanSub: { ...Typography.small, color: "rgba(255,255,255,0.65)", textAlign: "center" },
 });

@@ -26,6 +26,7 @@ import LiteTripView from "@/components/LiteTripView";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthGate } from "@/hooks/useAuthGate";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
@@ -372,6 +373,7 @@ export default function DriverHomeScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
   const { liteMode } = useLiteMode();
   const navigation = useNavigation<NavigationProp>();
   const queryClient = useQueryClient();
@@ -771,6 +773,7 @@ export default function DriverHomeScreen() {
   };
 
   const handleToggleOnline = (value: boolean) => {
+    if (!requireAuth()) return;
     setIsOnline(value);
     toggleOnlineMutation.mutate({ online: value });
     if (value) {
@@ -818,6 +821,7 @@ export default function DriverHomeScreen() {
   };
 
   const activateEvMode = async () => {
+    if (!requireAuth()) return;
     if (toggleOnlineMutation.isPending) return;
 
     if (driverData?.status && driverData.status !== "approved") {

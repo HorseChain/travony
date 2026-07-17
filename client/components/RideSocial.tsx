@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, StyleSheet, Pressable, TextInput, ActivityIndicator, Alert, Platform, Linking } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useNavigation } from "@react-navigation/native";
 
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -229,6 +230,38 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
           </ThemedText>
         </>
       )}
+    </Pressable>
+  );
+}
+
+// In-app live streaming (Agora) — broadcasts inside Travony instead of via
+// the Twitch app. Shown alongside the Twitch button on active ride screens;
+// the GoLive screen itself handles permissions, native-module availability
+// and the stream lifecycle.
+export function GoLiveInAppButton({ rideId, rideStatus }: { rideId: string; rideStatus?: string }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+
+  const streamable = ["accepted", "arriving", "started", "in_progress"].includes(rideStatus || "");
+  if (!streamable || Platform.OS === "web") return null;
+
+  return (
+    <Pressable
+      style={({ pressed }) => [
+        styles.streamButton,
+        {
+          backgroundColor: theme.backgroundSecondary,
+          borderWidth: 1,
+          borderColor: theme.border,
+          opacity: pressed ? 0.8 : 1,
+        },
+      ]}
+      onPress={() => navigation.navigate("GoLive", { rideId })}
+    >
+      <Ionicons name="radio-outline" size={16} color={Colors.liveRed} />
+      <ThemedText style={[styles.streamButtonText, { color: theme.text }]}>
+        Go Live on Travony
+      </ThemedText>
     </Pressable>
   );
 }

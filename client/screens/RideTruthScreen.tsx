@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -44,6 +45,7 @@ function formatDate(dateString: string): string {
 export default function RideTruthScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
 
@@ -293,10 +295,10 @@ export default function RideTruthScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing.xl,
+        paddingBottom: tabBarInset + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
+      scrollIndicatorInsets={{ bottom: tabBarInset }}
     >
       {!hasConsented ? (
         <Card style={styles.consentCard}>

@@ -9,6 +9,7 @@ import {
   Animated,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -103,6 +104,7 @@ const arrivedStyles = StyleSheet.create({
 
 export default function RatingScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
@@ -170,7 +172,7 @@ export default function RatingScreen() {
           styles.scrollContent,
           {
             paddingTop: headerHeight + Spacing["2xl"],
-            paddingBottom: insets.bottom + Spacing["3xl"],
+            paddingBottom: tabBarInset + Spacing["3xl"],
           },
         ]}
       >

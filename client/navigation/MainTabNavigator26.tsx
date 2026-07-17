@@ -4,7 +4,6 @@ import { createNativeBottomTabNavigator } from "@react-navigation/bottom-tabs/un
 import HomeStackNavigator from "@/navigation/HomeStackNavigator";
 import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import BookingsStackNavigator from "@/navigation/BookingsStackNavigator";
-import WalletStackNavigator from "@/navigation/WalletStackNavigator";
 
 export type MainTabParamList = {
   HomeTab: undefined;
@@ -43,17 +42,6 @@ export default function MainTabNavigator26() {
           icon: { sfSymbolName: "clock.arrow.circlepath" },
           // @ts-ignore — sfSymbolName is valid for iOS 26 native tabs; type definitions are incomplete for this unstable API
           selectedIcon: { sfSymbolName: "clock.arrow.circlepath" },
-        }}
-      />
-      <Tab.Screen
-        name="WalletTab"
-        component={WalletStackNavigator}
-        options={{
-          title: "Wallet",
-          // @ts-ignore — sfSymbolName is valid for iOS 26 native tabs; type definitions are incomplete for this unstable API
-          icon: { sfSymbolName: "creditcard" },
-          // @ts-ignore — sfSymbolName is valid for iOS 26 native tabs; type definitions are incomplete for this unstable API
-          selectedIcon: { sfSymbolName: "creditcard.fill" },
         }}
       />
       <Tab.Screen

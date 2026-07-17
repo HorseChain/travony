@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
@@ -60,6 +61,7 @@ const CATEGORY_ICONS: Record<string, string> = {
 
 export default function CoffeeScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
@@ -423,7 +425,7 @@ export default function CoffeeScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingTop: headerHeight + Spacing.md,
-          paddingBottom: insets.bottom + Spacing["3xl"],
+          paddingBottom: tabBarInset + Spacing["3xl"],
           paddingHorizontal: Spacing.lg,
         }}
         showsVerticalScrollIndicator={false}

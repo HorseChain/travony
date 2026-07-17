@@ -29,6 +29,7 @@ import { Card } from "@/components/Card";
 import { FasterPickupBanner } from "@/components/FasterPickupBanner";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthGate } from "@/hooks/useAuthGate";
 import { apiRequest } from "@/lib/query-client";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
 
@@ -344,6 +345,7 @@ export default function BookingBottomSheet({
 }: BookingBottomSheetProps) {
   const { theme } = useTheme();
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
   const queryClient = useQueryClient();
   type BookingNavProp = CompositeNavigationProp<
     NativeStackNavigationProp<HomeStackParamList>,
@@ -639,8 +641,7 @@ export default function BookingBottomSheet({
       }
     };
     
-    if (!user?.id) {
-      showError("Sign In Required", "Please sign in to book a ride. Go to the Profile tab to sign in.");
+    if (!requireAuth()) {
       return;
     }
     

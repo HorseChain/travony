@@ -1,5 +1,6 @@
 import { View, StyleSheet, FlatList, Pressable, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
@@ -32,6 +33,7 @@ interface Ride {
 
 export default function DriverRideHistoryScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -166,7 +168,7 @@ export default function DriverRideHistoryScreen() {
         renderItem={renderRideItem}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: tabBarInset + 100 },
         ]}
         ListEmptyComponent={renderEmptyState}
         ItemSeparatorComponent={() => <View style={{ height: Spacing.md }} />}

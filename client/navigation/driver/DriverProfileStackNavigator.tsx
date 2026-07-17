@@ -16,6 +16,10 @@ import AboutNetworkScreen from "@/screens/AboutNetworkScreen";
 import NetworkAnalyticsScreen from "@/screens/NetworkAnalyticsScreen";
 import CommunityPrestigeScreen from "@/screens/CommunityPrestigeScreen";
 import FeedbackScreen from "@/screens/FeedbackScreen";
+import FindFriendsScreen from "@/screens/FindFriendsScreen";
+import ActivityCentreScreen from "@/screens/ActivityCentreScreen";
+import RewardsScreen from "@/screens/RewardsScreen";
+import FollowListScreen from "@/screens/FollowListScreen";
 
 export type DriverProfileStackParamList = {
   DriverProfile: undefined;
@@ -33,6 +37,10 @@ export type DriverProfileStackParamList = {
   NetworkAnalytics: undefined;
   CommunityPrestige: undefined;
   Feedback: undefined;
+  FindFriends: undefined;
+  ActivityCentre: undefined;
+  Rewards: undefined;
+  FollowList: { mode: "followers" | "following" };
 };
 
 const Stack = createNativeStackNavigator<DriverProfileStackParamList>();
@@ -116,6 +124,26 @@ export default function DriverProfileStackNavigator() {
         name="Feedback"
         component={FeedbackScreen}
         options={{ headerTitle: "Share Feedback" }}
+      />
+      <Stack.Screen
+        name="FindFriends"
+        component={FindFriendsScreen}
+        options={{ headerTitle: "Find friends" }}
+      />
+      <Stack.Screen
+        name="ActivityCentre"
+        component={ActivityCentreScreen}
+        options={{ headerTitle: "Activity centre" }}
+      />
+      <Stack.Screen
+        name="Rewards"
+        component={RewardsScreen}
+        options={{ headerTitle: "Rewards" }}
+      />
+      <Stack.Screen
+        name="FollowList"
+        component={FollowListScreen}
+        options={{ headerTitle: "Followers" }}
       />
     </Stack.Navigator>
   );

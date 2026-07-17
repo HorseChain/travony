@@ -10,6 +10,7 @@ import { getApiUrl } from "@/lib/query-client";
 import { useAuth } from "@/hooks/useAuth";
 import { SkeletonLoader } from "@/components/SkeletonLoader";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 
 const TIER_COLORS: Record<string, string> = {
@@ -49,6 +50,7 @@ export default function NetworkAnalyticsScreen() {
   const { user } = useAuth();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
 
   const { data: prestigeData, isLoading } = useQuery<any>({
     queryKey: ["/api/openclaw/prestige"],
@@ -97,10 +99,10 @@ export default function NetworkAnalyticsScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing.xl,
+        paddingBottom: tabBarInset + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
+      scrollIndicatorInsets={{ bottom: tabBarInset }}
       showsVerticalScrollIndicator={false}
     >
       <View style={styles.statsRow}>

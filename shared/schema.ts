@@ -1,5 +1,5 @@
 import { sql, relations } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey, unique, index } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, boolean, timestamp, pgEnum, primaryKey, unique, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -20,7 +20,9 @@ export const transactionTypeEnum = pgEnum("transaction_type", [
   "directional_premium",
   "accountability_credit",
   "ride_fare_debit",
-  "tip"
+  "tip",
+  "coin_purchase",
+  "reward_cashout"
 ]);
 export const transactionStatusEnum = pgEnum("transaction_status", ["pending", "completed", "failed", "cancelled"]);
 export const payoutStatusEnum = pgEnum("payout_status", ["pending", "processing", "completed", "failed"]);
@@ -59,6 +61,8 @@ export const users = pgTable("users", {
   whatsappOptIn: boolean("whatsapp_opt_in").default(false),
   // Twitch channel login for ride streaming (validated against Twitch on save).
   twitchChannel: text("twitch_channel"),
+  // Short public bio shown on the TikTok-style profile (max 80 chars, enforced server-side).
+  bio: text("bio"),
   ethWalletAddress: text("eth_wallet_address"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -1661,6 +1665,9 @@ export const ridePosts = pgTable("ride_posts", {
   userId: varchar("user_id").references(() => users.id).notNull(),
   type: ridePostTypeEnum("type").notNull(),
   twitchChannel: text("twitch_channel"),
+  // Which system carries the live video: "twitch" (external app broadcast,
+  // WebView viewer) or "agora" (native in-app broadcast + viewer).
+  streamProvider: text("stream_provider").default("twitch").notNull(),
   caption: text("caption"),
   // Optional rider photo attached when sharing a ride memory to the feed.
   // Stored inline as a compressed data URL (validated + size-capped server-side).
@@ -1674,6 +1681,25 @@ export const ridePosts = pgTable("ride_posts", {
 
 export type RidePost = typeof ridePosts.$inferSelect;
 export type InsertRidePost = typeof ridePosts.$inferInsert;
+
+// A "Shop the Look" product card featured by the host during a live Agora
+// stream. The snapshot (title / image / price label) is always derived
+// server-side from the curated catalog — hosts can only pick a productKey,
+// never author the label. One active card per stream at a time.
+export const streamProducts = pgTable("stream_products", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "cascade" }).notNull(),
+  productKey: text("product_key").notNull(),
+  title: text("title").notNull(),
+  imageUrl: text("image_url"),
+  priceLabel: text("price_label").notNull(),
+  ttlSeconds: integer("ttl_seconds").default(45).notNull(),
+  tapCount: integer("tap_count").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  clearedAt: timestamp("cleared_at"),
+});
+
+export type StreamProduct = typeof streamProducts.$inferSelect;
 
 // A reaction on a feed post. One reaction per (post, user) — changing your
 // reaction replaces the row (upsert), removing it deletes the row.
@@ -1886,3 +1912,111 @@ export const searchQueries = pgTable("search_queries", {
 
 export type SearchQuery = typeof searchQueries.$inferSelect;
 export type InsertSearchQuery = typeof searchQueries.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Travony Rewards — TikTok-style coins / gifts / diamonds + earn hub.
+// Coins are the spend-side currency (bought from the AED wallet or earned via
+// check-ins, missions and referrals). Gifts convert to diamonds for the
+// recipient; diamonds cash out to the AED wallet. All amounts are integers of
+// whole coins/diamonds — money math happens only in deterministic server code.
+// ---------------------------------------------------------------------------
+
+export const rewardAccounts = pgTable("reward_accounts", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  coins: integer("coins").default(0).notNull(),
+  diamonds: integer("diamonds").default(0).notNull(),
+  streakDay: integer("streak_day").default(0).notNull(),
+  lastCheckInDate: text("last_check_in_date"), // YYYY-MM-DD (UTC)
+  referralCode: text("referral_code").unique(),
+  referredBy: varchar("referred_by").references(() => users.id),
+  referralQualified: boolean("referral_qualified").default(false).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type RewardAccount = typeof rewardAccounts.$inferSelect;
+export type InsertRewardAccount = typeof rewardAccounts.$inferInsert;
+
+// Immutable ledger of every coin/diamond movement. UNIQUE(user, kind, ref)
+// is the idempotency wall: refId is the date for check-ins,
+// "<missionKey>:<date>" for missions, the invitee's user id for referral
+// bonuses, "milestone:<n>" for milestone bonuses, and a UUID for
+// purchases/gifts/cashouts.
+export const rewardTransactions = pgTable("reward_transactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  kind: text("kind").notNull(), // coin_purchase | checkin | mission | referral_invitee | referral_qualified | referral_milestone | gift_sent | gift_received | cashout
+  coinsDelta: integer("coins_delta").default(0).notNull(),
+  diamondsDelta: integer("diamonds_delta").default(0).notNull(),
+  refId: text("ref_id").notNull(),
+  meta: text("meta"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("reward_tx_user_kind_ref_unique").on(table.userId, table.kind, table.refId),
+  index("reward_tx_user_created_idx").on(table.userId, table.createdAt),
+]);
+
+export type RewardTransaction = typeof rewardTransactions.$inferSelect;
+export type InsertRewardTransaction = typeof rewardTransactions.$inferInsert;
+
+export const giftsSent = pgTable("gifts_sent", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  senderId: varchar("sender_id").references(() => users.id).notNull(),
+  recipientId: varchar("recipient_id").references(() => users.id).notNull(),
+  giftKey: text("gift_key").notNull(),
+  coins: integer("coins").notNull(),
+  diamonds: integer("diamonds").notNull(),
+  context: text("context").notNull(), // post | ride
+  postId: varchar("post_id").references(() => ridePosts.id),
+  rideId: varchar("ride_id").references(() => rides.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("gifts_sent_recipient_idx").on(table.recipientId, table.createdAt),
+  index("gifts_sent_post_idx").on(table.postId),
+]);
+
+export type GiftSent = typeof giftsSent.$inferSelect;
+export type InsertGiftSent = typeof giftsSent.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Social Match Agent — self-learning people-to-people matching.
+// match_signals logs every suggestion impression (with the feature snapshot
+// that produced it) and every explicit dismissal. Positive outcomes are NOT
+// stored here — they are derived at learning time by joining user_follows,
+// so the ground truth is always the real social graph.
+// ---------------------------------------------------------------------------
+
+export const matchSignals = pgTable("match_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  candidateId: varchar("candidate_id").references(() => users.id).notNull(),
+  kind: text("kind").notNull(), // impression | dismiss
+  features: jsonb("features"), // feature vector snapshot at impression time
+  weightsVersion: integer("weights_version"),
+  // Set once a learning cycle has consumed this impression's final outcome —
+  // guarantees each outcome teaches the weights exactly once.
+  processedAt: timestamp("processed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("match_signals_user_created_idx").on(table.userId, table.createdAt),
+  index("match_signals_kind_created_idx").on(table.kind, table.createdAt),
+  index("match_signals_pair_idx").on(table.userId, table.candidateId),
+]);
+
+export type MatchSignal = typeof matchSignals.$inferSelect;
+export type InsertMatchSignal = typeof matchSignals.$inferInsert;
+
+// Versioned weight vectors — one row per completed learning cycle that
+// actually changed the weights. The newest row is the live "brain".
+export const matchWeights = pgTable("match_weights", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  version: integer("version").notNull().unique(),
+  weights: jsonb("weights").notNull(), // { featureKey: number }
+  metrics: jsonb("metrics"), // deterministic cycle stats (samples, follow rate, per-feature deltas)
+  insight: text("insight"), // Claude-written plain-language note about what changed
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type MatchWeightsRow = typeof matchWeights.$inferSelect;
+export type InsertMatchWeightsRow = typeof matchWeights.$inferInsert;

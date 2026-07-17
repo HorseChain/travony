@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -30,6 +31,7 @@ interface SavedAddress {
 
 export default function SavedAddressesScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -117,7 +119,7 @@ export default function SavedAddressesScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{
           paddingTop: headerHeight + Spacing.lg,
-          paddingBottom: insets.bottom + Spacing["3xl"],
+          paddingBottom: tabBarInset + Spacing["3xl"],
           paddingHorizontal: Spacing.lg,
           flexGrow: 1,
         }}

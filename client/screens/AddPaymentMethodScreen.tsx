@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet, Pressable, Linking, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
@@ -13,6 +14,7 @@ import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 
 export default function AddPaymentMethodScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const navigation = useNavigation();
@@ -43,7 +45,7 @@ export default function AddPaymentMethodScreen() {
           styles.scrollContent,
           {
             paddingTop: headerHeight + Spacing.lg,
-            paddingBottom: insets.bottom + Spacing["3xl"],
+            paddingBottom: tabBarInset + Spacing["3xl"],
           },
         ]}
       >

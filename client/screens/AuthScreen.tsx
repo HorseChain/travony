@@ -9,6 +9,7 @@ import {
   Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -23,6 +24,7 @@ export default function AuthScreen() {
   const { theme, isDark } = useTheme();
   const { login } = useAuth();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [isLoading, setIsLoading] = useState(false);
@@ -91,7 +93,7 @@ export default function AuthScreen() {
       <KeyboardAwareScrollViewCompat
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: insets.top + Spacing["3xl"], paddingBottom: insets.bottom + Spacing["3xl"] },
+          { paddingTop: insets.top + Spacing["3xl"], paddingBottom: tabBarInset + Spacing["3xl"] },
         ]}
       >
         <View style={styles.logoContainer}>

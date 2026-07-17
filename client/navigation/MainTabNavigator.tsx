@@ -10,6 +10,8 @@ import SocialStackNavigator from "@/navigation/SocialStackNavigator";
 import ProfileStackNavigator from "@/navigation/ProfileStackNavigator";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Shadows } from "@/constants/theme";
+import { useAuth } from "@/hooks/useAuth";
+import { useAuthGate } from "@/hooks/useAuthGate";
 
 export type MainTabParamList = {
   HomeTab: undefined;
@@ -23,10 +25,20 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export default function MainTabNavigator() {
   const { theme, isDark } = useTheme();
+  const { isAuthenticated } = useAuth();
+  const { openLoginSheet } = useAuthGate();
 
   return (
     <Tab.Navigator
       initialRouteName="HomeTab"
+      screenListeners={({ route }) => ({
+        tabPress: (e) => {
+          if (!isAuthenticated && route.name !== "HomeTab") {
+            e.preventDefault();
+            openLoginSheet();
+          }
+        },
+      })}
       screenOptions={{
         tabBarActiveTintColor: theme.primary,
         tabBarInactiveTintColor: theme.tabIconDefault,
@@ -77,14 +89,15 @@ export default function MainTabNavigator() {
           ),
         }}
       />
+      {/* Wallet stays reachable (profile sidebar, booking sheet, assistant)
+          but is hidden from the tab bar. */}
       <Tab.Screen
         name="WalletTab"
         component={WalletStackNavigator}
         options={{
           title: "Wallet",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="wallet-outline" size={size} color={color} />
-          ),
+          tabBarButton: () => null,
+          tabBarItemStyle: { display: "none" },
         }}
       />
       <Tab.Screen

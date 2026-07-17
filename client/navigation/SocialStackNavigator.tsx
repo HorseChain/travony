@@ -2,6 +2,7 @@ import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import SocialScreen from "@/screens/SocialScreen";
 import StreamViewerScreen from "@/screens/StreamViewerScreen";
+import AgoraStreamViewerScreen from "@/screens/AgoraStreamViewerScreen";
 import MemoriesScreen from "@/screens/MemoriesScreen";
 import PostCommentsScreen from "@/screens/PostCommentsScreen";
 import DiscoverScreen from "@/screens/DiscoverScreen";
@@ -11,9 +12,10 @@ import { useScreenOptions } from "@/hooks/useScreenOptions";
 export type SocialStackParamList = {
   Social: undefined;
   StreamViewer: { channel: string; name: string };
+  AgoraStreamViewer: { postId: string; name?: string };
   Memories: undefined;
   PostComments: { postId: string };
-  Discover: undefined;
+  Discover: { initialQuery?: string } | undefined;
   HubDetail: { hubId: string; hubName: string };
 };
 
@@ -27,12 +29,17 @@ export default function SocialStackNavigator() {
       <Stack.Screen
         name="Social"
         component={SocialScreen}
-        options={{ headerTitle: "Network" }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="StreamViewer"
         component={StreamViewerScreen}
         options={({ route }) => ({ headerTitle: route.params.name })}
+      />
+      <Stack.Screen
+        name="AgoraStreamViewer"
+        component={AgoraStreamViewerScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="Memories"

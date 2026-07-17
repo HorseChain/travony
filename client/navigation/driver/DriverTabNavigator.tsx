@@ -6,6 +6,8 @@ import { BlurView } from "expo-blur";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors } from "@/constants/theme";
 import { useDriverRideNotifications } from "@/hooks/useDriverRideNotifications";
+import { useAuth } from "@/hooks/useAuth";
+import { useAuthGate } from "@/hooks/useAuthGate";
 
 import DriverHomeStackNavigator from "./DriverHomeStackNavigator";
 import DriverEarningsStackNavigator from "./DriverEarningsStackNavigator";
@@ -25,12 +27,22 @@ const Tab = createBottomTabNavigator<DriverTabParamList>();
 
 export default function DriverTabNavigator() {
   const { theme, isDark } = useTheme();
+  const { isAuthenticated } = useAuth();
+  const { openLoginSheet } = useAuthGate();
 
   useDriverRideNotifications();
 
   return (
     <Tab.Navigator
       initialRouteName="DriverHomeTab"
+      screenListeners={({ route }) => ({
+        tabPress: (e) => {
+          if (!isAuthenticated && route.name !== "DriverHomeTab") {
+            e.preventDefault();
+            openLoginSheet();
+          }
+        },
+      })}
       screenOptions={{
         tabBarActiveTintColor: Colors.travonyGreen,
         tabBarInactiveTintColor: theme.tabIconDefault,

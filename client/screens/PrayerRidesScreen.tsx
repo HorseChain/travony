@@ -9,6 +9,8 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useHeaderHeight } from "@react-navigation/elements";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 
@@ -70,6 +72,8 @@ function formatLocal(iso: string): string {
 
 export default function PrayerRidesScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
+  const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
 
@@ -424,9 +428,10 @@ export default function PrayerRidesScreen() {
       <KeyboardAwareScrollViewCompat
         contentContainerStyle={{
           padding: Spacing.lg,
-          paddingBottom: insets.bottom + Spacing.xl,
+          paddingTop: headerHeight + Spacing.md,
+          paddingBottom: tabBarInset + Spacing.xl,
         }}
-        scrollIndicatorInsets={{ bottom: insets.bottom }}
+        scrollIndicatorInsets={{ bottom: tabBarInset }}
       >
         <View style={[styles.heroCard, { backgroundColor: `${Colors.travonyGreen}15`, borderColor: `${Colors.travonyGreen}40` }]}>
           <Ionicons name="moon-outline" size={22} color={Colors.travonyGreen} />

@@ -26,7 +26,7 @@ import LiteTripView from "@/components/LiteTripView";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
-import { StreamRideButton } from "@/components/RideSocial";
+import { StreamRideButton, GoLiveInAppButton } from "@/components/RideSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
@@ -277,6 +277,8 @@ export default function ActiveRideScreen() {
 
   const driverPhone = telemetry?.driver?.phone || ride?.driverPhone;
   const [chatVisible, setChatVisible] = useState(false);
+  const [sheetHeight, setSheetHeight] = useState(0);
+  const [headerOverlayHeight, setHeaderOverlayHeight] = useState(0);
   const driverDisplayName = telemetry?.driver?.name || "your driver";
   const { unreadCount, markRead } = useRideMessages({
     rideId,
@@ -412,6 +414,11 @@ export default function ActiveRideScreen() {
           statusTitle={statusInfo.title}
           statusSubtitle={statusInfo.subtitle}
           eta={eta}
+          style={{
+            justifyContent: "flex-start",
+            paddingTop: (headerOverlayHeight || insets.top + 64) + Spacing.lg,
+            paddingBottom: sheetHeight + Spacing.lg,
+          }}
         />
       ) : (
         <RideMap
@@ -428,7 +435,10 @@ export default function ActiveRideScreen() {
         />
       )}
 
-      <View style={[styles.header, { paddingTop: insets.top + Spacing.md }]}>
+      <View
+        onLayout={(e) => setHeaderOverlayHeight(e.nativeEvent.layout.height)}
+        style={[styles.header, { paddingTop: insets.top + Spacing.md }]}
+      >
         <Pressable
           style={[styles.backButton, { backgroundColor: theme.card }]}
           onPress={handleBack}
@@ -436,6 +446,7 @@ export default function ActiveRideScreen() {
           <Ionicons name="arrow-back-outline" size={24} color={theme.text} />
         </Pressable>
 
+        {liteMode ? null : (
         <Card style={styles.statusCard}>
           <View style={styles.statusHeader}>
             <View style={[styles.statusIcon, { backgroundColor: theme.primary + "20" }]}>
@@ -468,8 +479,10 @@ export default function ActiveRideScreen() {
               <ThemedText style={[styles.etaIntelText, { color: theme.textMuted }]}>ETA Intelligence: Active</ThemedText>
             </View>
           ) : null}
+          {rideId ? <GoLiveInAppButton rideId={rideId} rideStatus={ride?.status} /> : null}
           {rideId ? <StreamRideButton rideId={rideId} rideStatus={ride?.status} /> : null}
         </Card>
+        )}
 
       {showShareBanner ? (
         <Animated.View
@@ -582,7 +595,7 @@ export default function ActiveRideScreen() {
       ) : null}
       </View>
 
-      <View style={[styles.sideButtons, { bottom: tabBarHeight + Spacing["5xl"] + Spacing["4xl"] + Spacing["3xl"] + Spacing["2xl"] + Spacing.xl + Spacing.lg + Spacing.md + Spacing.sm }]}>
+      <View style={[styles.sideButtons, { bottom: (sheetHeight || tabBarHeight + 260) + Spacing.lg }]}>
         <Pressable
           style={[styles.shareButton, { backgroundColor: theme.primary }]}
           onPress={handleShareRide}
@@ -609,6 +622,7 @@ export default function ActiveRideScreen() {
       ) : null}
 
       <View
+        onLayout={(e) => setSheetHeight(e.nativeEvent.layout.height)}
         style={[
           styles.bottomSheet,
           { backgroundColor: theme.card, paddingBottom: tabBarHeight + Spacing.lg },

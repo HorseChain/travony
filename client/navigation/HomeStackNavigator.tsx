@@ -5,6 +5,7 @@ import HomeScreen from "@/screens/HomeScreen";
 import SelectLocationScreen from "@/screens/SelectLocationScreen";
 import ConfirmRideScreen from "@/screens/ConfirmRideScreen";
 import ActiveRideScreen from "@/screens/ActiveRideScreen";
+import GoLiveScreen from "@/screens/GoLiveScreen";
 import RatingScreen from "@/screens/RatingScreen";
 import InvoiceScreen from "@/screens/InvoiceScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
@@ -47,6 +48,7 @@ export type HomeStackParamList = {
     dropoff: { address: string; lat: number; lng: number };
   };
   ActiveRide: { rideId: string };
+  GoLive: { rideId: string };
   Rating: { rideId: string; driverId: string; driverName: string };
   Invoice: { rideId: string };
   OpenClaw: { variant: "rider" };
@@ -87,6 +89,11 @@ export default function HomeStackNavigator() {
         name="ActiveRide"
         component={ActiveRideScreen}
         options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="GoLive"
+        component={GoLiveScreen}
+        options={{ headerShown: false, presentation: "fullScreenModal" }}
       />
       <Stack.Screen
         name="Rating"

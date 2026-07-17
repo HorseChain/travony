@@ -3,7 +3,6 @@ import { View, ActivityIndicator, StyleSheet } from "react-native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import MainTabNavigator from "@/navigation/MainTabNavigator";
 import DriverTabNavigator from "@/navigation/driver/DriverTabNavigator";
-import OnboardingScreen from "@/screens/OnboardingScreen";
 import { CreditToast } from "@/components/CreditToast";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { reportCrash } from "@/lib/reportCrash";
@@ -31,7 +30,6 @@ function SafeDriverTabNavigator() {
 export type RootStackParamList = {
   Main: undefined;
   DriverMain: undefined;
-  Onboarding: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -66,32 +64,28 @@ export default function RootStackNavigator() {
   }
 
   const userIsDriver = user?.role === "driver";
-  
-  const shouldShowDriverApp = APP_VARIANT === 'driver' || (APP_VARIANT === 'unified' && userIsDriver);
-  const shouldShowRiderApp = APP_VARIANT === 'rider' || (APP_VARIANT === 'unified' && !userIsDriver);
+
+  // Guests browse the app too (TikTok-style): the driver build shows the
+  // driver app, everything else shows the rider app. Signed-in users are
+  // routed by their account role.
+  const shouldShowDriverApp =
+    APP_VARIANT === 'driver' ||
+    (APP_VARIANT === 'unified' && isAuthenticated && userIsDriver);
 
   return (
     <>
       <Stack.Navigator screenOptions={{ ...screenOptions, animation: 'none' }}>
-        {isAuthenticated ? (
-          shouldShowDriverApp ? (
-            <Stack.Screen
-              name="DriverMain"
-              component={SafeDriverTabNavigator}
-              options={{ headerShown: false, animation: 'none' }}
-            />
-          ) : (
-            <Stack.Screen
-              name="Main"
-              component={SafeMainTabNavigator}
-              options={{ headerShown: false, animation: 'none' }}
-            />
-          )
+        {shouldShowDriverApp ? (
+          <Stack.Screen
+            name="DriverMain"
+            component={SafeDriverTabNavigator}
+            options={{ headerShown: false, animation: 'none' }}
+          />
         ) : (
           <Stack.Screen
-            name="Onboarding"
-            component={OnboardingScreen}
-            options={{ headerShown: false }}
+            name="Main"
+            component={SafeMainTabNavigator}
+            options={{ headerShown: false, animation: 'none' }}
           />
         )}
       </Stack.Navigator>

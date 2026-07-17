@@ -1,5 +1,6 @@
 import { View, StyleSheet, ScrollView, FlatList, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
@@ -36,6 +37,7 @@ interface RatingsData {
 
 export default function DriverRatingsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -134,7 +136,7 @@ export default function DriverRatingsScreen() {
         renderItem={renderRatingItem}
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: tabBarInset + 100 },
         ]}
         ListHeaderComponent={
           <>

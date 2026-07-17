@@ -3,7 +3,7 @@
     "name": "T Ride",
     "slug": "trav-ride",
     "owner": "travoney_1",
-    "version": "6.2.0",
+    "version": "6.2.1",
     "orientation": "portrait",
     "icon": "./assets/images/icon-rider.png",
     "scheme": "travony-rider",
@@ -17,9 +17,17 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.travony.rider"
+      "bundleIdentifier": "com.travony.rider",
+      "infoPlist": {
+        "NSCameraUsageDescription": "T Ride uses your camera to stream your ride live inside the app.",
+        "NSMicrophoneUsageDescription": "T Ride uses your microphone so viewers can hear you while you stream your ride live."
+      }
     },
     "android": {
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#00B14F",
         "foregroundImage": "./assets/images/android-icon-rider-foreground.png",
@@ -29,7 +37,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.rider",
-      "versionCode": 70,
+      "versionCode": 71,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"

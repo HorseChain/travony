@@ -11,6 +11,7 @@ import {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -70,6 +71,7 @@ interface CoffeeOrder {
 export default function DriverCoffeeOrdersScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<TabMode>("available");
@@ -267,7 +269,7 @@ export default function DriverCoffeeOrdersScreen() {
           style={{ flex: 1 }}
           contentContainerStyle={{
             paddingTop: Spacing.md,
-            paddingBottom: insets.bottom + Spacing["3xl"],
+            paddingBottom: tabBarInset + Spacing["3xl"],
             paddingHorizontal: Spacing.lg,
             flexGrow: 1,
           }}

@@ -136,6 +136,10 @@ import type { Ride } from "@shared/schema";
 import { rides, payments, drivers, truthRides, truthScores, truthConsent, truthProviders, ghostRides, ghostMessages, offlineSyncQueue, evDemandSignals, hubs, prayerRideDispatches } from "@shared/schema";
 import { networkStatsRouter } from "./networkStats";
 import { socialRouter } from "./socialRoutes";
+import { matchRouter, startMatchAgent } from "./matchAgent";
+import { rewardsRouter, qualifyReferralsForRide } from "./rewardsRoutes";
+import { agoraRouter, startAgoraViewerLoop } from "./agoraStreaming";
+import { googleAuthRouter } from "./googleAuth";
 import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRoutes";
 import { db } from "./db";
 import { eq, and, gte, desc, count, like } from "drizzle-orm";
@@ -179,7 +183,7 @@ function getDeclineMessage(declineCode: string): string {
 
 async function createSession(userId: string, role: string): Promise<string> {
   const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000); // 30 days
   await storage.createSession(token, userId, role, expiresAt);
   return token;
 }
@@ -732,7 +736,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Allowed fields users can update on their own profile
-  const ALLOWED_USER_UPDATES = ["name", "phone", "avatar"];
+  const ALLOWED_USER_UPDATES = ["name", "phone", "avatar", "bio"];
   
   app.patch("/api/users/:id", requireAuth, async (req: any, res) => {
     try {
@@ -747,6 +751,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (req.body[key] !== undefined) {
           updates[key] = req.body[key];
         }
+      }
+
+      // Bio is a short public profile line — keep it plain text and short.
+      if (updates.bio !== undefined) {
+        if (typeof updates.bio !== "string") {
+          return res.status(400).json({ message: "Bio must be text" });
+        }
+        updates.bio = updates.bio.replace(/\s+/g, " ").trim().slice(0, 80);
       }
       
       // Admins can update role
@@ -764,6 +776,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: user.name,
         phone: user.phone,
         avatar: user.avatar,
+        bio: user.bio,
         role: user.role,
       });
     } catch (error: any) {
@@ -1782,6 +1795,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           // Fires only here — on the authorized, persisted completed transition.
           accrueLadderForRide(ride, driverShare).catch((err) =>
             console.error("[CarLadder] accrual hook error:", err),
+          );
+
+          // Travony Rewards: referral qualification on first completed ride.
+          // Idempotent inside (referral_qualified flag + unique ledger refs).
+          qualifyReferralsForRide(ride).catch((err) =>
+            console.error("[Rewards] referral qualification hook error:", err),
           );
         }
       }
@@ -8195,6 +8214,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.use(googleAuthRouter);
   app.use(openClawRouter);
   app.use(coffeeRouter);
   app.use(assistantRouter);
@@ -8203,6 +8223,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(prayerRidesRouter);
   app.use(networkStatsRouter);
   app.use(socialRouter);
+  app.use(matchRouter);
+  startMatchAgent();
+  app.use(rewardsRouter);
+  app.use(agoraRouter);
+  startAgoraViewerLoop();
   startPrayerRidesEngine();
   app.use(nameYourFareRouter);
   app.use(fleetDashboardRouter);

@@ -1,5 +1,6 @@
 import { View, StyleSheet, ScrollView, Switch, Pressable, Alert, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useState, useEffect } from "react";
@@ -26,6 +27,7 @@ interface SettingItem {
 
 export default function DriverAppSettingsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user } = useAuth();
@@ -251,7 +253,7 @@ export default function DriverAppSettingsScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + 100 },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: tabBarInset + 100 },
         ]}
         showsVerticalScrollIndicator={false}
       >

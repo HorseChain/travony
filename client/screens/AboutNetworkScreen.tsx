@@ -1,6 +1,7 @@
 import { View, StyleSheet, ScrollView } from "react-native";
 import { useHeaderHeight } from "@react-navigation/elements";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
@@ -9,6 +10,7 @@ import { Typography, Spacing, Colors } from "@/constants/theme";
 export default function AboutNetworkScreen() {
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const { theme } = useTheme();
 
   return (
@@ -16,7 +18,7 @@ export default function AboutNetworkScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.content,
-          { paddingTop: headerHeight + Spacing["3xl"], paddingBottom: insets.bottom + Spacing["3xl"] },
+          { paddingTop: headerHeight + Spacing["3xl"], paddingBottom: tabBarInset + Spacing["3xl"] },
         ]}
       >
         <ThemedText style={styles.statement}>

@@ -1,6 +1,7 @@
 import React from "react";
 import { View, StyleSheet, ScrollView, Pressable, Alert, Linking, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRoute } from "@react-navigation/native";
@@ -49,6 +50,7 @@ function getStatusColor(status: string, theme: ReturnType<typeof useTheme>["them
 
 export default function RideDetailsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const route = useRoute<RouteProps>();
@@ -123,7 +125,7 @@ export default function RideDetailsScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing["3xl"],
+        paddingBottom: tabBarInset + Spacing["3xl"],
         paddingHorizontal: Spacing.lg,
       }}
     >

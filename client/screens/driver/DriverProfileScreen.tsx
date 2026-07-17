@@ -1,6 +1,8 @@
+import React, { useState, useLayoutEffect } from "react";
 import { View, StyleSheet, Pressable, Alert, ScrollView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
+import { useHeaderHeight, HeaderButton } from "@react-navigation/elements";
 import { useNavigation } from "@react-navigation/native";
 import { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -9,6 +11,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { StatusBadges, type StatusBadge } from "@/components/StatusBadges";
+import ProfileSidebar from "@/components/profile/ProfileSidebar";
+import QRCodeSheet from "@/components/profile/QRCodeSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
@@ -36,19 +40,44 @@ type NavigationProp = NativeStackNavigationProp<DriverProfileStackParamList>;
 export default function DriverProfileScreen() {
   const navigation = useNavigation<NavigationProp>();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user, logout } = useAuth();
+
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
 
   const { data: driverData } = useQuery<DriverData>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
   });
 
-  const { data: socialData } = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+  const { data: socialData } = useQuery<{
+    followers: number;
+    following: number;
+    likes: number;
+    handle: string | null;
+    twitchChannel: string | null;
+  }>({
     queryKey: ["/api/social/counts"],
     enabled: !!user,
   });
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <HeaderButton onPress={() => navigation.navigate("FindFriends")}>
+          <Ionicons name="person-add-outline" size={22} color={theme.text} />
+        </HeaderButton>
+      ),
+      headerRight: () => (
+        <HeaderButton onPress={() => setSidebarVisible(true)}>
+          <Ionicons name="menu-outline" size={26} color={theme.text} />
+        </HeaderButton>
+      ),
+    });
+  }, [navigation, theme.text]);
 
   const { data: badgesData } = useQuery<{ badges: StatusBadge[] }>({
     queryKey: ["/api/social/badges", user?.id],
@@ -186,7 +215,7 @@ export default function DriverProfileScreen() {
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingTop: headerHeight + Spacing.lg, paddingBottom: insets.bottom + Spacing["5xl"] + Spacing["4xl"] + Spacing.md },
+          { paddingTop: headerHeight + Spacing.lg, paddingBottom: tabBarInset + Spacing["5xl"] + Spacing["4xl"] + Spacing.md },
         ]}
         showsVerticalScrollIndicator={false}
       >
@@ -261,34 +290,38 @@ export default function DriverProfileScreen() {
 
         {socialData ? (
           <View style={[styles.statsCard, { backgroundColor: theme.backgroundElevated }]}>
-            <View style={styles.statItem}>
+            <Pressable
+              style={styles.statItem}
+              onPress={() => navigation.navigate("FollowList", { mode: "followers" })}
+            >
               <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
                 {socialData.followers}
               </ThemedText>
               <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
                 Followers
               </ThemedText>
-            </View>
+            </Pressable>
             <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-            <View style={styles.statItem}>
+            <Pressable
+              style={styles.statItem}
+              onPress={() => navigation.navigate("FollowList", { mode: "following" })}
+            >
               <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
                 {socialData.following}
               </ThemedText>
               <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
                 Following
               </ThemedText>
+            </Pressable>
+            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+            <View style={styles.statItem}>
+              <ThemedText style={[styles.statValue, { color: Colors.travonyGreen }]}>
+                {socialData.likes ?? 0}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]}>
+                Likes
+              </ThemedText>
             </View>
-            {socialData.twitchChannel ? (
-              <>
-                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-                <View style={styles.statItem}>
-                  <Ionicons name="videocam-outline" size={20} color={Colors.travonyGreen} />
-                  <ThemedText style={[styles.statLabel, { color: theme.textSecondary }]} numberOfLines={1}>
-                    {socialData.twitchChannel}
-                  </ThemedText>
-                </View>
-              </>
-            ) : null}
           </View>
         ) : null}
 
@@ -307,6 +340,23 @@ export default function DriverProfileScreen() {
           T Driver v5.6.0
         </ThemedText>
       </ScrollView>
+
+      <ProfileSidebar
+        visible={sidebarVisible}
+        onClose={() => setSidebarVisible(false)}
+        balanceTitle="Vehicle Wallet"
+        onBalance={() =>
+          (navigation as any)
+            .getParent()
+            ?.navigate("DriverEarningsTab", { screen: "VehicleWallet" })
+        }
+        onRewards={() => navigation.navigate("Rewards")}
+        onActivity={() => navigation.navigate("ActivityCentre")}
+        onQRCode={() => setQrVisible(true)}
+        onSettings={() => navigation.navigate("DriverAppSettings")}
+      />
+
+      <QRCodeSheet visible={qrVisible} onClose={() => setQrVisible(false)} />
     </ThemedView>
   );
 }

@@ -1,7 +1,14 @@
-import React from "react";
-import { View, StyleSheet, ScrollView, Pressable, Alert, Image, Platform } from "react-native";
+import React, { useState } from "react";
+import {
+  View,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Image,
+  Share,
+  useWindowDimensions,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
@@ -9,57 +16,60 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
-import { Card } from "@/components/Card";
 import { StatusBadges, type StatusBadge } from "@/components/StatusBadges";
-import { LiteModeSetting } from "@/components/LiteModeSetting";
+import ProfileSidebar from "@/components/profile/ProfileSidebar";
+import QRCodeSheet from "@/components/profile/QRCodeSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
-import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { getApiUrl } from "@/lib/query-client";
+import { Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<ProfileStackParamList, "Profile">;
 
-interface MenuItemProps {
-  icon: string;
-  title: string;
-  onPress: () => void;
-  showArrow?: boolean;
-  danger?: boolean;
+const TIKTOK_CYAN = "#20D5EC";
+const LIVE_RED = "#FE2C55";
+
+interface SocialCounts {
+  followers: number;
+  following: number;
+  likes: number;
+  posts: number;
+  twitchChannel: string | null;
+  bio: string | null;
+  handle: string | null;
 }
 
-function MenuItem({ icon, title, onPress, showArrow = true, danger = false }: MenuItemProps) {
-  const { theme } = useTheme();
-  
-  return (
-    <Pressable
-      style={({ pressed }) => [
-        styles.menuItem,
-        { opacity: pressed ? 0.8 : 1 },
-      ]}
-      onPress={onPress}
-    >
-      <View style={[styles.menuIconContainer, { backgroundColor: danger ? theme.error + "20" : theme.backgroundDefault }]}>
-        <Ionicons name={icon as any} size={20} color={danger ? theme.error : theme.primary} />
-      </View>
-      <ThemedText style={[styles.menuItemText, danger && { color: theme.error }]}>
-        {title}
-      </ThemedText>
-      {showArrow && (
-        <Ionicons name="chevron-forward-outline" size={20} color={theme.textMuted} />
-      )}
-    </Pressable>
-  );
+interface ProfilePost {
+  id: string;
+  type: "published" | "stream";
+  caption: string | null;
+  photoUrl: string | null;
+  cityName: string | null;
+  distanceKm: string | null;
+  isLive: boolean;
+  reactionCount: number;
+}
+
+function formatCount(n: number): string {
+  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
+  if (n >= 10000) return `${(n / 1000).toFixed(1)}K`;
+  return String(n);
 }
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
-  const headerHeight = useHeaderHeight();
   const tabBarHeight = useBottomTabBarHeight();
   const { theme } = useTheme();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
+  const { width } = useWindowDimensions();
 
-  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+  const [activeTab, setActiveTab] = useState<"posts" | "liked">("posts");
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [qrVisible, setQrVisible] = useState(false);
+
+  const countsQuery = useQuery<SocialCounts>({
     queryKey: ["/api/social/counts"],
     enabled: !!user,
   });
@@ -69,159 +79,336 @@ export default function ProfileScreen() {
     enabled: !!user?.id,
   });
 
-  const handleLogout = async () => {
-    if (Platform.OS === "web") {
-      const confirmed = window.confirm("Are you sure you want to sign out?");
-      if (confirmed) {
-        await logout();
-      }
-    } else {
-      Alert.alert(
-        "Sign Out",
-        "Are you sure you want to sign out?",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Sign Out",
-            style: "destructive",
-            onPress: async () => {
-              await logout();
-            },
-          },
-        ]
-      );
-    }
+  const myPostsQuery = useQuery<{ posts: ProfilePost[] }>({
+    queryKey: ["/api/social/my-posts"],
+    enabled: !!user,
+  });
+
+  const likedPostsQuery = useQuery<{ posts: ProfilePost[] }>({
+    queryKey: ["/api/social/liked-posts"],
+    enabled: !!user && activeTab === "liked",
+  });
+
+  const walletQuery = useQuery<{ balance: string }>({
+    queryKey: [`/api/wallet/balance/${user?.id}`],
+    enabled: !!user?.id,
+  });
+
+  const counts = countsQuery.data;
+  const posts = activeTab === "posts" ? myPostsQuery.data?.posts : likedPostsQuery.data?.posts;
+  const postsLoading = activeTab === "posts" ? myPostsQuery.isLoading : likedPostsQuery.isLoading;
+
+  const tileWidth = (width - Spacing.lg * 2 - 4) / 3;
+
+  const openPost = (postId: string) => {
+    (navigation as any).getParent()?.navigate("SocialTab", {
+      screen: "PostComments",
+      params: { postId },
+    });
   };
 
+  const handleShareProfile = async () => {
+    try {
+      const handlePart = counts?.handle ? ` (@${counts.handle})` : "";
+      await Share.share({
+        message: `Follow ${user?.name || "me"}${handlePart} on Travony. ${getApiUrl()}`,
+      });
+    } catch {}
+  };
+
+  const tasks = [
+    {
+      key: "photo",
+      done: !!user?.avatar,
+      icon: "person-circle-outline" as const,
+      title: "Add profile photo",
+      subtitle: "Help friends recognise you",
+      onPress: () => navigation.navigate("EditProfile"),
+    },
+    {
+      key: "bio",
+      done: !!counts?.bio,
+      icon: "create-outline" as const,
+      title: "Add a bio",
+      subtitle: "Tell people about yourself",
+      onPress: () => navigation.navigate("EditProfile"),
+    },
+    {
+      key: "twitch",
+      done: !!counts?.twitchChannel,
+      icon: "videocam-outline" as const,
+      title: "Link Twitch",
+      subtitle: "Stream your rides live",
+      onPress: () => navigation.navigate("EditProfile"),
+    },
+    {
+      key: "post",
+      done: (counts?.posts ?? 0) > 0,
+      icon: "share-social-outline" as const,
+      title: "Share a ride",
+      subtitle: "Publish your first ride",
+      onPress: () => (navigation as any).getParent()?.navigate("SocialTab"),
+    },
+  ];
+  const doneCount = tasks.filter((t) => t.done).length;
+  const pendingTasks = tasks.filter((t) => !t.done);
+
   return (
-    <ScrollView
-      style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
-      contentContainerStyle={{
-        paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: tabBarHeight + Spacing.xl,
-        paddingHorizontal: Spacing.lg,
-      }}
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
-    >
-      <View style={styles.profileHeader}>
-        <View style={[styles.avatarContainer, { backgroundColor: theme.backgroundDefault }]}>
-          {user?.avatar ? (
-            <Image source={{ uri: user.avatar }} style={styles.avatar} />
-          ) : (
-            <Ionicons name="person-outline" size={40} color={theme.primary} />
-          )}
+    <View style={[styles.container, { backgroundColor: theme.backgroundRoot }]}>
+      <View style={[styles.topBar, { paddingTop: insets.top + Spacing.sm }]}>
+        <Pressable hitSlop={8} onPress={() => navigation.navigate("FindFriends")}>
+          <Ionicons name="person-add-outline" size={24} color={theme.text} />
+        </Pressable>
+        <View style={styles.topBarRight}>
+          <Pressable hitSlop={8} onPress={handleShareProfile}>
+            <Ionicons name="arrow-redo-outline" size={24} color={theme.text} />
+          </Pressable>
+          <Pressable hitSlop={8} onPress={() => setSidebarVisible(true)}>
+            <Ionicons name="menu-outline" size={28} color={theme.text} />
+          </Pressable>
         </View>
-        <View style={styles.profileInfo}>
-          <ThemedText style={styles.profileName}>{user?.name || "Guest User"}</ThemedText>
-          <ThemedText style={[styles.profileEmail, { color: theme.textSecondary }]}>
-            {user?.email || "No email"}
-          </ThemedText>
+      </View>
+
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: tabBarHeight + Spacing.xl }}
+        scrollIndicatorInsets={{ bottom: insets.bottom }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <View style={styles.avatarWrap}>
+            {user?.avatar ? (
+              <Image source={{ uri: user.avatar }} style={styles.avatar} />
+            ) : (
+              <View style={[styles.avatar, styles.avatarFallback, { backgroundColor: theme.backgroundDefault }]}>
+                <Ionicons name="person-outline" size={44} color={theme.primary} />
+              </View>
+            )}
+            <Pressable
+              style={[styles.plusBadge, { borderColor: theme.backgroundRoot }]}
+              onPress={() => navigation.navigate("EditProfile")}
+            >
+              <Ionicons name="add" size={16} color="#FFFFFF" />
+            </Pressable>
+          </View>
+
+          <View style={styles.nameRow}>
+            <Pressable style={styles.namePressable} onPress={() => navigation.navigate("EditProfile")}>
+              <ThemedText style={styles.name}>{user?.name || "Add name"}</ThemedText>
+              <Ionicons name="chevron-down-outline" size={16} color={theme.textSecondary} />
+            </Pressable>
+            <View style={[styles.nameDivider, { backgroundColor: theme.border }]} />
+            <Pressable
+              style={[styles.editPill, { borderColor: theme.border }]}
+              onPress={() => navigation.navigate("EditProfile")}
+            >
+              <ThemedText style={styles.editPillText}>Edit</ThemedText>
+            </Pressable>
+          </View>
+
+          {counts?.handle ? (
+            <ThemedText style={[styles.handle, { color: theme.textMuted }]}>
+              @{counts.handle}
+            </ThemedText>
+          ) : null}
+
+          <View style={styles.statsRow}>
+            <Pressable
+              style={styles.stat}
+              onPress={() => navigation.navigate("FollowList", { mode: "following" })}
+            >
+              <ThemedText style={styles.statValue}>
+                {formatCount(counts?.following ?? 0)}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>
+                Following
+              </ThemedText>
+            </Pressable>
+            <Pressable
+              style={styles.stat}
+              onPress={() => navigation.navigate("FollowList", { mode: "followers" })}
+            >
+              <ThemedText style={styles.statValue}>
+                {formatCount(counts?.followers ?? 0)}
+              </ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>
+                Followers
+              </ThemedText>
+            </Pressable>
+            <View style={styles.stat}>
+              <ThemedText style={styles.statValue}>{formatCount(counts?.likes ?? 0)}</ThemedText>
+              <ThemedText style={[styles.statLabel, { color: theme.textMuted }]}>Likes</ThemedText>
+            </View>
+          </View>
+
+          <View style={styles.actionRow}>
+            <Pressable
+              style={[styles.actionButton, { backgroundColor: theme.backgroundDefault }]}
+              onPress={() => navigation.navigate("EditProfile")}
+            >
+              <ThemedText style={styles.actionButtonText}>Edit profile</ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.actionButton, { backgroundColor: theme.backgroundDefault }]}
+              onPress={handleShareProfile}
+            >
+              <ThemedText style={styles.actionButtonText}>Share profile</ThemedText>
+            </Pressable>
+            <Pressable
+              style={[styles.qrButton, { backgroundColor: theme.backgroundDefault }]}
+              onPress={() => setQrVisible(true)}
+            >
+              <Ionicons name="qr-code-outline" size={18} color={theme.text} />
+            </Pressable>
+          </View>
+
+          <Pressable style={styles.bioWrap} onPress={() => navigation.navigate("EditProfile")}>
+            {counts?.bio ? (
+              <ThemedText style={styles.bioText}>{counts.bio}</ThemedText>
+            ) : (
+              <ThemedText style={[styles.addBio, { color: theme.textMuted }]}>+ Add bio</ThemedText>
+            )}
+          </Pressable>
+
           <StatusBadges badges={badgesQuery.data?.badges} size="md" />
         </View>
-        <Pressable
-          style={({ pressed }) => [
-            styles.editButton,
-            { backgroundColor: theme.backgroundDefault, opacity: pressed ? 0.8 : 1 },
-          ]}
-          onPress={() => navigation.navigate("EditProfile")}
-        >
-          <Ionicons name="pencil-outline" size={18} color={theme.primary} />
-        </Pressable>
-      </View>
 
-      {socialQuery.data ? (
-        <View style={styles.socialRow}>
-          <View style={styles.socialStat}>
-            <ThemedText style={styles.socialCount}>{socialQuery.data.followers}</ThemedText>
-            <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]}>Followers</ThemedText>
+        {pendingTasks.length > 0 ? (
+          <View style={styles.completeSection}>
+            <View style={styles.completeHeader}>
+              <ThemedText style={styles.completeTitle}>Complete your profile</ThemedText>
+              <ThemedText style={[styles.completeCount, { color: theme.textMuted }]}>
+                {doneCount}/4 completed
+              </ThemedText>
+            </View>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.completeCards}
+            >
+              {pendingTasks.map((task) => (
+                <View
+                  key={task.key}
+                  style={[styles.completeCard, { backgroundColor: theme.backgroundElevated }]}
+                >
+                  <View style={[styles.completeIcon, { backgroundColor: theme.backgroundDefault }]}>
+                    <Ionicons name={task.icon} size={22} color={theme.primary} />
+                  </View>
+                  <ThemedText style={styles.completeCardTitle} numberOfLines={1}>
+                    {task.title}
+                  </ThemedText>
+                  <ThemedText
+                    style={[styles.completeCardSubtitle, { color: theme.textMuted }]}
+                    numberOfLines={2}
+                  >
+                    {task.subtitle}
+                  </ThemedText>
+                  <Pressable
+                    style={[styles.completeCta, { backgroundColor: LIVE_RED }]}
+                    onPress={task.onPress}
+                  >
+                    <ThemedText style={styles.completeCtaText}>
+                      {task.key === "post" ? "Share" : "Add"}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              ))}
+            </ScrollView>
           </View>
-          <View style={[styles.socialDivider, { backgroundColor: theme.border }]} />
-          <View style={styles.socialStat}>
-            <ThemedText style={styles.socialCount}>{socialQuery.data.following}</ThemedText>
-            <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]}>Following</ThemedText>
-          </View>
-          {socialQuery.data.twitchChannel ? (
-            <>
-              <View style={[styles.socialDivider, { backgroundColor: theme.border }]} />
-              <View style={styles.socialStat}>
-                <Ionicons name="videocam-outline" size={18} color={theme.primary} />
-                <ThemedText style={[styles.socialLabel, { color: theme.textSecondary }]} numberOfLines={1}>
-                  {socialQuery.data.twitchChannel}
-                </ThemedText>
-              </View>
-            </>
-          ) : null}
+        ) : null}
+
+        <View style={[styles.tabsRow, { borderBottomColor: theme.border }]}>
+          <Pressable style={styles.tab} onPress={() => setActiveTab("posts")}>
+            <Ionicons
+              name="grid-outline"
+              size={22}
+              color={activeTab === "posts" ? theme.text : theme.textMuted}
+            />
+            {activeTab === "posts" ? (
+              <View style={[styles.tabIndicator, { backgroundColor: theme.text }]} />
+            ) : null}
+          </Pressable>
+          <Pressable style={styles.tab} onPress={() => setActiveTab("liked")}>
+            <Ionicons
+              name={activeTab === "liked" ? "heart" : "heart-outline"}
+              size={22}
+              color={activeTab === "liked" ? theme.text : theme.textMuted}
+            />
+            {activeTab === "liked" ? (
+              <View style={[styles.tabIndicator, { backgroundColor: theme.text }]} />
+            ) : null}
+          </Pressable>
         </View>
-      ) : null}
 
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="location-outline"
-          title="Saved Addresses"
-          onPress={() => navigation.navigate("SavedAddresses")}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-        <MenuItem
-          icon="people-outline"
-          title="Emergency Contacts"
-          onPress={() => navigation.navigate("EmergencyContacts")}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-        <MenuItem
-          icon="help-circle-outline"
-          title="Help & Support"
-          onPress={() => navigation.navigate("Help")}
-        />
-      </Card>
+        <View style={styles.grid}>
+          {(posts || []).map((post) => (
+            <Pressable
+              key={post.id}
+              style={[
+                styles.tile,
+                { width: tileWidth, backgroundColor: theme.backgroundElevated },
+              ]}
+              onPress={() => openPost(post.id)}
+            >
+              {post.photoUrl ? (
+                <Image source={{ uri: post.photoUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
+              ) : (
+                <View style={styles.tilePlaceholder}>
+                  <Ionicons name="car-outline" size={22} color={theme.textMuted} />
+                  {post.cityName ? (
+                    <ThemedText style={[styles.tileCity, { color: theme.textSecondary }]} numberOfLines={1}>
+                      {post.cityName}
+                    </ThemedText>
+                  ) : null}
+                  {post.distanceKm ? (
+                    <ThemedText style={[styles.tileKm, { color: theme.textMuted }]}>
+                      {parseFloat(post.distanceKm).toFixed(1)} km
+                    </ThemedText>
+                  ) : null}
+                </View>
+              )}
+              {post.isLive ? (
+                <View style={[styles.livePill, { backgroundColor: LIVE_RED }]}>
+                  <ThemedText style={styles.livePillText}>LIVE</ThemedText>
+                </View>
+              ) : null}
+              <View style={styles.tileFooter}>
+                <Ionicons name="heart" size={12} color="#FFFFFF" />
+                <ThemedText style={styles.tileLikes}>{post.reactionCount}</ThemedText>
+              </View>
+            </Pressable>
+          ))}
+        </View>
 
-      <View style={styles.menuCard}>
-        <LiteModeSetting />
-      </View>
+        {!postsLoading && (posts || []).length === 0 ? (
+          <View style={styles.emptyPosts}>
+            <Ionicons
+              name={activeTab === "posts" ? "videocam-outline" : "heart-outline"}
+              size={44}
+              color={theme.textMuted}
+            />
+            <ThemedText style={[styles.emptyText, { color: theme.textMuted }]}>
+              {activeTab === "posts"
+                ? "Share your first ride to start your profile"
+                : "Rides you like will appear here"}
+            </ThemedText>
+          </View>
+        ) : null}
+      </ScrollView>
 
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="chatbubbles-outline"
-          title="Messages"
-          onPress={() => navigation.navigate("Messages")}
-        />
-      </Card>
+      <ProfileSidebar
+        visible={sidebarVisible}
+        onClose={() => setSidebarVisible(false)}
+        balanceTitle="Balance"
+        balanceValue={walletQuery.data?.balance ? `AED ${walletQuery.data.balance}` : null}
+        onBalance={() => (navigation as any).getParent()?.navigate("WalletTab")}
+        onRewards={() => navigation.navigate("Rewards")}
+        onActivity={() => navigation.navigate("ActivityCentre")}
+        onQRCode={() => setQrVisible(true)}
+        onSettings={() => navigation.navigate("Settings")}
+      />
 
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="chatbox-outline"
-          title="Share Feedback"
-          onPress={() => navigation.navigate("Feedback" as any)}
-        />
-      </Card>
-
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="document-text-outline"
-          title="Terms of Service"
-          onPress={() => Alert.alert("Terms of Service", "Terms and conditions content here.")}
-        />
-        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
-        <MenuItem
-          icon="shield-checkmark-outline"
-          title="Privacy Policy"
-          onPress={() => Alert.alert("Privacy Policy", "Privacy policy content here.")}
-        />
-      </Card>
-
-      <Card style={styles.menuCard}>
-        <MenuItem
-          icon="log-out-outline"
-          title="Sign Out"
-          onPress={handleLogout}
-          showArrow={false}
-          danger
-        />
-      </Card>
-
-      <ThemedText style={[styles.version, { color: theme.textMuted }]}>
-        Travony v5.6.0
-      </ThemedText>
-    </ScrollView>
+      <QRCodeSheet visible={qrVisible} onClose={() => setQrVisible(false)} />
+    </View>
   );
 }
 
@@ -229,93 +416,254 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  profileHeader: {
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
-    marginBottom: Spacing["2xl"],
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.sm,
   },
-  avatarContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+  topBarRight: {
+    flexDirection: "row",
     alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
+    gap: Spacing.lg,
+  },
+  header: {
+    alignItems: "center",
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.md,
+  },
+  avatarWrap: {
+    position: "relative",
   },
   avatar: {
-    width: 80,
-    height: 80,
+    width: 96,
+    height: 96,
+    borderRadius: 48,
   },
-  profileInfo: {
-    flex: 1,
-    marginLeft: Spacing.lg,
-  },
-  profileName: {
-    ...Typography.h3,
-  },
-  profileEmail: {
-    ...Typography.bodyMedium,
-    marginTop: Spacing.xs,
-  },
-  editButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  avatarFallback: {
     alignItems: "center",
     justifyContent: "center",
   },
-  socialRow: {
+  plusBadge: {
+    position: "absolute",
+    bottom: 0,
+    right: -2,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: TIKTOK_CYAN,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+  },
+  nameRow: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-evenly",
-    marginTop: -Spacing.lg,
-    marginBottom: Spacing.xl,
+    marginTop: Spacing.md,
+    gap: Spacing.md,
   },
-  socialStat: {
+  namePressable: {
+    flexDirection: "row",
     alignItems: "center",
-    flexShrink: 1,
+    gap: 4,
   },
-  socialCount: {
+  name: {
     ...Typography.h4,
   },
-  socialLabel: {
+  nameDivider: {
+    width: 1,
+    height: 16,
+  },
+  editPill: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 3,
+  },
+  editPillText: {
+    ...Typography.bodySmallMedium,
+  },
+  handle: {
+    ...Typography.bodySmall,
+    marginTop: 2,
+  },
+  statsRow: {
+    flexDirection: "row",
+    marginTop: Spacing.lg,
+    gap: Spacing["3xl"],
+  },
+  stat: {
+    alignItems: "center",
+  },
+  statValue: {
+    ...Typography.bodyBold,
+  },
+  statLabel: {
     ...Typography.small,
     marginTop: 2,
   },
-  socialDivider: {
-    width: 1,
-    height: 28,
-  },
-  menuCard: {
-    marginBottom: Spacing.lg,
-    padding: 0,
-    overflow: "hidden",
-  },
-  menuItem: {
+  actionRow: {
     flexDirection: "row",
-    alignItems: "center",
-    paddingVertical: Spacing.lg,
-    paddingHorizontal: Spacing.lg,
+    marginTop: Spacing.lg,
+    gap: Spacing.sm,
   },
-  menuIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+  actionButton: {
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
+    borderRadius: BorderRadius.sm,
+  },
+  actionButtonText: {
+    ...Typography.bodySmallMedium,
+  },
+  qrButton: {
+    width: 42,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: Spacing.md,
+    borderRadius: BorderRadius.sm,
   },
-  menuItemText: {
-    ...Typography.body,
-    flex: 1,
+  bioWrap: {
+    marginTop: Spacing.md,
+    paddingHorizontal: Spacing.xl,
   },
-  menuDivider: {
-    height: 1,
-    marginLeft: Spacing.lg + 40 + Spacing.md,
+  bioText: {
+    ...Typography.bodySmall,
+    textAlign: "center",
   },
-  version: {
+  addBio: {
+    ...Typography.bodySmall,
+  },
+  completeSection: {
+    marginTop: Spacing["2xl"],
+  },
+  completeHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: Spacing.lg,
+    marginBottom: Spacing.md,
+  },
+  completeTitle: {
+    ...Typography.bodyMedium,
+  },
+  completeCount: {
+    ...Typography.small,
+  },
+  completeCards: {
+    paddingHorizontal: Spacing.lg,
+    gap: Spacing.md,
+  },
+  completeCard: {
+    width: 150,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    alignItems: "center",
+  },
+  completeIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Spacing.sm,
+  },
+  completeCardTitle: {
+    ...Typography.bodySmallMedium,
+    textAlign: "center",
+  },
+  completeCardSubtitle: {
     ...Typography.small,
     textAlign: "center",
-    marginTop: Spacing.lg,
+    marginTop: 2,
+    minHeight: 28,
+  },
+  completeCta: {
+    marginTop: Spacing.sm,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: 6,
+    borderRadius: BorderRadius.sm,
+  },
+  completeCtaText: {
+    ...Typography.bodySmallMedium,
+    color: "#FFFFFF",
+  },
+  tabsRow: {
+    flexDirection: "row",
+    marginTop: Spacing["2xl"],
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  tab: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: Spacing.md,
+  },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    width: 44,
+    height: 2,
+    borderRadius: 1,
+  },
+  grid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    paddingHorizontal: Spacing.lg,
+    paddingTop: 2,
+    gap: 2,
+  },
+  tile: {
+    aspectRatio: 3 / 4,
+    borderRadius: 2,
+    overflow: "hidden",
+  },
+  tilePlaceholder: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    padding: Spacing.sm,
+    gap: 2,
+  },
+  tileCity: {
+    ...Typography.small,
+    textAlign: "center",
+  },
+  tileKm: {
+    ...Typography.small,
+  },
+  livePill: {
+    position: "absolute",
+    top: 6,
+    left: 6,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  livePillText: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#FFFFFF",
+  },
+  tileFooter: {
+    position: "absolute",
+    bottom: 4,
+    left: 6,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  tileLikes: {
+    fontSize: 11,
+    fontWeight: "600",
+    color: "#FFFFFF",
+  },
+  emptyPosts: {
+    alignItems: "center",
+    paddingTop: Spacing["3xl"],
+    paddingHorizontal: Spacing["2xl"],
+    gap: Spacing.md,
+  },
+  emptyText: {
+    ...Typography.bodySmall,
+    textAlign: "center",
   },
 });

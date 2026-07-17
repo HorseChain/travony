@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { drivers, rides, users } from "@shared/schema";
+import { drivers, rides, users, savedAddresses } from "@shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 
 export interface DriverIntentVector {
@@ -404,6 +404,215 @@ export async function findAlignedDrivers(
   alignedDrivers.sort((a, b) => b.alignment.score - a.alignment.score);
   
   return alignedDrivers;
+}
+
+// ---------------------------------------------------------------------------
+// Smart Rider Destination Suggestions
+// ---------------------------------------------------------------------------
+// Predicts where a rider is most likely headed *right now* by scoring their own
+// completed-ride history on three signals — frequency, recency, and how well
+// each destination matches the current time-of-day and day-of-week — then
+// merges in saved Home/Work. No new tables: everything is derived from existing
+// rides + saved_addresses. All time math is done in the rider's local frame
+// using the timezone offset the client passes in.
+
+export interface DestinationSuggestion {
+  address: string;
+  lat: number;
+  lng: number;
+  label: string;
+  icon: string;
+  reason: string;
+  score: number;
+  savedLabel?: "home" | "work" | null;
+}
+
+interface DestAgg {
+  lat: number;
+  lng: number;
+  address: string;
+  count: number;
+  lastTs: number;
+  contextSum: number;
+}
+
+function isWeekend(dow: number): boolean {
+  // Sunday(0), Friday(5) and Saturday(6) are the common non-work days across
+  // the app's regions; treat Fri/Sat/Sun as "weekend" for day-type matching.
+  return dow === 5 || dow === 6 || dow === 0;
+}
+
+function circularHourDiff(a: number, b: number): number {
+  let diff = Math.abs(a - b);
+  if (diff > 12) diff = 24 - diff;
+  return diff;
+}
+
+function shortenAddress(address: string): string {
+  const trimmed = address.trim();
+  if (trimmed.length <= 22) return trimmed;
+  // Prefer the first comma-separated segment when it is reasonably short.
+  const first = trimmed.split(",")[0].trim();
+  if (first.length > 0 && first.length <= 22) return first;
+  return trimmed.slice(0, 21) + "…";
+}
+
+function distanceMeters(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  return calculateDistance(lat1, lng1, lat2, lng2) * 1000;
+}
+
+export async function getRiderDestinationSuggestions(
+  userId: string,
+  nowHour: number,
+  nowDow: number,
+  tzOffsetMinutes: number,
+  limit: number = 6
+): Promise<{ suggestions: DestinationSuggestion[]; source: "history" | "saved" | "empty" }> {
+  const userRides = await db
+    .select()
+    .from(rides)
+    .where(and(eq(rides.customerId, userId), eq(rides.status, "completed")))
+    .orderBy(desc(rides.createdAt))
+    .limit(200);
+
+  const saved = await db
+    .select()
+    .from(savedAddresses)
+    .where(eq(savedAddresses.userId, userId));
+
+  const homeSaved = saved.find((s) => s.label?.toLowerCase() === "home");
+  const workSaved = saved.find((s) => s.label?.toLowerCase() === "work");
+
+  const now = Date.now();
+  const aggregates = new Map<string, DestAgg>();
+
+  for (const ride of userRides) {
+    const lat = parseFloat(ride.dropoffLat || "0");
+    const lng = parseFloat(ride.dropoffLng || "0");
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    if (lat === 0 && lng === 0) continue;
+    if (!ride.dropoffAddress) continue;
+
+    const ts = ride.createdAt ? new Date(ride.createdAt).getTime() : now;
+    const localMs = ts + tzOffsetMinutes * 60 * 1000;
+    const localDate = new Date(localMs);
+    const rideHour = localDate.getUTCHours();
+    const rideDow = localDate.getUTCDay();
+
+    const hourDiff = circularHourDiff(rideHour, nowHour);
+    const timeProximity = Math.max(0, 1 - hourDiff / 4); // full within same hour, 0 at 4h+
+    const dayBonus = rideDow === nowDow ? 1 : isWeekend(rideDow) === isWeekend(nowDow) ? 0.6 : 0.2;
+    const contextContribution = timeProximity * dayBonus;
+
+    const key = `${lat.toFixed(3)},${lng.toFixed(3)}`;
+    const existing = aggregates.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.contextSum += contextContribution;
+      if (ts > existing.lastTs) {
+        existing.lastTs = ts;
+        existing.address = ride.dropoffAddress;
+      }
+    } else {
+      aggregates.set(key, {
+        lat,
+        lng,
+        address: ride.dropoffAddress,
+        count: 1,
+        lastTs: ts,
+        contextSum: contextContribution,
+      });
+    }
+  }
+
+  const aggList = Array.from(aggregates.values());
+  const hasHistory = aggList.length > 0;
+
+  const maxCount = Math.max(1, ...aggList.map((a) => a.count));
+  const maxContext = Math.max(0, ...aggList.map((a) => a.contextSum));
+
+  const suggestions: DestinationSuggestion[] = aggList.map((a) => {
+    const freqNorm = a.count / maxCount;
+    const daysSinceLast = (now - a.lastTs) / (1000 * 60 * 60 * 24);
+    const recencyNorm = Math.exp(-daysSinceLast / 21);
+    const contextNorm = maxContext > 0 ? a.contextSum / maxContext : 0;
+
+    const wFreq = 0.3 * freqNorm;
+    const wRecency = 0.25 * recencyNorm;
+    const wContext = 0.45 * contextNorm;
+    const score = wFreq + wRecency + wContext;
+
+    // Match against saved places by proximity so a frequently-visited work
+    // destination shows up labeled "Work" but ranked by real context.
+    let savedLabel: "home" | "work" | null = null;
+    let label = shortenAddress(a.address);
+    let icon = "location-outline";
+    if (homeSaved && parseFloat(homeSaved.lat) !== 0 &&
+        distanceMeters(a.lat, a.lng, parseFloat(homeSaved.lat), parseFloat(homeSaved.lng)) <= 250) {
+      savedLabel = "home";
+      label = "Home";
+      icon = "home-outline";
+    } else if (workSaved && parseFloat(workSaved.lat) !== 0 &&
+        distanceMeters(a.lat, a.lng, parseFloat(workSaved.lat), parseFloat(workSaved.lng)) <= 250) {
+      savedLabel = "work";
+      label = "Work";
+      icon = "briefcase-outline";
+    }
+
+    // Honest reason from the dominant weighted signal.
+    let reason: string;
+    if (wContext >= wFreq && wContext >= wRecency && contextNorm > 0.15) {
+      if (nowHour >= 5 && nowHour < 12) reason = "You usually head here in the mornings";
+      else if (nowHour >= 12 && nowHour < 17) reason = "You usually go here around this time";
+      else if (nowHour >= 17 && nowHour < 22) reason = "You usually head here in the evenings";
+      else reason = "You usually go here around now";
+    } else if (wFreq >= wRecency) {
+      reason = a.count >= 3 ? "One of your regular spots" : "You've been here before";
+    } else {
+      reason = "One of your recent trips";
+    }
+
+    return { address: a.address, lat: a.lat, lng: a.lng, label, icon, reason, score, savedLabel };
+  });
+
+  const matchedSaved = new Set(
+    suggestions.map((s) => s.savedLabel).filter((v): v is "home" | "work" => v !== null)
+  );
+
+  // Inject saved Home/Work that have no matching history so they never vanish.
+  const injectSaved = (
+    row: typeof homeSaved,
+    kind: "home" | "work",
+    labelText: string,
+    icon: string
+  ) => {
+    if (!row || matchedSaved.has(kind)) return;
+    const lat = parseFloat(row.lat);
+    const lng = parseFloat(row.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || (lat === 0 && lng === 0)) return;
+    if (!row.address) return;
+    suggestions.push({
+      address: row.address,
+      lat,
+      lng,
+      label: labelText,
+      icon,
+      reason: "Saved place",
+      score: hasHistory ? 0.35 : 0.6,
+      savedLabel: kind,
+    });
+  };
+  injectSaved(homeSaved, "home", "Home", "home-outline");
+  injectSaved(workSaved, "work", "Work", "briefcase-outline");
+
+  suggestions.sort((a, b) => b.score - a.score);
+  const trimmed = suggestions.slice(0, limit);
+
+  let source: "history" | "saved" | "empty" = "empty";
+  if (hasHistory) source = "history";
+  else if (trimmed.length > 0) source = "saved";
+
+  return { suggestions: trimmed, source };
 }
 
 export async function getBestAlignedDriver(

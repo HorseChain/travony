@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Location from "expo-location";
@@ -140,6 +141,7 @@ const POPULAR_LOCATIONS: LocationResult[] = [
 
 export default function SelectLocationScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme, isDark } = useTheme();
   const { liteMode } = useLiteMode();
@@ -480,7 +482,7 @@ export default function SelectLocationScreen() {
         ) : null}
       </View>
 
-      <View style={[styles.bottomContainer, { paddingBottom: insets.bottom + Spacing.lg }]}>
+      <View style={[styles.bottomContainer, { paddingBottom: tabBarInset + Spacing.lg }]}>
         {selectedLocation ? (
           <Card style={styles.selectedCard}>
             <View style={styles.selectedRow}>

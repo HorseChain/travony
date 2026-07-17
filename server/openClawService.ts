@@ -1,6 +1,8 @@
 import { db } from "./db";
 import { hubs, hotspots, rides, drivers, vehicles, carpoolSuggestions, hubCheckIns, type Hub, type Hotspot } from "@shared/schema";
 import { eq, and, gte, lte, desc, sql, or } from "drizzle-orm";
+import { detectRegionFromCoordinates, getRegionByCode } from "./regionService";
+import { getFlowRecommendation } from "./cityBrain";
 
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -573,6 +575,170 @@ export async function generateSmartPrompt(userId: string, role: string, lat: num
     message: "Few drivers nearby right now. Try booking in a few minutes or walk to a nearby hub for faster pickup.",
     actionType: "show_hubs",
     data: {},
+  };
+}
+
+function demandPhrase(level: string): string {
+  switch (level) {
+    case "very_high": return "Very high demand nearby";
+    case "high": return "High demand nearby";
+    case "medium": return "Good demand nearby";
+    default: return "Some demand nearby";
+  }
+}
+
+// Real per-hour earnings for an area, using only completed rides in the last
+// 6 hours within radiusKm. Returns null when there aren't enough real rides to
+// be honest about a figure (we never invent an earnings number).
+async function computeAreaYieldPerHour(lat: number, lng: number, radiusKm: number): Promise<{ yieldPerHour: number | null; sampleSize: number }> {
+  const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+  const completed = await db.select().from(rides).where(and(
+    gte(rides.createdAt, sixHoursAgo),
+    eq(rides.status, "completed"),
+  ));
+  const nearby = completed.filter((r) => {
+    const rLat = parseFloat(r.pickupLat);
+    const rLng = parseFloat(r.pickupLng);
+    if (isNaN(rLat) || isNaN(rLng)) return false;
+    return haversineDistance(lat, lng, rLat, rLng) <= radiusKm;
+  });
+  if (nearby.length < 3) return { yieldPerHour: null, sampleSize: nearby.length };
+  const totalFare = nearby.reduce((s, r) => s + parseFloat(r.actualFare || r.estimatedFare || "0"), 0);
+  const avgFare = totalFare / nearby.length;
+  const ridesPerHour = nearby.length / 6;
+  return { yieldPerHour: Math.round(avgFare * ridesPerHour), sampleSize: nearby.length };
+}
+
+// "Go here next" — the single best place an idle online driver should head to,
+// combining hub recommendations (real completed-ride yield), live hotspots, and
+// City Brain zone-flow, in that order of confidence. Earnings figures come only
+// from real ride data; when there isn't enough, we omit the /hr number rather
+// than fabricate one.
+export async function getGoHereNext(driverId: string, lat: number, lng: number): Promise<{
+  recommendation: {
+    kind: "hub" | "hotspot" | "zone";
+    hubId: string | null;
+    title: string;
+    lat: number;
+    lng: number;
+    distanceKm: number;
+    etaMinutes: number;
+    yieldPerHour: number | null;
+    currency: string;
+    demandLevel: string;
+    reason: string;
+    confidence: number;
+  } | null;
+  currency: string;
+  emptyReason?: string;
+}> {
+  const regionCode = detectRegionFromCoordinates(lat, lng);
+  const region = await getRegionByCode(regionCode);
+  const currency = region?.currency || "AED";
+
+  // Urban driving estimate ~25 km/h to turn distance into a rough ETA.
+  const etaFor = (distKm: number) => Math.max(1, Math.round((distKm / 25) * 60));
+
+  // 1) Best hub recommendation — real yield from nearby completed rides.
+  const hubRecs = await getHubRecommendationsForDriver(driverId, lat, lng);
+  const topHub = hubRecs.find(
+    (h) => h.yieldEstimate > 0 || h.demandLevel === "high" || h.demandLevel === "very_high",
+  );
+  if (topHub) {
+    const [hubRow] = await db.select().from(hubs).where(eq(hubs.id, topHub.hubId));
+    if (hubRow) {
+      const distanceKm = Math.round(topHub.distance * 10) / 10;
+      const etaMinutes = etaFor(topHub.distance);
+      const yieldPerHour = topHub.yieldEstimate > 0 ? Math.round(topHub.yieldEstimate) : null;
+      const reason = yieldPerHour
+        ? `${demandPhrase(topHub.demandLevel)} — about ${currency} ${yieldPerHour}/hr, ~${etaMinutes} min away`
+        : `${demandPhrase(topHub.demandLevel)} — ~${etaMinutes} min away, about ${topHub.predictedWaitMinutes} min wait`;
+      return {
+        recommendation: {
+          kind: "hub",
+          hubId: topHub.hubId,
+          title: topHub.hubName,
+          lat: parseFloat(hubRow.lat),
+          lng: parseFloat(hubRow.lng),
+          distanceKm,
+          etaMinutes,
+          yieldPerHour,
+          currency,
+          demandLevel: topHub.demandLevel,
+          reason,
+          confidence: topHub.score,
+        },
+        currency,
+      };
+    }
+  }
+
+  // 2) Live hotspot — a real cluster of recent pickup requests.
+  const detected = await detectHotspots();
+  const nearHot = detected
+    .map((h) => ({ ...h, dist: haversineDistance(lat, lng, h.lat, h.lng) }))
+    .filter((h) => h.dist <= 10 && h.demandCount > 0)
+    .sort((a, b) => b.demandScore - a.demandScore)[0];
+  if (nearHot) {
+    const distanceKm = Math.round(nearHot.dist * 10) / 10;
+    const etaMinutes = etaFor(nearHot.dist);
+    const area = await computeAreaYieldPerHour(nearHot.lat, nearHot.lng, 1);
+    const reqWord = nearHot.demandCount === 1 ? "request" : "requests";
+    const reason = area.yieldPerHour
+      ? `${nearHot.demandCount} recent ${reqWord} here — about ${currency} ${area.yieldPerHour}/hr, ~${etaMinutes} min away`
+      : `${nearHot.demandCount} recent ${reqWord} here — ~${etaMinutes} min away`;
+    return {
+      recommendation: {
+        kind: "hotspot",
+        hubId: null,
+        title: "Busy pickup area",
+        lat: nearHot.lat,
+        lng: nearHot.lng,
+        distanceKm,
+        etaMinutes,
+        yieldPerHour: area.yieldPerHour,
+        currency,
+        demandLevel: nearHot.demandScore >= 8 ? "high" : "medium",
+        reason,
+        confidence: Math.min(1, Math.round((nearHot.demandCount / 8) * 100) / 100),
+      },
+      currency,
+    };
+  }
+
+  // 3) City Brain zone-flow — nudge toward a busier adjacent zone.
+  const flow = await getFlowRecommendation(lat, lng);
+  if (flow.recommendedZone) {
+    const dist = haversineDistance(lat, lng, flow.recommendedZone.lat, flow.recommendedZone.lng);
+    const distanceKm = Math.round(dist * 10) / 10;
+    const etaMinutes = etaFor(dist);
+    const area = await computeAreaYieldPerHour(flow.recommendedZone.lat, flow.recommendedZone.lng, 1.5);
+    const reason = area.yieldPerHour
+      ? `Busier zone nearby — about ${currency} ${area.yieldPerHour}/hr, ~${etaMinutes} min away`
+      : `Busier zone nearby — ~${etaMinutes} min away`;
+    return {
+      recommendation: {
+        kind: "zone",
+        hubId: null,
+        title: "Higher-demand zone",
+        lat: flow.recommendedZone.lat,
+        lng: flow.recommendedZone.lng,
+        distanceKm,
+        etaMinutes,
+        yieldPerHour: area.yieldPerHour,
+        currency,
+        demandLevel: "medium",
+        reason,
+        confidence: 0.4,
+      },
+      currency,
+    };
+  }
+
+  return {
+    recommendation: null,
+    currency,
+    emptyReason: "It's quiet nearby right now. Stay online — we'll point you to the next busy spot as demand picks up.",
   };
 }
 

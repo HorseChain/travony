@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { View, StyleSheet, TextInput, Pressable, Alert, ActivityIndicator, Image } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation } from "@react-navigation/native";
@@ -17,6 +18,7 @@ import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 export default function EditProfileScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const { user, updateUser } = useAuth();
@@ -29,18 +31,22 @@ export default function EditProfileScreen() {
   const [avatar, setAvatar] = useState(user?.avatar || "");
   const [twitchChannel, setTwitchChannel] = useState<string | null>(null);
   const [twitchTouched, setTwitchTouched] = useState(false);
+  const [bio, setBio] = useState<string | null>(null);
+  const [bioTouched, setBioTouched] = useState(false);
 
-  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null }>({
+  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null; bio: string | null }>({
     queryKey: ["/api/social/counts"],
   });
   const savedTwitch = socialQuery.data?.twitchChannel || "";
   const twitchValue = twitchTouched ? twitchChannel || "" : savedTwitch;
+  const savedBio = socialQuery.data?.bio || "";
+  const bioValue = bioTouched ? bio || "" : savedBio;
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
       const result = await apiRequest(`/api/users/${user?.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ name, phone, avatar }),
+        body: JSON.stringify({ name, phone, avatar, bio: bioValue.trim() }),
         headers: { "Content-Type": "application/json" },
       });
       if (twitchTouched && (twitchChannel || "").trim() !== savedTwitch) {
@@ -101,7 +107,7 @@ export default function EditProfileScreen() {
           styles.scrollContent,
           {
             paddingTop: headerHeight + Spacing["2xl"],
-            paddingBottom: insets.bottom + Spacing["3xl"],
+            paddingBottom: tabBarInset + Spacing["3xl"],
           },
         ]}
       >
@@ -182,6 +188,32 @@ export default function EditProfileScreen() {
                 keyboardType="phone-pad"
               />
             </View>
+          </View>
+
+          <View style={styles.inputGroup}>
+            <ThemedText style={styles.label}>Bio</ThemedText>
+            <View
+              style={[
+                styles.inputContainer,
+                { backgroundColor: theme.backgroundDefault, borderColor: theme.border },
+              ]}
+            >
+              <Ionicons name="text-outline" size={20} color={theme.textMuted} />
+              <TextInput
+                style={[styles.input, { color: theme.text }]}
+                placeholder="Add a short bio (optional)"
+                placeholderTextColor={theme.textMuted}
+                value={bioValue}
+                onChangeText={(text) => {
+                  setBioTouched(true);
+                  setBio(text);
+                }}
+                maxLength={80}
+              />
+            </View>
+            <ThemedText style={[styles.helperText, { color: theme.textMuted }]}>
+              {`${bioValue.length}/80 — shown on your profile`}
+            </ThemedText>
           </View>
 
           <View style={styles.inputGroup}>

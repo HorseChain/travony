@@ -9,6 +9,7 @@ import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import { useAuth } from "@/hooks/useAuth";
 import { SkeletonLoader } from "@/components/SkeletonLoader";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 
 const TIER_COLORS: Record<string, string> = {
@@ -97,6 +98,7 @@ export default function CommunityPrestigeScreen() {
   const { user } = useAuth();
   const headerHeight = useHeaderHeight();
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
 
   const { data: prestigeData, isLoading: prestigeLoading } = useQuery<any>({
     queryKey: ["/api/openclaw/prestige"],
@@ -133,10 +135,10 @@ export default function CommunityPrestigeScreen() {
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing.xl,
+        paddingBottom: tabBarInset + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
+      scrollIndicatorInsets={{ bottom: tabBarInset }}
       data={leaderboard}
       keyExtractor={(item) => item.id || String(item.rank)}
       renderItem={({ item }) => (

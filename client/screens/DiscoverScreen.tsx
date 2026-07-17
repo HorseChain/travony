@@ -9,8 +9,9 @@ import {
   Image,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
-import { useNavigation } from "@react-navigation/native";
+import { useNavigation, useRoute, type RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery } from "@tanstack/react-query";
@@ -130,12 +131,15 @@ function SmallAvatar({ uri, name }: { uri: string | null; name: string }) {
 
 export default function DiscoverScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
+  const route = useRoute<RouteProp<SocialStackParamList, "Discover">>();
+  const initialQuery = route.params?.initialQuery?.trim() || "";
 
-  const [input, setInput] = useState("");
-  const [query, setQuery] = useState("");
+  const [input, setInput] = useState(initialQuery);
+  const [query, setQuery] = useState(initialQuery);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<TextInput>(null);
 
@@ -188,11 +192,11 @@ export default function DiscoverScreen() {
       style={{ backgroundColor: theme.backgroundRoot }}
       contentContainerStyle={{
         paddingTop: headerHeight + Spacing.lg,
-        paddingBottom: insets.bottom + Spacing.xl,
+        paddingBottom: tabBarInset + Spacing.xl,
         paddingHorizontal: Spacing.lg,
       }}
       keyboardShouldPersistTaps="handled"
-      scrollIndicatorInsets={{ bottom: insets.bottom }}
+      scrollIndicatorInsets={{ bottom: tabBarInset }}
     >
       <View style={[styles.searchBar, { backgroundColor: theme.backgroundDefault }]}>
         <Ionicons name="search" size={18} color={theme.textMuted} />

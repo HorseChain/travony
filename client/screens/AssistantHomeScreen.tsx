@@ -29,6 +29,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { useAuthGate } from "@/hooks/useAuthGate";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
@@ -107,6 +108,7 @@ export default function AssistantHomeScreen() {
   const tabBarHeight = useBottomTabBarHeight();
   const { theme, isDark } = useTheme();
   const { user } = useAuth();
+  const { requireAuth } = useAuthGate();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
 
@@ -181,6 +183,7 @@ export default function AssistantHomeScreen() {
 
   const sendToAssistant = useCallback(
     async (text: string, destination?: AssistantPoint, pickupOverride?: AssistantPoint | null) => {
+      if (!requireAuth()) return;
       const trimmed = text.trim();
       if (!trimmed || thinking) return;
       appendMessages([{ id: nextId(), role: "user", text: trimmed }]);
@@ -213,7 +216,7 @@ export default function AssistantHomeScreen() {
         setThinking(false);
       }
     },
-    [appendMessages, pickup, thinking]
+    [appendMessages, pickup, thinking, requireAuth]
   );
 
   // Ride handoffs from the classic flows: SelectLocation and "Book Again" both
@@ -274,13 +277,22 @@ export default function AssistantHomeScreen() {
   };
 
   const handleChip = (chip: { id: string; message: string }) => {
+    if (!requireAuth()) return;
     logEvent(chip.id, true);
     sendToAssistant(chip.message);
   };
 
+  // Guests see a real, inviting home — tapping anything opens the login sheet.
+  const guestChips = [
+    { id: "guest_ride", icon: "car-outline", label: "Book a ride", message: "I need a ride" },
+    { id: "guest_coffee", icon: "cafe-outline", label: "Order coffee", message: "I'd like a coffee" },
+    { id: "guest_prayer", icon: "moon-outline", label: "Prayer ride", message: "Take me to the mosque" },
+    { id: "guest_places", icon: "compass-outline", label: "Places nearby", message: "What's around me?" },
+  ];
+
   const greeting = home?.greeting || "Hello";
   const subline = home?.subline || "Where to? Ask me anything.";
-  const chips = home?.chips || [];
+  const chips = user?.id ? home?.chips || [] : guestChips;
   const conversationStarted = messages.length > 0;
 
   return (

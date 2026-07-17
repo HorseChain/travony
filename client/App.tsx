@@ -1,6 +1,6 @@
 import React, { useEffect, useCallback } from "react";
 import { StyleSheet, View } from "react-native";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer, DefaultTheme, DarkTheme } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
@@ -16,6 +16,9 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { reportCrash } from "@/lib/reportCrash";
 import { LiteModeProvider } from "@/hooks/useLiteMode";
 import { NetworkStatusBanner } from "@/components/NetworkStatusBanner";
+import { useTheme } from "@/hooks/useTheme";
+import { AuthGateProvider } from "@/hooks/useAuthGate";
+import { LoginSheet } from "@/components/auth/LoginSheet";
 
 let KeyboardProvider: React.ComponentType<{ children: React.ReactNode }> | null = null;
 try {
@@ -25,6 +28,28 @@ try {
 }
 
 SplashScreen.preventAutoHideAsync();
+
+function ThemedNavigation() {
+  const { theme, isDark } = useTheme();
+  const base = isDark ? DarkTheme : DefaultTheme;
+  const navTheme = {
+    ...base,
+    colors: {
+      ...base.colors,
+      primary: theme.primary,
+      background: theme.backgroundRoot,
+      card: theme.backgroundRoot,
+      text: theme.text,
+      border: theme.border,
+    },
+  };
+
+  return (
+    <NavigationContainer theme={navTheme}>
+      <RootStackNavigator />
+    </NavigationContainer>
+  );
+}
 
 function SafeKeyboardProvider({ children }: { children: React.ReactNode }) {
   if (KeyboardProvider) {
@@ -66,11 +91,12 @@ export default function App() {
           <SafeAreaProvider>
             <GestureHandlerRootView style={styles.root} onLayout={onLayoutRootView}>
               <SafeKeyboardProvider>
-                <NavigationContainer>
-                  <RootStackNavigator />
-                </NavigationContainer>
-                <NetworkStatusBanner />
-                <StatusBar style="auto" />
+                <AuthGateProvider>
+                  <ThemedNavigation />
+                  <LoginSheet />
+                  <NetworkStatusBanner />
+                  <StatusBar style="auto" />
+                </AuthGateProvider>
               </SafeKeyboardProvider>
             </GestureHandlerRootView>
           </SafeAreaProvider>

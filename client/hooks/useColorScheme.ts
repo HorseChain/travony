@@ -1,4 +1,6 @@
-// Force light mode for the app
+import { useColorScheme as useRNColorScheme } from "react-native";
+
+// Follow the device's light/dark setting.
 export function useColorScheme(): "light" | "dark" {
-  return "light";
+  return useRNColorScheme() ?? "light";
 }

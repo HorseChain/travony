@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
 
@@ -93,6 +94,7 @@ function parseTimeInput(text: string): { hh: number; mm: number } | null {
 
 export default function ScheduledArrivalsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
 
@@ -526,9 +528,9 @@ export default function ScheduledArrivalsScreen() {
       <KeyboardAwareScrollViewCompat
         contentContainerStyle={{
           padding: Spacing.lg,
-          paddingBottom: insets.bottom + Spacing.xl,
+          paddingBottom: tabBarInset + Spacing.xl,
         }}
-        scrollIndicatorInsets={{ bottom: insets.bottom }}
+        scrollIndicatorInsets={{ bottom: tabBarInset }}
       >
         <View style={[styles.heroCard, { backgroundColor: `${Colors.travonyGreen}15`, borderColor: `${Colors.travonyGreen}40` }]}>
           <Ionicons name="alarm-outline" size={22} color={Colors.travonyGreen} />

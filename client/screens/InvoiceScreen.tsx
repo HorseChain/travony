@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   View,
   StyleSheet,
@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -18,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { Card } from "@/components/Card";
+import GiftSheet from "@/components/rewards/GiftSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
@@ -65,12 +67,14 @@ interface Invoice {
 
 export default function InvoiceScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<RouteProps>();
 
   const { rideId } = route.params;
+  const [giftVisible, setGiftVisible] = useState(false);
 
   const { data: ride, isLoading: rideLoading } = useQuery<Ride>({
     queryKey: ["/api/rides", rideId],
@@ -185,7 +189,7 @@ export default function InvoiceScreen() {
       <ScrollView
         contentContainerStyle={{
           paddingTop: headerHeight + Spacing.lg,
-          paddingBottom: insets.bottom + Spacing["3xl"],
+          paddingBottom: tabBarInset + Spacing["3xl"],
           paddingHorizontal: Spacing.lg,
         }}
       >
@@ -378,6 +382,16 @@ export default function InvoiceScreen() {
         </Card>
 
         <View style={styles.actions}>
+          {ride.status === "completed" ? (
+            <Pressable
+              style={[styles.giftButton, { borderColor: theme.border }]}
+              onPress={() => setGiftVisible(true)}
+            >
+              <Ionicons name="gift-outline" size={18} color="#FE2C55" />
+              <ThemedText style={styles.giftButtonText}>Send a gift to your driver</ThemedText>
+            </Pressable>
+          ) : null}
+
           <Pressable
             style={[styles.bookAgainButton, { backgroundColor: theme.primary }]}
             onPress={handleBookAgain}
@@ -402,6 +416,13 @@ export default function InvoiceScreen() {
           </Pressable>
         </View>
       </ScrollView>
+
+      <GiftSheet
+        visible={giftVisible}
+        onClose={() => setGiftVisible(false)}
+        rideId={rideId}
+        recipientName="your driver"
+      />
     </ThemedView>
   );
 }
@@ -670,6 +691,18 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     borderWidth: 1,
     gap: Spacing.sm,
+  },
+  giftButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingVertical: Spacing.lg,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1,
+    gap: Spacing.sm,
+  },
+  giftButtonText: {
+    ...Typography.button,
   },
   shareButtonText: {
     ...Typography.button,

@@ -6,6 +6,7 @@ import {
   coffeeOrders,
   drivers,
   hubs,
+  ladderGoals,
   prayerRideDispatches,
   rides,
   scheduledArrivals,
@@ -51,6 +52,7 @@ async function buildStats() {
     [coffeeTotals],
     cityRows,
     hubRows,
+    [ladderClimbers],
   ] = await Promise.all([
     db.select({ online: count() }).from(drivers).where(eq(drivers.isOnline, true)),
     db
@@ -90,6 +92,10 @@ async function buildStats() {
       .select({ type: hubs.type, evHub: hubs.isEvHub })
       .from(hubs)
       .where(eq(hubs.status, "active")),
+    db
+      .select({ climbing: countDistinct(ladderGoals.driverId) })
+      .from(ladderGoals)
+      .where(inArray(ladderGoals.status, ["active", "qualified", "claimed"] as any)),
   ]);
 
   // Group online drivers into cities by distance to the city center.
@@ -150,6 +156,7 @@ async function buildStats() {
       evHubs,
       onTimeArrivalsScheduled: Number(arrivalTotals.total),
       coffeeOrders: Number(coffeeTotals.total),
+      driversClimbing: Number(ladderClimbers.climbing),
     },
     blockchain: {
       chain: "Polygon Amoy",

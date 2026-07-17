@@ -79,6 +79,18 @@ export interface VehicleMilestone {
   value?: string;
 }
 
+// Deterministic Car Ladder facts computed by server/carLadder.ts — the ring's
+// numbers. The LLM may only echo these; it never invents progress or targets.
+export interface LadderFacts {
+  hasGoal: boolean;
+  status: string | null;
+  target: { name: string; vehicleKind: string } | null;
+  progressPercent: number;
+  paceWeeksRemaining: number | null;
+  qualified: boolean;
+  claimed: boolean;
+}
+
 export interface CarAgentInput {
   vehicle: Vehicle;
   earnings: VehicleEarnings;
@@ -90,6 +102,8 @@ export interface CarAgentInput {
   milestones?: VehicleMilestone[];
   // The car's own earning rhythm, used to plan the next shift honestly.
   earningPatterns?: EarningPatterns;
+  // Car Ladder ring facts (deterministic; optional when the driver has no goal).
+  ladder?: LadderFacts;
 }
 
 export interface CarAgentSummary {
@@ -102,6 +116,9 @@ export interface CarAgentSummary {
   plan: string;
   // Short rank/standing line, or null when there's nothing honest to show.
   rankLine: string | null;
+  // One deterministic Car Ladder sentence ("I'm 41% of the way to your new
+  // tuktuk — about 14 weeks at your pace"), or null when there's no goal.
+  ladderLine: string | null;
   // The currency code used in the figures (derived from the car's rides).
   currency: string;
   // True when the message came from real AI; false when we used the safe fallback.
@@ -279,6 +296,29 @@ function buildPlan(
   return `Give me a few more trips and I'll map out the hours and areas where we earn the most.`;
 }
 
+// One deterministic Car Ladder sentence built entirely from engine numbers.
+// Never mentions crypto/token vocabulary — just the vehicle, % and pace.
+function buildLadderLine(ladder: LadderFacts | undefined): string | null {
+  if (!ladder || !ladder.hasGoal || !ladder.target) return null;
+  const what = ladder.target.vehicleKind === "car" || ladder.target.vehicleKind === "suv"
+    ? `your new ${ladder.target.name}`
+    : `your new ${ladder.target.vehicleKind} (${ladder.target.name})`;
+  if (ladder.claimed) {
+    return `We claimed ${what} — the dealer has your record. I'll celebrate the day you pick it up.`;
+  }
+  if (ladder.qualified) {
+    return `We did it — you're fully qualified for ${what}. Tap the ring to claim it.`;
+  }
+  const pct = Math.round(ladder.progressPercent * 10) / 10;
+  if (ladder.paceWeeksRemaining !== null && ladder.paceWeeksRemaining > 0) {
+    return `I'm ${pct}% of the way to ${what} — about ${ladder.paceWeeksRemaining} ${ladder.paceWeeksRemaining === 1 ? "week" : "weeks"} at our pace.`;
+  }
+  if (pct > 0) {
+    return `I'm ${pct}% of the way to ${what}. Every trip we finish together moves the ring.`;
+  }
+  return `Every trip we finish together now quietly builds toward ${what}.`;
+}
+
 // Plain, honest fallback used when the AI is unavailable — never blocks the screen.
 function fallbackSummary(
   stats: DerivedStats,
@@ -286,6 +326,7 @@ function fallbackSummary(
   hubDemand: HubDemand[],
   latestMilestone: VehicleMilestone | null = null,
   patterns: EarningPatterns | undefined = undefined,
+  ladder: LadderFacts | undefined = undefined,
 ): CarAgentSummary {
   const c = stats.currency;
   let message: string;
@@ -309,6 +350,7 @@ function fallbackSummary(
     suggestion: buildSuggestion(stats, hubDemand),
     plan: buildPlan(stats, patterns, hubDemand),
     rankLine: buildRankLine(rank),
+    ladderLine: buildLadderLine(ladder),
     currency: c,
     aiGenerated: false,
   };
@@ -329,8 +371,11 @@ function aiTextIsHonest(
   stats: DerivedStats,
   hubDemand: HubDemand[],
   latestMilestone: VehicleMilestone | null = null,
+  ladder: LadderFacts | undefined = undefined,
 ): boolean {
   const allowed = new Set<number>([
+    // Ladder ring numbers the model was explicitly handed may be echoed.
+    ...(ladder ? [Math.round(ladder.progressPercent), Math.round(ladder.progressPercent * 10) / 10, ...(ladder.paceWeeksRemaining !== null ? [ladder.paceWeeksRemaining] : [])] : []),
     Math.round(stats.todayEarnings),
     Math.round(stats.weekEarnings),
     stats.todayTrips,
@@ -364,6 +409,13 @@ function aiTextIsHonest(
       if (!allowedMoney.has(n)) return false;
     }
   }
+
+  // Hard vocabulary wall: the ladder's savings rail must never leak into
+  // driver-facing words. Any crypto/token language forces the deterministic
+  // fallback regardless of what the prompt asked for.
+  if (/\b(crypto|cryptocurrency|token|tokens|blockchain|hrs|horsechain|erc[- ]?20|ethereum|wallet address|on[- ]?chain|coin|coins|stablecoin|usdt)\b/i.test(text)) {
+    return false;
+  }
   return true;
 }
 
@@ -376,9 +428,10 @@ export async function generateCarAgentSummary(input: CarAgentInput): Promise<Car
   const latestMilestone = input.milestones?.[0] ?? null;
   const patterns = input.earningPatterns;
   const deterministicPlan = buildPlan(stats, patterns, input.hubDemand);
+  const ladderLine = buildLadderLine(input.ladder);
 
   const client = getOpenAI();
-  if (!client) return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
+  if (!client) return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns, input.ladder);
 
   const facts = {
     carName: name,
@@ -392,6 +445,16 @@ export async function generateCarAgentSummary(input: CarAgentInput): Promise<Car
     rankAmongCarsInCityThisWeek: rankLine,
     latestMilestone: latestMilestone
       ? { title: latestMilestone.title, description: latestMilestone.description }
+      : null,
+    // The Car Ladder ring — deterministic numbers the model may mention warmly.
+    ladderProgress: input.ladder && input.ladder.hasGoal && input.ladder.target
+      ? {
+          targetVehicle: input.ladder.target.name,
+          progressPercent: input.ladder.progressPercent,
+          weeksRemainingAtCurrentPace: input.ladder.paceWeeksRemaining,
+          qualified: input.ladder.qualified,
+          claimed: input.ladder.claimed,
+        }
       : null,
     nearbyHubDemand: input.hubDemand.map((h) => ({
       hub: h.name,
@@ -408,6 +471,7 @@ RULES:
 - The only money figures you may mention are earnedToday and earnedThisWeek, with the given currency code, and only when trips exist.
 - Keep the "message" to 1-2 short sentences a busy person reads at a glance. You may reference strongAreasRecently and the city rank.
 - If latestMilestone is provided, you may warmly mention it (using its exact title/description, no new numbers) to celebrate the journey — but only when it feels natural and the message stays short.
+- If ladderProgress is provided, you may warmly reference the journey toward the target vehicle using ONLY its exact progressPercent and weeksRemainingAtCurrentPace numbers. Never mention tokens, crypto, blockchain, HRS, or savings mechanics — it is simply "our progress toward your next vehicle".
 - The "suggestion" is one short line about where to earn next. Prefer a hub from nearbyHubDemand with higher demand; otherwise suggest a strongAreasRecently place; otherwise suggest going online. Do not promise demand that isn't in nearbyHubDemand.
 - If tripsThisWeek is 0, gently encourage a first trip instead of reporting numbers.
 Respond ONLY as JSON: {"message": string, "suggestion": string}.`;
@@ -432,8 +496,8 @@ Respond ONLY as JSON: {"message": string, "suggestion": string}.`;
     // Guard against hallucinated figures — if the model strayed from the facts,
     // serve the deterministic, honest summary instead. The plan is composed
     // deterministically from real signals, so it is grounded by construction.
-    if (!message || !aiTextIsHonest(`${message} ${suggestion || ""}`, stats, input.hubDemand, latestMilestone)) {
-      return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
+    if (!message || !aiTextIsHonest(`${message} ${suggestion || ""}`, stats, input.hubDemand, latestMilestone, input.ladder)) {
+      return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns, input.ladder);
     }
 
     return {
@@ -441,11 +505,12 @@ Respond ONLY as JSON: {"message": string, "suggestion": string}.`;
       suggestion: suggestion || buildSuggestion(stats, input.hubDemand),
       plan: deterministicPlan,
       rankLine,
+      ladderLine,
       currency: stats.currency,
       aiGenerated: true,
     };
   } catch (err) {
     console.error("[carAgent] AI summary failed, using fallback:", err);
-    return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns);
+    return fallbackSummary(stats, input.rank, input.hubDemand, latestMilestone, patterns, input.ladder);
   }
 }

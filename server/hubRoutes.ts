@@ -16,6 +16,7 @@ import {
   getHubRecommendationsForDriver,
   getHubRecommendationsForRider,
   generateSmartPrompt,
+  getGoHereNext,
   suggestCarpoolMatches,
 } from "./openClawService";
 import {
@@ -636,6 +637,30 @@ router.get("/api/openclaw/recommendations/rider", async (req, res) => {
     res.json(recommendations);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to get rider recommendations" });
+  }
+});
+
+router.get("/api/openclaw/go-here-next", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Unauthorized" });
+
+    const lat = parseFloat(req.query.lat as string);
+    const lng = parseFloat(req.query.lng as string);
+
+    if (isNaN(lat) || isNaN(lng)) {
+      return res.status(400).json({ error: "lat and lng are required" });
+    }
+
+    const [driver] = await db.select().from(drivers).where(eq(drivers.userId, session.userId));
+    if (!driver) {
+      return res.status(404).json({ error: "Driver profile not found" });
+    }
+
+    const result = await getGoHereNext(driver.id, lat, lng);
+    res.json(result);
+  } catch (error: any) {
+    res.status(500).json({ error: error.message || "Failed to get go-here-next recommendation" });
   }
 });
 

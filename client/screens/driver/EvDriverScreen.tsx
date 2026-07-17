@@ -9,6 +9,7 @@ import {
   Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Location from "expo-location";
@@ -91,6 +92,7 @@ function sourceLabel(source: string, theme: Theme): { text: string; color: strin
 
 export default function EvDriverScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
@@ -207,10 +209,10 @@ export default function EvDriverScreen() {
         contentContainerStyle={{
           paddingTop: Spacing.lg,
           paddingHorizontal: Spacing.lg,
-          paddingBottom: insets.bottom + Spacing["2xl"],
+          paddingBottom: tabBarInset + Spacing["2xl"],
           gap: Spacing.md,
         }}
-        scrollIndicatorInsets={{ bottom: insets.bottom }}
+        scrollIndicatorInsets={{ bottom: tabBarInset }}
       >
         {/* Connection / battery card */}
         <View style={[styles.card, { backgroundColor: theme.backgroundDefault }]}>

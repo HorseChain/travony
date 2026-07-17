@@ -13,6 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useTabBarInset } from "@/hooks/useTabBarInset";
 import { useHeaderHeight } from "@react-navigation/elements";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as ImagePicker from "expo-image-picker";
@@ -258,6 +259,7 @@ function MemoryCard({ memory, onShare }: { memory: Memory; onShare: (m: Memory) 
 
 export default function MemoriesScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
@@ -320,10 +322,10 @@ export default function MemoriesScreen() {
       <FlatList
         contentContainerStyle={{
           paddingTop: headerHeight + Spacing.lg,
-          paddingBottom: insets.bottom + Spacing.xl,
+          paddingBottom: tabBarInset + Spacing.xl,
           paddingHorizontal: Spacing.lg,
         }}
-        scrollIndicatorInsets={{ bottom: insets.bottom }}
+        scrollIndicatorInsets={{ bottom: tabBarInset }}
         data={memories}
         keyExtractor={(item) => item.rideId}
         initialNumToRender={4}
