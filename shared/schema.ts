@@ -1752,6 +1752,9 @@ export const ladderGoals = pgTable("ladder_goals", {
   claimedAt: timestamp("claimed_at"),
   fulfilledAt: timestamp("fulfilled_at"),
   dealerNote: text("dealer_note"),
+  hrsPayoutTxHash: varchar("hrs_payout_tx_hash"),
+  hrsPayoutAddress: varchar("hrs_payout_address"),
+  hrsPayoutAmount: decimal("hrs_payout_amount", { precision: 18, scale: 6 }),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 

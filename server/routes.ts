@@ -3874,7 +3874,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await claimGoal(driver.id);
       if (!result.ok) return res.status(400).json({ code: "CLAIM_FAILED", message: result.error });
       const me = await storage.getUser(req.userId);
-      res.json(await getLadderStatus(driver.id, me?.regionCode || "AE"));
+      const status = await getLadderStatus(driver.id, me?.regionCode || "AE");
+      res.json({
+        ...status,
+        hrsPayout: result.txHash ? {
+          txHash: result.txHash,
+          explorerUrl: result.explorerUrl,
+          amount: result.hrsAmount,
+          toAddress: result.ethAddress,
+        } : null,
+      });
     } catch (error: any) {
       res.status(500).json({ code: "LADDER_ERROR", message: error.message });
     }
