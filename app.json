@@ -23,7 +23,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.app",
-      "versionCode": 66,
+      "versionCode": 67,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"
