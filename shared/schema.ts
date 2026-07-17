@@ -6,7 +6,7 @@ import { z } from "zod";
 export const userRoleEnum = pgEnum("user_role", ["customer", "driver", "admin", "fleet_owner"]);
 export const rideStatusEnum = pgEnum("ride_status", ["pending", "accepted", "arriving", "started", "in_progress", "completed", "cancelled"]);
 export const riderPriorityEnum = pgEnum("rider_priority", ["fastest", "cheapest", "reliable"]);
-export const paymentMethodEnum = pgEnum("payment_method", ["card", "cash", "wallet", "usdt"]);
+export const paymentMethodEnum = pgEnum("payment_method", ["card", "cash", "wallet", "usdt", "hrs"]);
 export const driverStatusEnum = pgEnum("driver_status", ["pending", "approved", "rejected", "suspended"]);
 export const vehicleTypeEnum = pgEnum("vehicle_type", ["economy", "comfort", "premium", "xl", "moto", "rickshaw", "tuktuk", "minibus", "cng", "auto_rickshaw", "motorcycle", "suv", "minivan", "safe_driver"]);
 export const transactionTypeEnum = pgEnum("transaction_type", [
@@ -59,6 +59,7 @@ export const users = pgTable("users", {
   whatsappOptIn: boolean("whatsapp_opt_in").default(false),
   // Twitch channel login for ride streaming (validated against Twitch on save).
   twitchChannel: text("twitch_channel"),
+  ethWalletAddress: text("eth_wallet_address"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1701,3 +1702,108 @@ export const ridePostComments = pgTable("ride_post_comments", {
 
 export type RidePostComment = typeof ridePostComments.$inferSelect;
 export type InsertRidePostComment = typeof ridePostComments.$inferInsert;
+
+// ===================== The Car Ladder =====================
+// Every driver's car quietly earns them their next, better vehicle. A small
+// configurable slice of each completed ride's driver earnings accrues (as
+// internal ladder credit units, HRS-denominated in Phase 1 — internal ledger
+// only, no on-chain movement) toward a per-region vehicle target. The driver
+// never sees crypto vocabulary: the app shows only progress % and pace.
+
+export const ladderGoalStatusEnum = pgEnum("ladder_goal_status", [
+  "active",     // saving toward the target
+  "qualified",  // all thresholds met — Claim available
+  "claimed",    // driver pressed Claim — visible to the dealer
+  "fulfilled",  // dealer marked handoff done — ladder resets to next rung
+  "cancelled",
+]);
+
+// Per-region vehicle catalog (the "rungs"). goalUnits is the ladder-credit
+// target (HRS-denominated internally); ridesRequired / minRating /
+// minWeeksActive are the qualification thresholds for this rung.
+export const ladderVehicles = pgTable("ladder_vehicles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  regionCode: text("region_code").notNull(), // country prefix: "AE", "BD", ...
+  name: text("name").notNull(),              // e.g. "Toyota Corolla" / "Bajaj Tuktuk"
+  vehicleKind: text("vehicle_kind").notNull().default("car"), // car | tuktuk | motorbike | suv
+  tier: integer("tier").notNull(),            // 1 = first rung up
+  priceLocal: decimal("price_local", { precision: 12, scale: 2 }).notNull(),
+  currency: currencyEnum("currency").notNull(),
+  goalUnits: decimal("goal_units", { precision: 18, scale: 6 }).notNull(),
+  ridesRequired: integer("rides_required").notNull().default(0),
+  minRating: decimal("min_rating", { precision: 3, scale: 2 }).default("4.50"),
+  minWeeksActive: integer("min_weeks_active").notNull().default(0),
+  isActive: boolean("is_active").default(true).notNull(),
+  sortOrder: integer("sort_order").default(0).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// One goal per driver at a time (enforced in the engine: a single non-terminal
+// goal). Holds the running ladder-credit balance and qualification state.
+export const ladderGoals = pgTable("ladder_goals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").references(() => drivers.id).notNull(),
+  targetVehicleId: varchar("target_vehicle_id").references(() => ladderVehicles.id).notNull(),
+  unitsSaved: decimal("units_saved", { precision: 18, scale: 6 }).default("0").notNull(),
+  ridesCounted: integer("rides_counted").default(0).notNull(),
+  status: ladderGoalStatusEnum("status").default("active").notNull(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  qualifiedAt: timestamp("qualified_at"),
+  claimedAt: timestamp("claimed_at"),
+  fulfilledAt: timestamp("fulfilled_at"),
+  dealerNote: text("dealer_note"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Immutable per-ride accrual audit rows. UNIQUE(ride_id) is the idempotency
+// key — a ride can only ever contribute once, no matter how many times the
+// completion path is retried.
+export const ladderAccruals = pgTable("ladder_accruals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  goalId: varchar("goal_id").references(() => ladderGoals.id).notNull(),
+  driverId: varchar("driver_id").references(() => drivers.id).notNull(),
+  rideId: varchar("ride_id").references(() => rides.id).notNull().unique(),
+  earningsAmount: decimal("earnings_amount", { precision: 12, scale: 2 }).notNull(),
+  earningsCurrency: currencyEnum("earnings_currency").default("AED"),
+  savePercent: decimal("save_percent", { precision: 5, scale: 2 }).notNull(),
+  unitsAccrued: decimal("units_accrued", { precision: 18, scale: 6 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// Single-row global economics config: the save-rate slice, the internal
+// conversion rate (ladder-credit units per 1 unit of local currency), and the
+// global accrual kill-switch.
+export const ladderSettings = pgTable("ladder_settings", {
+  id: varchar("id").primaryKey().default("global"),
+  savePercent: decimal("save_percent", { precision: 5, scale: 2 }).default("2.00").notNull(),
+  unitsPerCurrency: decimal("units_per_currency", { precision: 18, scale: 6 }).default("1.000000").notNull(),
+  accrualPaused: boolean("accrual_paused").default(false).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type LadderVehicle = typeof ladderVehicles.$inferSelect;
+export type LadderGoal = typeof ladderGoals.$inferSelect;
+export type LadderAccrual = typeof ladderAccruals.$inferSelect;
+export type LadderSettings = typeof ladderSettings.$inferSelect;
+
+// ===================== T Ride Assistant =====================
+// Per-user log of assistant interactions (intents parsed, destinations chosen,
+// suggestions accepted or declined). Feeds the user-understanding layer that
+// personalizes the greeting, adaptive chips, and default proposals. Only the
+// user's own history is ever read back — no cross-user analytics.
+export const assistantInteractions = pgTable("assistant_interactions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  intent: text("intent").notNull(), // closed set: book_ride | go_home | order_coffee | ...
+  queryText: text("query_text"), // what the user typed/tapped (trimmed, capped)
+  destinationAddress: text("destination_address"),
+  destinationLat: decimal("destination_lat", { precision: 10, scale: 8 }),
+  destinationLng: decimal("destination_lng", { precision: 11, scale: 8 }),
+  hourOfDay: integer("hour_of_day").notNull(), // user-local hour 0-23
+  dayOfWeek: integer("day_of_week").notNull(), // user-local day 0-6 (Sun=0)
+  accepted: boolean("accepted"), // null = just asked; true/false = acted on / declined
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AssistantInteraction = typeof assistantInteractions.$inferSelect;
+export type InsertAssistantInteraction = typeof assistantInteractions.$inferInsert;

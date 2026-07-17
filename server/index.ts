@@ -238,6 +238,12 @@ function configureExpoAndLanding(app: express.Application) {
   const healthTemplate = fs.existsSync(healthTemplatePath)
     ? fs.readFileSync(healthTemplatePath, "utf-8")
     : null;
+  const dealerLadderTemplatePath = path.resolve(
+    process.cwd(), "server", "templates", "dealer-ladder.html",
+  );
+  const dealerLadderTemplate = fs.existsSync(dealerLadderTemplatePath)
+    ? fs.readFileSync(dealerLadderTemplatePath, "utf-8")
+    : null;
   const appName = getAppName();
 
   log("Serving static Expo files with dynamic manifest routing");
@@ -259,6 +265,17 @@ function configureExpoAndLanding(app: express.Application) {
       res.status(200).send(healthTemplate);
     } else {
       res.status(404).send("System health page not found");
+    }
+  });
+
+  // Dealer-facing Car Ladder claims page. Auth happens client-side against the
+  // admin-only /api/ladder/dealer/* endpoints (same Bearer-token pattern as /admin).
+  app.get("/dealer", (_req: Request, res: Response) => {
+    if (dealerLadderTemplate) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.status(200).send(dealerLadderTemplate);
+    } else {
+      res.status(404).send("Dealer page not found");
     }
   });
 
@@ -782,6 +799,10 @@ async function setupApiKeyRoutes(app: express.Application) {
   const { initializeBlockchain } = await import("./blockchain");
   const blockchainResult = await initializeBlockchain();
   log(`Blockchain: ${blockchainResult.message}`);
+
+  const { initializeHrs } = await import("./hrsToken");
+  const hrsResult = await initializeHrs();
+  log(`HRS: ${hrsResult.message}`);
 
   await seedAdminUser();
   try {

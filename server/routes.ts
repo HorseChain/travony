@@ -4,6 +4,14 @@ import { storage } from "./storage";
 import { randomBytes, scryptSync, timingSafeEqual } from "crypto";
 import { v4 as uuidv4 } from "uuid";
 import { findOptimalDrivers, calculateOptimalPrice, getOptimalRideMatch } from "./aiEngine";
+import {
+  getHrsBalance,
+  getHrsTokenInfo,
+  getPlatformHrsBalance,
+  sendHrsPayout,
+  getPlatformAddress,
+  isValidEthAddress,
+} from "./hrsToken";
 import { 
   initializeBlockchain, 
   recordRideToBlockchain, 
@@ -79,6 +87,17 @@ import * as rematchService from "./rematchService";
 import * as incentivePolicy from "./incentivePolicy";
 import * as walletService from "./walletService";
 import { generateCarAgentSummary } from "./carAgent";
+import {
+  accrueLadderForRide,
+  getLadderStatus,
+  changeTarget,
+  claimGoal,
+  listDealerClaims,
+  fulfillClaim,
+  getLadderLiability,
+  updateLadderSettings,
+  getLadderSettings,
+} from "./carLadder";
 import { getHubsNearLocation } from "./openClawService";
 import {
   isThreeWheeler,
@@ -105,6 +124,7 @@ import * as truthFraud from "./truthFraud";
 import * as ghostRideService from "./ghostRideService";
 import { openClawRouter } from "./hubRoutes";
 import { coffeeRouter } from "./coffeeRoutes";
+import { assistantRouter } from "./assistantRoutes";
 import { scheduledArrivalsRouter, startScheduledArrivalsEngine } from "./scheduledArrivals";
 import { nameYourFareRouter, computeNamedFareBounds, clampToBounds, closeOpenBidsForRide, isOfferExpired, OFFER_WINDOW_MS } from "./nameYourFare";
 import { recordRideEvent } from "./rideEventService";
@@ -750,6 +770,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Smart Rider Destination Suggestions — returns the rider's likely
+  // destinations right now, ranked by frequency + recency + time/day context,
+  // merged with saved Home/Work. Derived entirely from existing ride history.
+  // MUST be registered before "/api/rides/:id" so it isn't captured by :id.
+  app.get("/api/rides/destination-suggestions", requireAuth, async (req: any, res) => {
+    try {
+      const parseIntParam = (v: any, fallback: number) => {
+        const n = parseInt(String(v), 10);
+        return Number.isFinite(n) ? n : fallback;
+      };
+      const serverNow = new Date();
+      let hour = parseIntParam(req.query.hour, serverNow.getHours());
+      let dow = parseIntParam(req.query.dow, serverNow.getDay());
+      const tzOffset = parseIntParam(req.query.tzOffset, -serverNow.getTimezoneOffset());
+      hour = Math.max(0, Math.min(23, hour));
+      dow = Math.max(0, Math.min(6, dow));
+
+      const result = await intentEngine.getRiderDestinationSuggestions(
+        req.userId,
+        hour,
+        dow,
+        tzOffset
+      );
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message || "Failed to load suggestions" });
+    }
+  });
+
   app.get("/api/rides/:id", async (req, res) => {
     try {
       const ride = await storage.getRide(req.params.id);
@@ -824,12 +873,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       } else if (paymentMethod === "usdt") {
         console.log("USDT payment selected - will be processed via NOWPayments at ride end");
+      } else if (paymentMethod === "hrs") {
+        console.log("HRS payment selected - HorseChain token, trust-first settlement at ride end");
       } else if (paymentMethod === "cash") {
         console.log("Cash payment selected - rider will pay driver directly");
       } else {
         return res.status(400).json({
           code: "INVALID_PAYMENT_METHOD",
-          message: "Invalid payment method. Please use wallet, USDT, or cash.",
+          message: "Invalid payment method. Please use wallet, USDT, HRS, or cash.",
         });
       }
       
@@ -1582,6 +1633,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
               description: `Earnings from ride (USDT payment)`,
               completedAt: new Date(),
             });
+          } else if (paymentMethod === "hrs") {
+            // HRS (HorseChain token) — credit driver wallet, then attempt
+            // real on-chain payout to driver's linked Ethereum wallet.
+            if (ride.vehicleId) {
+              await storage.updateVehicleWalletBalance(ride.vehicleId, driverShare);
+            } else {
+              await storage.updateDriverWalletBalance(ride.driverId, driverShare);
+            }
+            // Attempt on-chain HRS transfer to driver's linked ETH wallet
+            let hrsPayoutNote = "HRS token payment for ride (pending on-chain transfer)";
+            try {
+              const driverRecord = await storage.getDriver(ride.driverId);
+              const driverUser = driverRecord?.userId ? await storage.getUser(driverRecord.userId) : null;
+              const driverEthAddress = driverUser ? (driverUser as any).ethWalletAddress : null;
+              if (driverEthAddress && getPlatformAddress()) {
+                const payout = await sendHrsPayout(driverEthAddress, driverShare);
+                if (payout.success) {
+                  hrsPayoutNote = `HRS token payout sent on-chain — tx: ${payout.txHash}`;
+                  console.log(`HRS: Payout to driver ${ride.driverId}: ${driverShare} HRS → ${driverEthAddress} | ${payout.explorerUrl}`);
+                } else {
+                  console.warn(`HRS: On-chain payout failed for driver ${ride.driverId}: ${payout.message}`);
+                  hrsPayoutNote = `HRS token payment (on-chain payout failed: ${payout.message})`;
+                }
+              }
+            } catch (hrsErr: any) {
+              console.warn("HRS: Payout error:", hrsErr.message);
+            }
+            await storage.createWalletTransaction({
+              id: uuidv4(),
+              driverId: ride.driverId,
+              vehicleId: ride.vehicleId || undefined,
+              rideId: ride.id,
+              type: "ride_payment",
+              amount: driverShare.toFixed(2),
+              status: "completed",
+              description: hrsPayoutNote,
+              completedAt: new Date(),
+            });
           } else {
             // Cash: driver collected the full fare, so the platform fee is
             // debited from the vehicle wallet (fallback to driver wallet).
@@ -1682,6 +1771,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             method: paymentMethod,
             status: paymentStatus,
           });
+
+          // Car Ladder: idempotent per-ride accrual (UNIQUE ride_id inside).
+          // Fires only here — on the authorized, persisted completed transition.
+          accrueLadderForRide(ride, driverShare).catch((err) =>
+            console.error("[CarLadder] accrual hook error:", err),
+          );
         }
       }
 
@@ -3236,6 +3331,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // HRS (HorseChain) token endpoints
+  app.get("/api/hrs/token-info", async (_req, res) => {
+    res.json(getHrsTokenInfo());
+  });
+
+  app.get("/api/wallet/hrs-balance", requireAuth, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const walletAddress = (user as any).ethWalletAddress;
+      if (!walletAddress) {
+        return res.json({
+          linked: false,
+          balance: "0",
+          balanceFormatted: "0.00",
+          tokenInfo: getHrsTokenInfo(),
+          message: "No Ethereum wallet linked. Add your wallet address to see your HRS balance.",
+        });
+      }
+
+      const result = await getHrsBalance(walletAddress);
+      return res.json({
+        linked: true,
+        walletAddress,
+        ...result,
+        tokenInfo: getHrsTokenInfo(),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/wallet/link-eth-wallet", requireAuth, async (req: any, res) => {
+    try {
+      const { ethWalletAddress } = req.body;
+      if (!ethWalletAddress) {
+        return res.status(400).json({ message: "ethWalletAddress is required" });
+      }
+      if (!isValidEthAddress(ethWalletAddress)) {
+        return res.status(400).json({ message: "Invalid Ethereum address format (must start with 0x, 42 characters)" });
+      }
+      await storage.updateUser(req.userId, { ethWalletAddress } as any);
+      const result = await getHrsBalance(ethWalletAddress);
+      return res.json({
+        success: true,
+        ethWalletAddress,
+        hrsBalance: result.balance,
+        hrsBalanceFormatted: result.balanceFormatted,
+        tokenInfo: getHrsTokenInfo(),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/wallet/hrs-platform-balance", requireAuth, async (req: any, res) => {
+    try {
+      const user = await storage.getUser(req.userId);
+      if (!user || (user as any).role !== "admin") {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const result = await getPlatformHrsBalance();
+      return res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/drivers/:driverId/withdraw", requireAuth, async (req: any, res) => {
     try {
       const { driverId } = req.params;
@@ -3387,6 +3551,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
             message: paymentError.message || "Payment processing failed. Please try another payment method.",
           });
         }
+      } else if (paymentMethod === 'hrs') {
+        // HRS (HorseChain ERC-20) — trust-first settlement.
+        // The rider transfers HRS from their linked Ethereum wallet.
+        // Platform records the payment as completed immediately.
+        paymentStatus = 'completed';
+        await storage.createWalletTransaction({
+          id: uuidv4(),
+          userId: ride.customerId,
+          rideId: ride.id,
+          type: 'ride_payment',
+          amount: (-fare).toFixed(2),
+          status: 'completed',
+          description: `HRS token payment for ride to ${ride.dropoffAddress}`,
+          completedAt: new Date(),
+        });
       }
 
       const payment = await storage.createPayment({
@@ -3633,16 +3812,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.error("[carAgent] hub demand lookup failed:", err);
       }
 
-      const summary = await generateCarAgentSummary({ vehicle, earnings, recentRides, rank, regionCode, hubDemand, milestones, earningPatterns });
+      // Car Ladder: deterministic ring numbers computed server-side; the LLM
+      // only ever phrases around them (honesty guard covers ladder figures).
+      let ladder: Awaited<ReturnType<typeof getLadderStatus>> | null = null;
+      if (driver) {
+        ladder = await getLadderStatus(driver.id, regionCode).catch(() => null);
+      }
+
+      const summary = await generateCarAgentSummary({ vehicle, earnings, recentRides, rank, regionCode, hubDemand, milestones, earningPatterns, ladder: ladder || undefined });
       res.json({
         name: (vehicle.nickname && vehicle.nickname.trim()) || `${vehicle.make} ${vehicle.model}`,
         nickname: vehicle.nickname,
         publicHandle: vehicle.publicHandle,
         latestMilestone: milestones[0] ?? null,
+        ladder,
         ...summary,
       });
     } catch (error: any) {
       res.status(500).json({ code: "CAR_AGENT_ERROR", message: error.message });
+    }
+  });
+
+  // ===================== The Car Ladder =====================
+  // Driver-facing: ring status, target change, claim. Deterministic engine in
+  // server/carLadder.ts; accrual fires only from the persisted completion
+  // transition in PATCH /api/rides/:id.
+
+  app.get("/api/ladder/me", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) return res.status(404).json({ code: "DRIVER_NOT_FOUND", message: "Driver profile not found" });
+      const me = await storage.getUser(req.userId);
+      const status = await getLadderStatus(driver.id, me?.regionCode || "AE");
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  app.post("/api/ladder/me/target", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) return res.status(404).json({ code: "DRIVER_NOT_FOUND", message: "Driver profile not found" });
+      const { vehicleId } = req.body || {};
+      if (!vehicleId || typeof vehicleId !== "string") {
+        return res.status(400).json({ code: "BAD_REQUEST", message: "vehicleId is required" });
+      }
+      const me = await storage.getUser(req.userId);
+      const result = await changeTarget(driver.id, vehicleId, me?.regionCode || "AE");
+      if (!result.ok) return res.status(400).json({ code: "TARGET_CHANGE_FAILED", message: result.error });
+      res.json(await getLadderStatus(driver.id, me?.regionCode || "AE"));
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  app.post("/api/ladder/me/claim", requireAuth, async (req: any, res) => {
+    try {
+      const driver = await storage.getDriverByUserId(req.userId);
+      if (!driver) return res.status(404).json({ code: "DRIVER_NOT_FOUND", message: "Driver profile not found" });
+      const result = await claimGoal(driver.id);
+      if (!result.ok) return res.status(400).json({ code: "CLAIM_FAILED", message: result.error });
+      const me = await storage.getUser(req.userId);
+      res.json(await getLadderStatus(driver.id, me?.regionCode || "AE"));
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  // Admin: total goal liability, economics config, and the accrual kill-switch.
+  app.get("/api/ladder/admin/liability", requireAdmin, async (_req: any, res) => {
+    try {
+      res.json(await getLadderLiability());
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  app.get("/api/ladder/admin/settings", requireAdmin, async (_req: any, res) => {
+    try {
+      res.json(await getLadderSettings());
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  app.patch("/api/ladder/admin/settings", requireAdmin, async (req: any, res) => {
+    try {
+      const { savePercent, unitsPerCurrency, accrualPaused } = req.body || {};
+      const updated = await updateLadderSettings({
+        savePercent: savePercent !== undefined ? parseFloat(savePercent) : undefined,
+        unitsPerCurrency: unitsPerCurrency !== undefined ? parseFloat(unitsPerCurrency) : undefined,
+        accrualPaused: accrualPaused !== undefined ? !!accrualPaused : undefined,
+      });
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  // Dealer handoff: list pre-qualified claims + mark fulfilled. Guarded the
+  // same way as the other back-office APIs (admin bearer session); the /dealer
+  // web page authenticates client-side against these, like /admin does.
+  app.get("/api/ladder/dealer/claims", requireAdmin, async (_req: any, res) => {
+    try {
+      res.json({ claims: await listDealerClaims() });
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
+    }
+  });
+
+  app.post("/api/ladder/dealer/claims/:goalId/fulfill", requireAdmin, async (req: any, res) => {
+    try {
+      const note = typeof req.body?.note === "string" ? req.body.note.slice(0, 500) : undefined;
+      const result = await fulfillClaim(req.params.goalId, note);
+      if (!result.ok) return res.status(400).json({ code: "FULFILL_FAILED", message: result.error });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ code: "LADDER_ERROR", message: error.message });
     }
   });
 
@@ -7895,6 +8182,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use(openClawRouter);
   app.use(coffeeRouter);
+  app.use(assistantRouter);
   app.use(scheduledArrivalsRouter);
   startScheduledArrivalsEngine();
   app.use(prayerRidesRouter);
