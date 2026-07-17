@@ -62,7 +62,8 @@
           "merchantIdentifier": "merchant.com.travony",
           "enableGooglePay": true
         }
-      ]
+      ],
+      "./plugins/withAgoraPickFirst"
     ],
     "experiments": {
       "reactCompiler": false

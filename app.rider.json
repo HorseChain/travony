@@ -61,7 +61,8 @@
           }
         }
       ],
-      "expo-web-browser"
+      "expo-web-browser",
+      "./plugins/withAgoraPickFirst"
     ],
     "experiments": {
       "reactCompiler": false
