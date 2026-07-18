@@ -31,12 +31,15 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.app",
-      "versionCode": 71,
+      "versionCode": 72,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"
         }
-      }
+      },
+      "blockedPermissions": [
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION"
+      ]
     },
     "web": {
       "output": "single",
