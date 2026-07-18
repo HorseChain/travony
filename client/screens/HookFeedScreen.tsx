@@ -760,9 +760,15 @@ export default function HookFeedScreen() {
 
   const reactMutation = useMutation({
     mutationFn: ({ postId, type }: { postId: string; type: string }) =>
-      apiRequest("POST", `/api/social/posts/${postId}/react`, { type }),
+      apiRequest(`/api/social/posts/${postId}/react`, {
+        method: "POST",
+        body: JSON.stringify({ type }),
+        headers: { "Content-Type": "application/json" },
+      }),
     onSuccess: () => {
-      qc.invalidateQueries({ predicate: (q) => q.queryKey[0]?.toString().startsWith("/api/social") });
+      qc.invalidateQueries({
+        predicate: (q) => !!q.queryKey[0]?.toString().startsWith("/api/social"),
+      });
     },
   });
 
