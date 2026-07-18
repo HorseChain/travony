@@ -8,15 +8,41 @@ import { storage } from "./storage";
 // back to /api/auth/google/callback on this server; we create (or find) the
 // user, mint a session token and bounce back into the app deep link.
 
-const STATE_SECRET = randomBytes(32);
+// Use the OAuth client secret as a stable HMAC key so the state signature
+// survives server restarts and redeploys. Fall back to a random key only when
+// the env var is missing (dev without credentials) — log a warning so the
+// operator knows any cross-restart flows will break.
+const STATE_SECRET_KEY: Buffer = process.env.GOOGLE_OAUTH_CLIENT_SECRET
+  ? Buffer.from(process.env.GOOGLE_OAUTH_CLIENT_SECRET, "utf8")
+  : (() => {
+      console.warn(
+        "[googleAuth] GOOGLE_OAUTH_CLIENT_SECRET not set — state secret is ephemeral and will break on restart",
+      );
+      return randomBytes(32);
+    })();
+
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 function getBaseUrl(): string {
+  // GOOGLE_CALLBACK_URL lets the operator pin the exact callback URL that is
+  // registered in Google Cloud Console (Authorized redirect URIs).
+  if (process.env.GOOGLE_CALLBACK_URL) {
+    return process.env.GOOGLE_CALLBACK_URL.replace(/\/api\/auth\/google\/callback.*$/, "");
+  }
   const domain =
     process.env.REPLIT_DEV_DOMAIN ||
     process.env.REPLIT_DOMAINS?.split(",")[0];
   return domain ? `https://${domain}` : "http://localhost:5000";
 }
+
+// Log the callback URL once at startup so it is visible in the deployment logs.
+// The operator must add this exact URL to Google Cloud Console:
+// APIs & Services → Credentials → OAuth 2.0 Client IDs → Authorized redirect URIs
+setTimeout(() => {
+  const callbackUrl = `${getBaseUrl()}/api/auth/google/callback`;
+  console.log(`[googleAuth] OAuth callback URL: ${callbackUrl}`);
+  console.log(`[googleAuth] Add this URL to Google Cloud Console → Authorized redirect URIs`);
+}, 0);
 
 function isConfigured(): boolean {
   return Boolean(
@@ -26,7 +52,7 @@ function isConfigured(): boolean {
 
 function signState(payload: object): string {
   const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig = createHmac("sha256", STATE_SECRET).update(body).digest("base64url");
+  const sig = createHmac("sha256", STATE_SECRET_KEY).update(body).digest("base64url");
   return `${body}.${sig}`;
 }
 
@@ -35,7 +61,7 @@ function verifyState(state: string): any | null {
   if (dot < 0) return null;
   const body = state.slice(0, dot);
   const sig = state.slice(dot + 1);
-  const expected = createHmac("sha256", STATE_SECRET).update(body).digest("base64url");
+  const expected = createHmac("sha256", STATE_SECRET_KEY).update(body).digest("base64url");
   if (sig.length !== expected.length || sig !== expected) return null;
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));

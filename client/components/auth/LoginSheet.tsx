@@ -229,7 +229,14 @@ export function LoginSheet() {
         startUrl.toString(),
         redirectUri,
       );
+      if (result.type === "cancel" || result.type === "dismiss") {
+        return;
+      }
       if (result.type !== "success" || !result.url) {
+        Alert.alert(
+          "Google sign-in",
+          "Sign-in did not complete. Make sure you allow Travony to open in your browser and try again.",
+        );
         return;
       }
       const parsed = Linking.parse(result.url);
@@ -240,6 +247,7 @@ export function LoginSheet() {
       }
       const token = params.token;
       if (params.gauth !== "success" || !token) {
+        Alert.alert("Google sign-in", "Sign-in did not complete. Please try again.");
         return;
       }
 
