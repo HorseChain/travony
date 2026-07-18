@@ -17,7 +17,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
-import { StreamRideButton, GoLiveInAppButton } from "@/components/RideSocial";
+import { GoLiveInAppButton } from "@/components/RideSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
@@ -595,7 +595,6 @@ export default function DriverActiveRideScreen() {
 
         <View style={styles.buttonSection}>
           {validRideId ? <GoLiveInAppButton rideId={validRideId} rideStatus={ride?.status} /> : null}
-          {validRideId ? <StreamRideButton rideId={validRideId} rideStatus={ride?.status} /> : null}
           <Pressable
             style={[styles.navigateButton, { backgroundColor: Colors.travonyGreen }]}
             onPress={handleNavigate}

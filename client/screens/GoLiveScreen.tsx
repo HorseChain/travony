@@ -219,8 +219,7 @@ export default function GoLiveScreen() {
         <Ionicons name="construct-outline" size={44} color="rgba(255,255,255,0.6)" />
         <ThemedText style={styles.permTitle}>Needs the new app build</ThemedText>
         <ThemedText style={styles.permBody}>
-          In-app live streaming ships with the next T Ride / T Driver update. You can still Go
-          Live on Twitch from your ride screen.
+          Live streaming ships with the next T Ride / T Driver update. Update your app to go live.
         </ThemedText>
         <Pressable
           style={[styles.primaryButton, { backgroundColor: theme.primary }]}
@@ -271,8 +270,14 @@ export default function GoLiveScreen() {
   const RtcSurfaceView = rtc?.RtcSurfaceView;
   const products = catalogQuery.data?.products || [];
 
+  // Distance from bottom edge: leave room for home indicator + gesture bar.
+  const BOTTOM_OFFSET = insets.bottom + Spacing["2xl"];
+  // Bottom bar is 48px tall; shop sheet sits above it with extra padding.
+  const SHOP_BOTTOM = BOTTOM_OFFSET + 48 + Spacing.lg;
+
   return (
     <View style={styles.root}>
+      {/* Camera layer (native view — must come first in JSX) */}
       {RtcSurfaceView && engine ? (
         <RtcSurfaceView style={StyleSheet.absoluteFill} canvas={{ uid: 0 }} />
       ) : (
@@ -282,7 +287,8 @@ export default function GoLiveScreen() {
         </View>
       )}
 
-      <View style={[styles.topBar, { top: insets.top + Spacing.md }]}>
+      {/* All overlays use zIndex + elevation so they render above the native camera view */}
+      <View style={[styles.topBar, { top: insets.top + Spacing.md, zIndex: 10, elevation: 10 }]}>
         <View style={styles.topLeft}>
           <LiveBadge />
           <ViewerCountChip count={viewerCount} />
@@ -300,15 +306,23 @@ export default function GoLiveScreen() {
         </Pressable>
       </View>
 
-      <View style={[styles.giftLayer, { top: insets.top + 90 }]} pointerEvents="none">
+      <View
+        style={[styles.giftLayer, { top: insets.top + 90, zIndex: 10, elevation: 10 }]}
+        pointerEvents="none"
+      >
         <GiftAnimationLayer gift={currentGift} />
       </View>
 
-      {/* Shop the Look host controls */}
+      {/* Shop the Look host controls — sits above the bottom bar */}
       {shopOpen ? (
-        <View style={[styles.shopSheet, { bottom: insets.bottom + 130, backgroundColor: theme.backgroundElevated }]}>
+        <View
+          style={[
+            styles.shopSheet,
+            { bottom: SHOP_BOTTOM, backgroundColor: theme.backgroundElevated, zIndex: 11, elevation: 11 },
+          ]}
+        >
           <ThemedText style={styles.shopTitle}>Feature a product</ThemedText>
-          <ScrollView style={{ maxHeight: 240 }}>
+          <ScrollView style={{ maxHeight: 220 }}>
             {products.map((p) => (
               <Pressable
                 key={p.key}
@@ -344,7 +358,7 @@ export default function GoLiveScreen() {
         </View>
       ) : null}
 
-      <View style={[styles.bottomBar, { bottom: insets.bottom + Spacing.xl }]}>
+      <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
         <Pressable
           style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
           onPress={() => setShopOpen((s) => !s)}
