@@ -1,5 +1,6 @@
 import React from "react";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import HookFeedScreen from "@/screens/HookFeedScreen";
 import AssistantHomeScreen from "@/screens/AssistantHomeScreen";
 import HomeScreen from "@/screens/HomeScreen";
 import SelectLocationScreen from "@/screens/SelectLocationScreen";
@@ -16,12 +17,28 @@ import PrayerRidesScreen from "@/screens/PrayerRidesScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type HomeStackParamList = {
-  Home: { 
-    selectedLocation?: { 
-      type: "pickup" | "dropoff"; 
-      address: string; 
-      lat: number; 
-      lng: number; 
+  // TikTok-style hook feed — first thing users see when they open the app.
+  // Booking params forwarded here are immediately delegated to AssistantHome.
+  Home: {
+    selectedLocation?: {
+      type: "pickup" | "dropoff";
+      address: string;
+      lat: number;
+      lng: number;
+    };
+    selectedPickup?: {
+      address: string;
+      lat: number;
+      lng: number;
+    };
+  } | undefined;
+  // AI assistant chat (formerly the Home route)
+  AssistantHome: {
+    selectedLocation?: {
+      type: "pickup" | "dropoff";
+      address: string;
+      lat: number;
+      lng: number;
     };
     selectedPickup?: {
       address: string;
@@ -65,8 +82,15 @@ export default function HomeStackNavigator() {
 
   return (
     <Stack.Navigator screenOptions={screenOptions}>
+      {/* TikTok-style hook feed — the new Home */}
       <Stack.Screen
         name="Home"
+        component={HookFeedScreen}
+        options={{ headerShown: false }}
+      />
+      {/* AI assistant chat */}
+      <Stack.Screen
+        name="AssistantHome"
         component={AssistantHomeScreen}
         options={{ headerShown: false }}
       />
@@ -98,17 +122,17 @@ export default function HomeStackNavigator() {
       <Stack.Screen
         name="Rating"
         component={RatingScreen}
-        options={{ 
+        options={{
           headerTitle: "Rate Your Ride",
-          presentation: "modal"
+          presentation: "modal",
         }}
       />
       <Stack.Screen
         name="Invoice"
         component={InvoiceScreen}
-        options={{ 
+        options={{
           headerTitle: "Payment Receipt",
-          presentation: "modal"
+          presentation: "modal",
         }}
       />
       <Stack.Screen
