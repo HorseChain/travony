@@ -35,7 +35,6 @@ interface SocialCounts {
   following: number;
   likes: number;
   posts: number;
-  twitchChannel: string | null;
   bio: string | null;
   handle: string | null;
 }
@@ -131,14 +130,6 @@ export default function ProfileScreen() {
       icon: "create-outline" as const,
       title: "Add a bio",
       subtitle: "Tell people about yourself",
-      onPress: () => navigation.navigate("EditProfile"),
-    },
-    {
-      key: "twitch",
-      done: !!counts?.twitchChannel,
-      icon: "videocam-outline" as const,
-      title: "Link Twitch",
-      subtitle: "Stream your rides live",
       onPress: () => navigation.navigate("EditProfile"),
     },
     {
@@ -400,11 +391,30 @@ export default function ProfileScreen() {
         onClose={() => setSidebarVisible(false)}
         balanceTitle="Balance"
         balanceValue={walletQuery.data?.balance ? `AED ${walletQuery.data.balance}` : null}
-        onBalance={() => (navigation as any).getParent()?.navigate("WalletTab")}
-        onRewards={() => navigation.navigate("Rewards")}
-        onActivity={() => navigation.navigate("ActivityCentre")}
-        onQRCode={() => setQrVisible(true)}
-        onSettings={() => navigation.navigate("Settings")}
+        onBalance={() => {
+          setSidebarVisible(false);
+          setTimeout(() => (navigation as any).getParent()?.navigate("WalletTab"), 250);
+        }}
+        onRewards={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("Rewards"), 250);
+        }}
+        onActivity={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("ActivityCentre"), 250);
+        }}
+        onQRCode={() => {
+          setSidebarVisible(false);
+          setTimeout(() => setQrVisible(true), 250);
+        }}
+        onSettings={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("Settings"), 250);
+        }}
+        onTravonyAI={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("TravonyAI"), 250);
+        }}
       />
 
       <QRCodeSheet visible={qrVisible} onClose={() => setQrVisible(false)} />

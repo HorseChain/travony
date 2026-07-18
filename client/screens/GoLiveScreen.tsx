@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, StyleSheet, Pressable, ActivityIndicator, ScrollView, Platform, Linking } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import { useKeepAwake } from "expo-keep-awake";
@@ -48,6 +48,17 @@ export default function GoLiveScreen() {
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
 
   useKeepAwake();
+
+  // Hide tab bar while this full-screen live view is active.
+  useFocusEffect(
+    useCallback(() => {
+      const parent = (navigation as any).getParent?.();
+      parent?.setOptions({ tabBarStyle: { display: "none" } });
+      return () => {
+        parent?.setOptions({ tabBarStyle: undefined });
+      };
+    }, [navigation])
+  );
 
   const nativeOk = agoraNativeAvailable();
   const rtc = useMemo(() => loadAgoraRtc(), []);
@@ -104,12 +115,12 @@ export default function GoLiveScreen() {
   useEffect(() => {
     if (!rtc || !tokens || tokens.role !== "publisher") return;
     let localEngine: any = null;
+    let startTimer: ReturnType<typeof setTimeout> | null = null;
     try {
       const {
         createAgoraRtcEngine,
         ChannelProfileType,
         ClientRoleType,
-        VideoEncoderConfiguration,
       } = rtc;
       localEngine = createAgoraRtcEngine();
       localEngine.initialize({
@@ -119,25 +130,34 @@ export default function GoLiveScreen() {
       localEngine.registerEventHandler({
         onJoinChannelSuccess: () => setPublishing(true),
       });
-      localEngine.enableVideo();
-      // Simulcast so Lite Mode viewers can pull the low stream.
-      localEngine.enableDualStreamMode?.(true);
-      localEngine.setVideoEncoderConfiguration?.({
-        dimensions: { width: 1280, height: 720 },
-        frameRate: 24,
-        bitrate: 0,
-      });
-      localEngine.startPreview();
-      localEngine.joinChannelWithUserAccount(tokens.rtcToken, tokens.channel, tokens.uid, {
-        clientRoleType: ClientRoleType.ClientRoleBroadcaster,
-        publishCameraTrack: true,
-        publishMicrophoneTrack: true,
-      });
+      // Mount the engine state first so RtcSurfaceView renders and the native
+      // surface is ready, then start video/preview on the next tick.
       setEngine(localEngine);
+      startTimer = setTimeout(() => {
+        try {
+          localEngine.enableVideo();
+          // Simulcast so Lite Mode viewers can pull the low stream.
+          localEngine.enableDualStreamMode?.(true);
+          localEngine.setVideoEncoderConfiguration?.({
+            dimensions: { width: 1280, height: 720 },
+            frameRate: 24,
+            bitrate: 0,
+          });
+          localEngine.startPreview();
+          localEngine.joinChannelWithUserAccount(tokens.rtcToken, tokens.channel, tokens.uid, {
+            clientRoleType: ClientRoleType.ClientRoleBroadcaster,
+            publishCameraTrack: true,
+            publishMicrophoneTrack: true,
+          });
+        } catch (innerErr) {
+          console.log("[GoLive] RTC start failed:", (innerErr as any)?.message || innerErr);
+        }
+      }, 150);
     } catch (err) {
-      console.log("[GoLive] RTC start failed:", (err as any)?.message || err);
+      console.log("[GoLive] RTC init failed:", (err as any)?.message || err);
     }
     return () => {
+      if (startTimer) clearTimeout(startTimer);
       try {
         localEngine?.stopPreview?.();
         localEngine?.leaveChannel();
@@ -267,7 +287,11 @@ export default function GoLiveScreen() {
   }
 
   // ---- live ----------------------------------------------------------------
-  const RtcSurfaceView = rtc?.RtcSurfaceView;
+  // On Android, RtcSurfaceView uses SurfaceView which renders in a separate
+  // compositor layer and appears black when layered with React Native views.
+  // RtcTextureView uses TextureView which renders inline — no z-index issues.
+  // Fall back to RtcSurfaceView if TextureView is unavailable.
+  const AgoraLocalView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
   const products = catalogQuery.data?.products || [];
 
   // Distance from bottom edge: leave room for home indicator + gesture bar.
@@ -277,9 +301,9 @@ export default function GoLiveScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Camera layer (native view — must come first in JSX) */}
-      {RtcSurfaceView && engine ? (
-        <RtcSurfaceView style={StyleSheet.absoluteFill} canvas={{ uid: 0 }} />
+      {/* Camera layer — RtcTextureView on Android avoids SurfaceView z-index black */}
+      {AgoraLocalView && engine ? (
+        <AgoraLocalView style={StyleSheet.absoluteFill} canvas={{ uid: 0 }} />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: "#101014" }]}>
           <ActivityIndicator color="#fff" />

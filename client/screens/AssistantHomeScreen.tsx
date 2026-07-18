@@ -186,6 +186,9 @@ export default function AssistantHomeScreen() {
       if (!requireAuth()) return;
       const trimmed = text.trim();
       if (!trimmed || thinking) return;
+
+      // Snapshot history BEFORE appending the new user message, then append.
+      const historySnapshot = messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
       appendMessages([{ id: nextId(), role: "user", text: trimmed }]);
       setThinking(true);
       try {
@@ -197,6 +200,7 @@ export default function AssistantHomeScreen() {
             text: trimmed,
             pickup: pickupOverride !== undefined ? pickupOverride : pickup,
             destination,
+            history: historySnapshot,
             ...tp,
           }),
         });
@@ -216,7 +220,7 @@ export default function AssistantHomeScreen() {
         setThinking(false);
       }
     },
-    [appendMessages, pickup, thinking, requireAuth]
+    [appendMessages, messages, pickup, thinking, requireAuth]
   );
 
   // Ride handoffs from the classic flows: SelectLocation and "Book Again" both

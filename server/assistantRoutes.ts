@@ -63,6 +63,22 @@ function getOpenAI(): OpenAI | null {
   }
 }
 
+// Shared system context for all LLM calls in this assistant.
+const TRAVONY_SYSTEM_CONTEXT = `You are the Travony AI assistant, the friendly front door of the Travony ride-hailing app. Travony is an intelligent mobility network operating in the UAE, Saudi Arabia, Kuwait, and Bahrain.
+
+What you can help riders with:
+- Booking rides (economy, SUV, and local vehicle types depending on the city)
+- Going to saved home or work addresses in one tap
+- Ordering coffee and Gulf drinks (Karak Tea, Arabic Coffee, etc.) for delivery or pickup
+- Prayer rides — completely free, volunteer drivers take riders to mosques
+- Scheduled arrivals — book a ride that guarantees you arrive somewhere on time
+- Viewing wallet balance and transaction history
+- Checking current and past ride history
+
+Pricing: transparent 10% platform commission, dynamic pricing based on demand and time of day. Fares shown in local currency (AED, SAR, KWD, BHD). Never promise a specific price — show a quote card instead.
+
+Personality: warm, clear, and concise. One or two sentences max unless the user asks for detail. Never mention blockchain, crypto, tokens, or coins. Never invent numbers — when the user needs a fare or balance, say you'll pull it up and let the system card show the real figure.`;
+
 // ---------- closed intent set ----------
 const INTENTS = [
   "book_ride",
@@ -148,24 +164,35 @@ function replyIsHonest(reply: string): boolean {
   return true;
 }
 
-async function llmParse(text: string): Promise<ParsedMessage | null> {
+type HistoryEntry = { role: "user" | "assistant"; text: string };
+
+async function llmParse(text: string, history: HistoryEntry[] = []): Promise<ParsedMessage | null> {
   const client = getOpenAI();
   if (!client) return null;
   try {
+    // Build multi-turn context: last 6 history entries + current message.
+    const historyMessages = history.slice(-6).map((h) => ({
+      role: h.role as "user" | "assistant",
+      content: h.text.slice(0, 300),
+    }));
+
     const response = await client.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: `You are the intent parser for Travony's rider assistant. Map the user's message to EXACTLY ONE intent from this closed set:
+          content: `${TRAVONY_SYSTEM_CONTEXT}
+
+Your task here: map the user's LATEST message to EXACTLY ONE intent from this closed set:
 ${INTENTS.join(", ")}
 
-Meanings: book_ride = wants a ride somewhere (put the destination phrase, if any, in "destination"); go_home = wants to go to their saved home; go_work = saved work; order_coffee = coffee/drinks; prayer_ride = mosque/prayer rides; schedule_arrival = arrive somewhere on time / scheduled rides; wallet = balance, payments, top-up; ride_history = past trips, receipts, invoices; active_ride = asking about their current ride/driver; open_map = wants to pick a place on the map; help = anything else or unclear.
+Meanings: book_ride = wants a ride somewhere (put the destination phrase, if any, in "destination"); go_home = wants to go to their saved home; go_work = saved work; order_coffee = coffee/drinks; prayer_ride = mosque/prayer rides; schedule_arrival = arrive somewhere on time / scheduled rides; wallet = balance, payments, top-up; ride_history = past trips, receipts, invoices; active_ride = asking about their current ride/driver; open_map = wants to pick a place on the map; help = anything else including general questions about Travony.
 
-Also write "reply": ONE short, warm sentence acknowledging the request (it will be shown above a data card). STRICT RULES for reply: no numbers or digits of any kind, no prices, no promises about timing, no emojis.
+Also write "reply": ONE short, warm sentence acknowledging the request. STRICT RULES for reply: no numbers or digits of any kind, no prices, no promises about timing, no emojis.
 
 Respond ONLY as JSON: {"intent": string, "destination": string|null, "reply": string}`,
         },
+        ...historyMessages,
         { role: "user", content: text.slice(0, 500) },
       ],
       response_format: { type: "json_object" },
@@ -185,6 +212,41 @@ Respond ONLY as JSON: {"intent": string, "destination": string|null, "reply": st
     return { intent, destination, reply };
   } catch (err) {
     console.error("[assistant] LLM parse failed, using keyword parser:", err);
+    return null;
+  }
+}
+
+// For general/conversational messages (help intent) — the LLM writes a full
+// reply using the conversation history. The honesty guard still applies.
+async function conversationalReply(text: string, history: HistoryEntry[]): Promise<string | null> {
+  const client = getOpenAI();
+  if (!client) return null;
+  try {
+    const historyMessages = history.slice(-8).map((h) => ({
+      role: h.role as "user" | "assistant",
+      content: h.text.slice(0, 400),
+    }));
+
+    const response = await client.chat.completions.create({
+      model: "gpt-4o",
+      messages: [
+        {
+          role: "system",
+          content: `${TRAVONY_SYSTEM_CONTEXT}
+
+The user is having a general conversation with you — not booking a ride right now. Answer naturally and helpfully. Keep replies short (1-3 sentences). STRICT RULES: no numbers or digits, no specific prices, no emojis, no crypto vocabulary.`,
+        },
+        ...historyMessages,
+        { role: "user", content: text.slice(0, 500) },
+      ],
+      max_tokens: 200,
+      temperature: 0.6,
+    });
+    const reply = response.choices[0]?.message?.content?.trim() || null;
+    if (reply && !replyIsHonest(reply)) return null;
+    return reply;
+  } catch (err) {
+    console.error("[assistant] conversational reply failed:", err);
     return null;
   }
 }
@@ -609,6 +671,13 @@ router.post("/api/assistant/message", async (req: any, res) => {
     const text = typeof req.body.text === "string" ? req.body.text.trim().slice(0, 500) : "";
     if (!text) return res.status(400).json({ message: "Message text is required" });
 
+    // Conversation history (last N messages from the client).
+    const rawHistory: any[] = Array.isArray(req.body.history) ? req.body.history : [];
+    const history: HistoryEntry[] = rawHistory
+      .filter((h) => (h.role === "user" || h.role === "assistant") && typeof h.text === "string" && h.text.trim())
+      .slice(-10)
+      .map((h) => ({ role: h.role as "user" | "assistant", text: h.text.trim().slice(0, 400) }));
+
     const pickup: Point | null =
       req.body.pickup &&
       Number.isFinite(parseFloat(req.body.pickup.lat)) &&
@@ -647,7 +716,7 @@ router.post("/api/assistant/message", async (req: any, res) => {
     let parsed: ParsedMessage | null = explicitDest
       ? { intent: "book_ride", destination: null, reply: null }
       : keywordParse(text);
-    if (!parsed) parsed = await llmParse(text);
+    if (!parsed) parsed = await llmParse(text, history);
     if (!parsed) parsed = { intent: "help", destination: null, reply: null };
 
     // 2) Deterministic executor.
@@ -798,9 +867,12 @@ router.post("/api/assistant/message", async (req: any, res) => {
 
       case "help":
       default: {
-        if (!reply)
-          reply =
+        if (!reply) {
+          // Try a full conversational reply using history context.
+          const aiReply = await conversationalReply(text, history);
+          reply = aiReply ||
             "I can book rides, take you home, order coffee, set up prayer rides and on-time arrivals, and show your wallet or trips. Just tell me what you need.";
+        }
         card = null;
         break;
       }

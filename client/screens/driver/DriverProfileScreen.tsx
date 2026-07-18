@@ -58,7 +58,6 @@ export default function DriverProfileScreen() {
     following: number;
     likes: number;
     handle: string | null;
-    twitchChannel: string | null;
   }>({
     queryKey: ["/api/social/counts"],
     enabled: !!user,
@@ -345,15 +344,30 @@ export default function DriverProfileScreen() {
         visible={sidebarVisible}
         onClose={() => setSidebarVisible(false)}
         balanceTitle="Vehicle Wallet"
-        onBalance={() =>
-          (navigation as any)
-            .getParent()
-            ?.navigate("DriverEarningsTab", { screen: "VehicleWallet" })
-        }
-        onRewards={() => navigation.navigate("Rewards")}
-        onActivity={() => navigation.navigate("ActivityCentre")}
-        onQRCode={() => setQrVisible(true)}
-        onSettings={() => navigation.navigate("DriverAppSettings")}
+        onBalance={() => {
+          setSidebarVisible(false);
+          setTimeout(() => (navigation as any).getParent()?.navigate("DriverEarningsTab", { screen: "VehicleWallet" }), 250);
+        }}
+        onRewards={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("Rewards"), 250);
+        }}
+        onActivity={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("ActivityCentre"), 250);
+        }}
+        onQRCode={() => {
+          setSidebarVisible(false);
+          setTimeout(() => setQrVisible(true), 250);
+        }}
+        onSettings={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("DriverAppSettings"), 250);
+        }}
+        onTravonyAI={() => {
+          setSidebarVisible(false);
+          setTimeout(() => navigation.navigate("TravonyAI"), 250);
+        }}
       />
 
       <QRCodeSheet visible={qrVisible} onClose={() => setQrVisible(false)} />

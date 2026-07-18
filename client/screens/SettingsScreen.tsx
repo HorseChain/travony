@@ -58,10 +58,14 @@ export default function SettingsScreen() {
   const navigation = useNavigation<NavigationProp>();
 
   const handleLogout = async () => {
+    const doLogout = async () => {
+      await logout();
+      navigation.popToTop();
+    };
     if (Platform.OS === "web") {
       const confirmed = window.confirm("Are you sure you want to sign out?");
       if (confirmed) {
-        await logout();
+        await doLogout();
       }
     } else {
       Alert.alert("Sign Out", "Are you sure you want to sign out?", [
@@ -69,9 +73,7 @@ export default function SettingsScreen() {
         {
           text: "Sign Out",
           style: "destructive",
-          onPress: async () => {
-            await logout();
-          },
+          onPress: doLogout,
         },
       ]);
     }
