@@ -37,7 +37,7 @@
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
       "package": "com.travony.rider",
-      "versionCode": 76,
+      "versionCode": 77,
       "config": {
         "googleMaps": {
           "apiKey": "${GOOGLE_API_KEY}"

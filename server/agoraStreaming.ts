@@ -199,6 +199,15 @@ const PRODUCT_CATALOG = [
 ] as const;
 
 // ---------------------------------------------------------------------------
+// Public app-id endpoint — lets the broadcaster initialize the Agora engine
+// with the real appId before the user taps "Go Live" (no auth required;
+// the Agora App ID is not a secret — security comes from tokens).
+// ---------------------------------------------------------------------------
+agoraRouter.get("/api/agora/app-id", (_req, res) => {
+  res.json({ appId: process.env.AGORA_APP_ID || "" });
+});
+
+// ---------------------------------------------------------------------------
 // Token endpoint — RTC + RTM tokens, role decided server-side only
 // ---------------------------------------------------------------------------
 
@@ -361,7 +370,7 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
         userId: user.id,
         type: "stream",
         streamProvider: "agora",
-        twitchChannel: null,
+        twitchChannel: (null as any),
         cityName: null,
         distanceKm: ride.distance ?? null,
         isLive: true,

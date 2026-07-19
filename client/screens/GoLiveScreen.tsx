@@ -35,12 +35,6 @@ interface CatalogProduct {
   imageUrl: string | null;
 }
 
-// ---------------------------------------------------------------------------
-// State machine
-//   "preview"    → camera is running, user hasn't tapped Go Live yet
-//   "starting"   → startMutation in flight / waiting for token
-//   "live"       → joined channel, broadcasting
-// ---------------------------------------------------------------------------
 type Phase = "preview" | "starting" | "live";
 
 export default function GoLiveScreen() {
@@ -80,14 +74,25 @@ export default function GoLiveScreen() {
   );
 
   // ---------------------------------------------------------------------------
-  // Engine lifecycle — created once permissions + native SDK are confirmed.
-  // We start the camera in PREVIEW mode immediately so RtcTextureView is
-  // already rendering by the time the user taps "Go Live". This eliminates
-  // the black-screen race where startPreview() fires before the native
-  // surface is ready.
+  // Fetch the Agora App ID from the server before anything else.
+  // The App ID is not a secret — security comes from RTC tokens.
+  // We need it to initialize the engine BEFORE the user taps "Go Live".
+  // ---------------------------------------------------------------------------
+  const appIdQuery = useQuery<{ appId: string }>({
+    queryKey: ["/api/agora/app-id"],
+    staleTime: Infinity,
+    retry: 3,
+  });
+  const agoraAppId = appIdQuery.data?.appId ?? "";
+
+  // ---------------------------------------------------------------------------
+  // Engine lifecycle — created once we have the real App ID + permissions.
+  // Camera preview starts immediately so the user sees themselves before
+  // tapping "Go Live". The RtcTextureView native surface is already mounted
+  // by the time joinChannel is called — no black-screen race.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!rtc) return;
+    if (!rtc || !agoraAppId) return;
     if (!cameraPermission?.granted || !micPermission?.granted) return;
     if (!nativeOk) return;
 
@@ -96,27 +101,21 @@ export default function GoLiveScreen() {
       const { createAgoraRtcEngine, ChannelProfileType } = rtc;
       localEngine = createAgoraRtcEngine();
       localEngine.initialize({
+        appId: agoraAppId,
         channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
-        // appId is set per-channel at join time via the token
-        appId: "",
       });
       localEngine.registerEventHandler({
         onJoinChannelSuccess: () => setPublishing(true),
-        onError: (err: number, msg: string) => {
-          console.log("[GoLive] RTC error", err, msg);
-        },
+        onError: (err: number, msg: string) =>
+          console.log("[GoLive] RTC error", err, msg),
       });
       localEngine.enableVideo();
-      // Simulcast for Lite Mode viewers.
       localEngine.enableDualStreamMode?.(true);
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
         frameRate: 24,
         bitrate: 0,
       });
-      // Start the camera capture → feeds into RtcTextureView automatically.
-      // The view is rendered below synchronously with this engine in state,
-      // so the native surface is guaranteed to exist before any join call.
       localEngine.startPreview();
       setEngine(localEngine);
     } catch (err) {
@@ -132,10 +131,10 @@ export default function GoLiveScreen() {
       setEngine(null);
       setPublishing(false);
     };
-  }, [rtc, cameraPermission?.granted, micPermission?.granted, nativeOk]);
+  }, [rtc, agoraAppId, cameraPermission?.granted, micPermission?.granted, nativeOk]);
 
   // ---------------------------------------------------------------------------
-  // Go Live mutations
+  // Go Live flow
   // ---------------------------------------------------------------------------
   const startMutation = useMutation({
     mutationFn: async () =>
@@ -157,7 +156,7 @@ export default function GoLiveScreen() {
     },
   });
 
-  // Token — only fetched after post is created.
+  // Token — only fetched after the post is created server-side.
   const tokenQuery = useQuery<StreamTokenBundle>({
     queryKey: ["/api/agora/token", post?.id],
     queryFn: () =>
@@ -172,17 +171,11 @@ export default function GoLiveScreen() {
   });
   const tokens = tokenQuery.data ?? null;
 
-  // Join the channel once we have a publisher token.
+  // Join the channel once the publisher token arrives.
+  // Engine is already initialized with real appId + camera already running.
   useEffect(() => {
     if (!engine || !tokens || tokens.role !== "publisher") return;
     if (phase !== "starting") return;
-    try {
-      // Re-initialize with the real appId from the token.
-      engine.initialize?.({
-        appId: tokens.appId,
-        channelProfile: rtc?.ChannelProfileType?.ChannelProfileLiveBroadcasting ?? 1,
-      });
-    } catch {}
     try {
       const { ClientRoleType } = rtc ?? {};
       engine.joinChannelWithUserAccount(
@@ -198,6 +191,7 @@ export default function GoLiveScreen() {
       setPhase("live");
     } catch (err) {
       console.log("[GoLive] joinChannel failed:", (err as any)?.message ?? err);
+      setPhase("preview");
     }
   }, [engine, tokens, phase, rtc]);
 
@@ -238,11 +232,9 @@ export default function GoLiveScreen() {
   // ---------------------------------------------------------------------------
   // Permission gate
   // ---------------------------------------------------------------------------
-  if (!cameraPermission || !micPermission) {
-    return <View style={styles.root} />;
-  }
+  if (!cameraPermission || !micPermission) return <View style={styles.root} />;
 
-  const permissionDeniedForever =
+  const permDeniedForever =
     (cameraPermission.status === "denied" && !cameraPermission.canAskAgain) ||
     (micPermission.status === "denied" && !micPermission.canAskAgain);
 
@@ -254,13 +246,11 @@ export default function GoLiveScreen() {
         <ThemedText style={styles.permBody}>
           Going live shares your ride's camera and sound with Travony viewers.
         </ThemedText>
-        {permissionDeniedForever ? (
+        {permDeniedForever ? (
           Platform.OS !== "web" ? (
             <Pressable
               style={[styles.primaryButton, { backgroundColor: theme.primary }]}
-              onPress={async () => {
-                try { await Linking.openSettings(); } catch {}
-              }}
+              onPress={async () => { try { await Linking.openSettings(); } catch {} }}
             >
               <ThemedText style={styles.primaryButtonText}>Open Settings</ThemedText>
             </Pressable>
@@ -289,7 +279,7 @@ export default function GoLiveScreen() {
         <Ionicons name="construct-outline" size={44} color="rgba(255,255,255,0.6)" />
         <ThemedText style={styles.permTitle}>Needs the new app build</ThemedText>
         <ThemedText style={styles.permBody}>
-          Live streaming ships with the next T Ride / T Driver update. Update your app to go live.
+          Live streaming ships with the next T Ride / T Driver update.
         </ThemedText>
         <Pressable
           style={[styles.primaryButton, { backgroundColor: theme.primary }]}
@@ -302,7 +292,7 @@ export default function GoLiveScreen() {
   }
 
   // ---------------------------------------------------------------------------
-  // Camera view component (TextureView avoids SurfaceView z-index black).
+  // Camera view — TextureView avoids SurfaceView z-index black on Android.
   // ---------------------------------------------------------------------------
   const AgoraLocalView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
   const products = catalogQuery.data?.products ?? [];
@@ -311,30 +301,22 @@ export default function GoLiveScreen() {
 
   return (
     <View style={styles.root}>
-      {/* ------------------------------------------------------------------ */}
-      {/* Camera layer — always visible once engine is ready.                 */}
-      {/* RtcTextureView is mounted BEFORE any channel join so the native     */}
-      {/* surface exists when startPreview()/joinChannel() fires.             */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Camera — already capturing because engine started in useEffect */}
       {AgoraLocalView && engine ? (
         <AgoraLocalView
           style={StyleSheet.absoluteFill}
-          canvas={{
-            uid: 0,
-            renderMode: 1, // RenderModeHidden = fill (crop)
-            mirrorMode: frontCamera ? 0 : 2, // 0=auto(mirror front), 2=disabled
-          }}
+          canvas={{ uid: 0, renderMode: 1, mirrorMode: frontCamera ? 0 : 2 }}
         />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: "#101014" }]}>
           <ActivityIndicator color="#fff" />
-          <ThemedText style={styles.permBody}>Starting your camera…</ThemedText>
+          <ThemedText style={styles.permBody}>
+            {!agoraAppId ? "Connecting to Travony…" : "Starting your camera…"}
+          </ThemedText>
         </View>
       )}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Top bar                                                              */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Top bar */}
       <View style={[styles.topBar, { top: insets.top + Spacing.md, zIndex: 10, elevation: 10 }]}>
         <View style={styles.topLeft}>
           {phase === "live" ? <LiveBadge /> : null}
@@ -364,9 +346,7 @@ export default function GoLiveScreen() {
         <GiftAnimationLayer gift={currentGift} />
       </View>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* PRE-LIVE overlay — shown while phase === "preview"                  */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Pre-live panel */}
       {phase === "preview" ? (
         <View style={[styles.preLiveOverlay, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
           <View style={styles.liveIconCircle}>
@@ -377,7 +357,7 @@ export default function GoLiveScreen() {
             Your camera is on. Tap below to start broadcasting to Travony viewers.
           </ThemedText>
           <Pressable
-            style={[styles.goLiveButton]}
+            style={styles.goLiveButton}
             onPress={() => {
               setPhase("starting");
               startMutation.mutate();
@@ -391,18 +371,17 @@ export default function GoLiveScreen() {
             )}
           </Pressable>
           {startMutation.isError ? (
-            <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed, marginTop: Spacing.sm }]}>
+            <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed }]}>
               {(startMutation.error as any)?.message || "Could not start the stream"}
             </ThemedText>
           ) : null}
         </View>
       ) : null}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* STARTING overlay — waiting for token / joining channel               */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Starting spinner */}
       {phase === "starting" ? (
-        <View style={[styles.center, StyleSheet.absoluteFill, { zIndex: 10, elevation: 10 }]}
+        <View
+          style={[styles.center, StyleSheet.absoluteFill, { zIndex: 10, elevation: 10 }]}
           pointerEvents="none"
         >
           <View style={styles.startingBadge}>
@@ -414,9 +393,7 @@ export default function GoLiveScreen() {
         </View>
       ) : null}
 
-      {/* ------------------------------------------------------------------ */}
-      {/* LIVE controls                                                        */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Live controls */}
       {phase === "live" ? (
         <>
           {shopOpen ? (
@@ -471,10 +448,7 @@ export default function GoLiveScreen() {
               <Ionicons name="bag-handle-outline" size={20} color="#fff" />
             </Pressable>
             <Pressable
-              style={({ pressed }) => [
-                styles.stopButton,
-                { opacity: pressed || stopMutation.isPending ? 0.85 : 1 },
-              ]}
+              style={({ pressed }) => [styles.stopButton, { opacity: pressed || stopMutation.isPending ? 0.85 : 1 }]}
               onPress={() => stopMutation.mutate()}
               disabled={stopMutation.isPending}
             >
@@ -499,165 +473,58 @@ export default function GoLiveScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-  center: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: Spacing.md,
-    padding: Spacing.xl,
-  },
-  permTitle: {
-    ...Typography.h3,
-    color: "#fff",
-    textAlign: "center",
-  },
-  permBody: {
-    ...Typography.small,
-    color: "rgba(255,255,255,0.7)",
-    textAlign: "center",
-  },
+  root: { flex: 1, backgroundColor: "#000" },
+  center: { alignItems: "center", justifyContent: "center", gap: Spacing.md, padding: Spacing.xl },
+  permTitle: { ...Typography.h3, color: "#fff", textAlign: "center" },
+  permBody: { ...Typography.small, color: "rgba(255,255,255,0.7)", textAlign: "center" },
   primaryButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    height: 46,
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.xl,
-    marginTop: Spacing.md,
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    height: 46, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.xl, marginTop: Spacing.md,
   },
-  primaryButtonText: {
-    ...Typography.bodyBold,
-    color: "#fff",
-  },
+  primaryButtonText: { ...Typography.bodyBold, color: "#fff" },
   topBar: {
-    position: "absolute",
-    left: Spacing.lg,
-    right: Spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
+    position: "absolute", left: Spacing.lg, right: Spacing.lg,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
   },
-  topLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
-  topRight: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-  },
+  topLeft: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  topRight: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   roundButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center",
   },
-  giftLayer: {
-    position: "absolute",
-    left: Spacing.lg,
-    right: Spacing.lg,
-    alignItems: "flex-start",
-  },
-  // Pre-live overlay
+  giftLayer: { position: "absolute", left: Spacing.lg, right: Spacing.lg, alignItems: "flex-start" },
   preLiveOverlay: {
-    position: "absolute",
-    left: Spacing.xl,
-    right: Spacing.xl,
-    alignItems: "center",
-    backgroundColor: "rgba(0,0,0,0.6)",
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.xl,
-    gap: Spacing.sm,
+    position: "absolute", left: Spacing.xl, right: Spacing.xl,
+    alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: BorderRadius.lg, padding: Spacing.xl, gap: Spacing.sm,
   },
   liveIconCircle: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: "rgba(233,25,22,0.18)",
-    alignItems: "center",
-    justifyContent: "center",
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: "rgba(233,25,22,0.18)", alignItems: "center", justifyContent: "center",
   },
-  preLiveTitle: {
-    ...Typography.h3,
-    color: "#fff",
-    textAlign: "center",
-  },
-  preLiveBody: {
-    ...Typography.small,
-    color: "rgba(255,255,255,0.75)",
-    textAlign: "center",
-  },
+  preLiveTitle: { ...Typography.h3, color: "#fff", textAlign: "center" },
+  preLiveBody: { ...Typography.small, color: "rgba(255,255,255,0.75)", textAlign: "center" },
   goLiveButton: {
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.liveRed,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Spacing["2xl"],
-    marginTop: Spacing.sm,
-    minWidth: 160,
+    height: 48, borderRadius: BorderRadius.full, backgroundColor: Colors.liveRed,
+    alignItems: "center", justifyContent: "center",
+    paddingHorizontal: Spacing["2xl"], marginTop: Spacing.sm, minWidth: 160,
   },
   startingBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.sm,
-    backgroundColor: "rgba(0,0,0,0.65)",
-    borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
+    flexDirection: "row", alignItems: "center", gap: Spacing.sm,
+    backgroundColor: "rgba(0,0,0,0.65)", borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
   },
-  // Live controls
   bottomBar: {
-    position: "absolute",
-    left: Spacing.lg,
-    right: Spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: Spacing.md,
+    position: "absolute", left: Spacing.lg, right: Spacing.lg,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: Spacing.md,
   },
   stopButton: {
-    flex: 1,
-    height: 48,
-    borderRadius: BorderRadius.full,
-    backgroundColor: Colors.liveRed,
-    alignItems: "center",
-    justifyContent: "center",
+    flex: 1, height: 48, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.liveRed, alignItems: "center", justifyContent: "center",
   },
-  shopSheet: {
-    position: "absolute",
-    left: Spacing.lg,
-    right: Spacing.lg,
-    borderRadius: BorderRadius.md,
-    padding: Spacing.md,
-  },
-  shopTitle: {
-    ...Typography.h4,
-    marginBottom: Spacing.sm,
-  },
-  shopRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: Spacing.md,
-    paddingVertical: Spacing.sm,
-  },
-  shopThumb: {
-    width: 40,
-    height: 40,
-    borderRadius: BorderRadius.sm,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  clearRow: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    paddingTop: Spacing.sm,
-    marginTop: Spacing.sm,
-    alignItems: "center",
-  },
+  shopSheet: { position: "absolute", left: Spacing.lg, right: Spacing.lg, borderRadius: BorderRadius.md, padding: Spacing.md },
+  shopTitle: { ...Typography.h4, marginBottom: Spacing.sm },
+  shopRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
+  shopThumb: { width: 40, height: 40, borderRadius: BorderRadius.sm, alignItems: "center", justifyContent: "center" },
+  clearRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.sm, marginTop: Spacing.sm, alignItems: "center" },
 });
