@@ -116,7 +116,8 @@ export default function GoLiveScreen() {
         frameRate: 24,
         bitrate: 0,
       });
-      localEngine.startPreview();
+      // Do NOT call startPreview() here — RtcTextureView is not mounted yet.
+      // A second effect calls it after engine state is set and the view renders.
       setEngine(localEngine);
     } catch (err) {
       console.log("[GoLive] RTC init failed:", (err as any)?.message ?? err);
@@ -132,6 +133,19 @@ export default function GoLiveScreen() {
       setPublishing(false);
     };
   }, [rtc, agoraAppId, cameraPermission?.granted, micPermission?.granted, nativeOk]);
+
+  // ---------------------------------------------------------------------------
+  // Start preview AFTER engine is set — RtcTextureView is now mounted and
+  // the native surface exists. A 150 ms delay lets the view fully attach
+  // before Agora starts pushing frames into it (Agora SDK v4.x requirement).
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!engine) return;
+    const t = setTimeout(() => {
+      try { engine.startPreview(); } catch {}
+    }, 150);
+    return () => clearTimeout(t);
+  }, [engine]);
 
   // ---------------------------------------------------------------------------
   // Go Live flow
