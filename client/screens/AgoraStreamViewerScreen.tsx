@@ -1,7 +1,7 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, StyleSheet, Pressable, ActivityIndicator, Image } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useQuery } from "@tanstack/react-query";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
@@ -45,6 +45,17 @@ export default function AgoraStreamViewerScreen() {
   const { user } = useAuth();
   const { liteMode } = useLiteMode();
   const postId: string = route.params?.postId;
+
+  // Hide tab bar — this is a full-screen viewer.
+  useFocusEffect(
+    useCallback(() => {
+      const parent = (navigation as any).getParent?.();
+      parent?.setOptions({ tabBarStyle: { display: "none" } });
+      return () => {
+        parent?.setOptions({ tabBarStyle: undefined });
+      };
+    }, [navigation])
+  );
 
   const [giftOpen, setGiftOpen] = useState(false);
   const [remoteUid, setRemoteUid] = useState<number | null>(null);
@@ -166,14 +177,18 @@ export default function AgoraStreamViewerScreen() {
     };
   }, [rtc, tokens?.rtcToken, ended]);
 
-  const RtcSurfaceView = rtc?.RtcSurfaceView;
+  // Prefer TextureView (renders inline, no z-index black on Android).
+  const AgoraRemoteView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
   const isSelf = user?.id && snapshot?.hostId === user.id;
 
   return (
     <View style={styles.root}>
       {/* Video layer */}
-      {nativeOk && RtcSurfaceView && remoteUid !== null && !ended ? (
-        <RtcSurfaceView style={StyleSheet.absoluteFill} canvas={{ uid: remoteUid }} />
+      {nativeOk && AgoraRemoteView && remoteUid !== null && !ended ? (
+        <AgoraRemoteView
+          style={StyleSheet.absoluteFill}
+          canvas={{ uid: remoteUid, renderMode: 1 }}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.videoFallback]}>
           {ended ? (
