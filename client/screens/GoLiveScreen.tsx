@@ -1,5 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, StyleSheet, Pressable, ActivityIndicator, ScrollView, Platform, Linking } from "react-native";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+  View,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  ScrollView,
+  Platform,
+  Linking,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,9 +35,14 @@ interface CatalogProduct {
   imageUrl: string | null;
 }
 
-// Host side of in-app streaming: broadcast your ride's camera to Travony
-// viewers. The publisher role is granted by the server only because you are
-// a participant of this ride — the app never picks its own role.
+// ---------------------------------------------------------------------------
+// State machine
+//   "preview"    → camera is running, user hasn't tapped Go Live yet
+//   "starting"   → startMutation in flight / waiting for token
+//   "live"       → joined channel, broadcasting
+// ---------------------------------------------------------------------------
+type Phase = "preview" | "starting" | "live";
+
 export default function GoLiveScreen() {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -40,12 +53,18 @@ export default function GoLiveScreen() {
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
-  const [post, setPost] = useState<any>(null);
+
+  const nativeOk = agoraNativeAvailable();
+  const rtc = useRef(loadAgoraRtc()).current;
+
+  const [engine, setEngine] = useState<any>(null);
+  const [phase, setPhase] = useState<Phase>("preview");
+  const [frontCamera, setFrontCamera] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
-  const [frontCamera, setFrontCamera] = useState(true);
   const [shopOpen, setShopOpen] = useState(false);
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
+  const [post, setPost] = useState<any>(null);
 
   useKeepAwake();
 
@@ -60,17 +79,73 @@ export default function GoLiveScreen() {
     }, [navigation])
   );
 
-  const nativeOk = agoraNativeAvailable();
-  const rtc = useMemo(() => loadAgoraRtc(), []);
-  const [engine, setEngine] = useState<any>(null);
+  // ---------------------------------------------------------------------------
+  // Engine lifecycle — created once permissions + native SDK are confirmed.
+  // We start the camera in PREVIEW mode immediately so RtcTextureView is
+  // already rendering by the time the user taps "Go Live". This eliminates
+  // the black-screen race where startPreview() fires before the native
+  // surface is ready.
+  // ---------------------------------------------------------------------------
+  useEffect(() => {
+    if (!rtc) return;
+    if (!cameraPermission?.granted || !micPermission?.granted) return;
+    if (!nativeOk) return;
 
+    let localEngine: any = null;
+    try {
+      const { createAgoraRtcEngine, ChannelProfileType } = rtc;
+      localEngine = createAgoraRtcEngine();
+      localEngine.initialize({
+        channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
+        // appId is set per-channel at join time via the token
+        appId: "",
+      });
+      localEngine.registerEventHandler({
+        onJoinChannelSuccess: () => setPublishing(true),
+        onError: (err: number, msg: string) => {
+          console.log("[GoLive] RTC error", err, msg);
+        },
+      });
+      localEngine.enableVideo();
+      // Simulcast for Lite Mode viewers.
+      localEngine.enableDualStreamMode?.(true);
+      localEngine.setVideoEncoderConfiguration?.({
+        dimensions: { width: 1280, height: 720 },
+        frameRate: 24,
+        bitrate: 0,
+      });
+      // Start the camera capture → feeds into RtcTextureView automatically.
+      // The view is rendered below synchronously with this engine in state,
+      // so the native surface is guaranteed to exist before any join call.
+      localEngine.startPreview();
+      setEngine(localEngine);
+    } catch (err) {
+      console.log("[GoLive] RTC init failed:", (err as any)?.message ?? err);
+    }
+
+    return () => {
+      try {
+        localEngine?.stopPreview?.();
+        localEngine?.leaveChannel?.();
+        localEngine?.release?.();
+      } catch {}
+      setEngine(null);
+      setPublishing(false);
+    };
+  }, [rtc, cameraPermission?.granted, micPermission?.granted, nativeOk]);
+
+  // ---------------------------------------------------------------------------
+  // Go Live mutations
+  // ---------------------------------------------------------------------------
   const startMutation = useMutation({
     mutationFn: async () =>
       apiRequest(`/api/agora/streams/${rideId}/start`, { method: "POST" }),
     onSuccess: (data) => {
       setPost(data.post);
+      setPhase("starting");
       queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
     },
+    onError: () => setPhase("preview"),
   });
 
   const stopMutation = useMutation({
@@ -82,6 +157,7 @@ export default function GoLiveScreen() {
     },
   });
 
+  // Token — only fetched after post is created.
   const tokenQuery = useQuery<StreamTokenBundle>({
     queryKey: ["/api/agora/token", post?.id],
     queryFn: () =>
@@ -95,6 +171,35 @@ export default function GoLiveScreen() {
     retry: 1,
   });
   const tokens = tokenQuery.data ?? null;
+
+  // Join the channel once we have a publisher token.
+  useEffect(() => {
+    if (!engine || !tokens || tokens.role !== "publisher") return;
+    if (phase !== "starting") return;
+    try {
+      // Re-initialize with the real appId from the token.
+      engine.initialize?.({
+        appId: tokens.appId,
+        channelProfile: rtc?.ChannelProfileType?.ChannelProfileLiveBroadcasting ?? 1,
+      });
+    } catch {}
+    try {
+      const { ClientRoleType } = rtc ?? {};
+      engine.joinChannelWithUserAccount(
+        tokens.rtcToken,
+        tokens.channel,
+        tokens.uid,
+        {
+          clientRoleType: ClientRoleType?.ClientRoleBroadcaster ?? 1,
+          publishCameraTrack: true,
+          publishMicrophoneTrack: true,
+        }
+      );
+      setPhase("live");
+    } catch (err) {
+      console.log("[GoLive] joinChannel failed:", (err as any)?.message ?? err);
+    }
+  }, [engine, tokens, phase, rtc]);
 
   const catalogQuery = useQuery<{ products: CatalogProduct[] }>({
     queryKey: ["/api/agora/products/catalog"],
@@ -110,63 +215,6 @@ export default function GoLiveScreen() {
       if (event.type === "viewer.count") setViewerCount(Number(event.data?.count) || 0);
     });
   }, [subscribe, onGiftEvent]);
-
-  // Broadcaster join once we hold a publisher token.
-  useEffect(() => {
-    if (!rtc || !tokens || tokens.role !== "publisher") return;
-    let localEngine: any = null;
-    let startTimer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      const {
-        createAgoraRtcEngine,
-        ChannelProfileType,
-        ClientRoleType,
-      } = rtc;
-      localEngine = createAgoraRtcEngine();
-      localEngine.initialize({
-        appId: tokens.appId,
-        channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
-      });
-      localEngine.registerEventHandler({
-        onJoinChannelSuccess: () => setPublishing(true),
-      });
-      // Mount the engine state first so RtcSurfaceView renders and the native
-      // surface is ready, then start video/preview on the next tick.
-      setEngine(localEngine);
-      startTimer = setTimeout(() => {
-        try {
-          localEngine.enableVideo();
-          // Simulcast so Lite Mode viewers can pull the low stream.
-          localEngine.enableDualStreamMode?.(true);
-          localEngine.setVideoEncoderConfiguration?.({
-            dimensions: { width: 1280, height: 720 },
-            frameRate: 24,
-            bitrate: 0,
-          });
-          localEngine.startPreview();
-          localEngine.joinChannelWithUserAccount(tokens.rtcToken, tokens.channel, tokens.uid, {
-            clientRoleType: ClientRoleType.ClientRoleBroadcaster,
-            publishCameraTrack: true,
-            publishMicrophoneTrack: true,
-          });
-        } catch (innerErr) {
-          console.log("[GoLive] RTC start failed:", (innerErr as any)?.message || innerErr);
-        }
-      }, 150);
-    } catch (err) {
-      console.log("[GoLive] RTC init failed:", (err as any)?.message || err);
-    }
-    return () => {
-      if (startTimer) clearTimeout(startTimer);
-      try {
-        localEngine?.stopPreview?.();
-        localEngine?.leaveChannel();
-        localEngine?.release();
-      } catch {}
-      setEngine(null);
-      setPublishing(false);
-    };
-  }, [rtc, tokens?.rtcToken]);
 
   const featureMutation = useMutation({
     mutationFn: async (productKey: string) =>
@@ -187,8 +235,12 @@ export default function GoLiveScreen() {
     onSuccess: () => setFeaturedKey(null),
   });
 
-  // ---- permission gates -----------------------------------------------
-  if (!cameraPermission || !micPermission) return <View style={styles.root} />;
+  // ---------------------------------------------------------------------------
+  // Permission gate
+  // ---------------------------------------------------------------------------
+  if (!cameraPermission || !micPermission) {
+    return <View style={styles.root} />;
+  }
 
   const permissionDeniedForever =
     (cameraPermission.status === "denied" && !cameraPermission.canAskAgain) ||
@@ -207,9 +259,7 @@ export default function GoLiveScreen() {
             <Pressable
               style={[styles.primaryButton, { backgroundColor: theme.primary }]}
               onPress={async () => {
-                try {
-                  await Linking.openSettings();
-                } catch {}
+                try { await Linking.openSettings(); } catch {}
               }}
             >
               <ThemedText style={styles.primaryButtonText}>Open Settings</ThemedText>
@@ -251,59 +301,30 @@ export default function GoLiveScreen() {
     );
   }
 
-  // ---- pre-live confirm --------------------------------------------------
-  if (!post) {
-    return (
-      <View style={[styles.root, styles.center, { paddingTop: insets.top }]}>
-        <View style={styles.liveIconCircle}>
-          <Ionicons name="radio-outline" size={34} color={Colors.liveRed} />
-        </View>
-        <ThemedText style={styles.permTitle}>Go live on Travony</ThemedText>
-        <ThemedText style={styles.permBody}>
-          Your camera streams inside the Travony app. Viewers can send gifts while they watch.
-          Your exact location is never shown.
-        </ThemedText>
-        <Pressable
-          style={[styles.primaryButton, { backgroundColor: Colors.liveRed }]}
-          onPress={() => startMutation.mutate()}
-          disabled={startMutation.isPending}
-        >
-          {startMutation.isPending ? (
-            <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <ThemedText style={styles.primaryButtonText}>Start streaming</ThemedText>
-          )}
-        </Pressable>
-        {startMutation.isError ? (
-          <ThemedText style={[styles.permBody, { color: Colors.liveRed }]}>
-            {(startMutation.error as any)?.message || "Could not start the stream"}
-          </ThemedText>
-        ) : null}
-        <Pressable onPress={() => navigation.goBack()} style={{ marginTop: Spacing.md }}>
-          <ThemedText style={styles.permBody}>Cancel</ThemedText>
-        </Pressable>
-      </View>
-    );
-  }
-
-  // ---- live ----------------------------------------------------------------
-  // On Android, RtcSurfaceView uses SurfaceView which renders in a separate
-  // compositor layer and appears black when layered with React Native views.
-  // RtcTextureView uses TextureView which renders inline — no z-index issues.
-  // Fall back to RtcSurfaceView if TextureView is unavailable.
+  // ---------------------------------------------------------------------------
+  // Camera view component (TextureView avoids SurfaceView z-index black).
+  // ---------------------------------------------------------------------------
   const AgoraLocalView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
-  const products = catalogQuery.data?.products || [];
-
-  // Distance from bottom edge: leave room for home indicator + gesture bar.
+  const products = catalogQuery.data?.products ?? [];
   const BOTTOM_OFFSET = insets.bottom + Spacing["2xl"];
-  // Bottom bar is 48px tall; shop sheet sits above it with extra padding.
   const SHOP_BOTTOM = BOTTOM_OFFSET + 48 + Spacing.lg;
 
   return (
     <View style={styles.root}>
-      {/* Camera layer — RtcTextureView on Android avoids SurfaceView z-index black */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Camera layer — always visible once engine is ready.                 */}
+      {/* RtcTextureView is mounted BEFORE any channel join so the native     */}
+      {/* surface exists when startPreview()/joinChannel() fires.             */}
+      {/* ------------------------------------------------------------------ */}
       {AgoraLocalView && engine ? (
-        <AgoraLocalView style={StyleSheet.absoluteFill} canvas={{ uid: 0 }} />
+        <AgoraLocalView
+          style={StyleSheet.absoluteFill}
+          canvas={{
+            uid: 0,
+            renderMode: 1, // RenderModeHidden = fill (crop)
+            mirrorMode: frontCamera ? 0 : 2, // 0=auto(mirror front), 2=disabled
+          }}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: "#101014" }]}>
           <ActivityIndicator color="#fff" />
@@ -311,25 +332,31 @@ export default function GoLiveScreen() {
         </View>
       )}
 
-      {/* All overlays use zIndex + elevation so they render above the native camera view */}
+      {/* ------------------------------------------------------------------ */}
+      {/* Top bar                                                              */}
+      {/* ------------------------------------------------------------------ */}
       <View style={[styles.topBar, { top: insets.top + Spacing.md, zIndex: 10, elevation: 10 }]}>
         <View style={styles.topLeft}>
-          <LiveBadge />
-          <ViewerCountChip count={viewerCount} />
+          {phase === "live" ? <LiveBadge /> : null}
+          {phase === "live" ? <ViewerCountChip count={viewerCount} /> : null}
         </View>
-        <Pressable
-          style={styles.roundButton}
-          onPress={() => {
-            setFrontCamera((f) => !f);
-            try {
-              engine?.switchCamera?.();
-            } catch {}
-          }}
-        >
-          <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
-        </Pressable>
+        <View style={styles.topRight}>
+          <Pressable
+            style={styles.roundButton}
+            onPress={() => {
+              setFrontCamera((f) => !f);
+              try { engine?.switchCamera?.(); } catch {}
+            }}
+          >
+            <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
+          </Pressable>
+          <Pressable style={styles.roundButton} onPress={() => navigation.goBack()}>
+            <Ionicons name="close" size={20} color="#fff" />
+          </Pressable>
+        </View>
       </View>
 
+      {/* Gift overlay */}
       <View
         style={[styles.giftLayer, { top: insets.top + 90, zIndex: 10, elevation: 10 }]}
         pointerEvents="none"
@@ -337,76 +364,136 @@ export default function GoLiveScreen() {
         <GiftAnimationLayer gift={currentGift} />
       </View>
 
-      {/* Shop the Look host controls — sits above the bottom bar */}
-      {shopOpen ? (
-        <View
-          style={[
-            styles.shopSheet,
-            { bottom: SHOP_BOTTOM, backgroundColor: theme.backgroundElevated, zIndex: 11, elevation: 11 },
-          ]}
-        >
-          <ThemedText style={styles.shopTitle}>Feature a product</ThemedText>
-          <ScrollView style={{ maxHeight: 220 }}>
-            {products.map((p) => (
-              <Pressable
-                key={p.key}
-                style={({ pressed }) => [styles.shopRow, { opacity: pressed ? 0.7 : 1 }]}
-                onPress={() => featureMutation.mutate(p.key)}
-                disabled={featureMutation.isPending}
-              >
-                <View style={[styles.shopThumb, { backgroundColor: theme.backgroundSecondary }]}>
-                  <Ionicons name="bag-handle-outline" size={18} color={theme.textSecondary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <ThemedText style={Typography.bodyBold}>{p.title}</ThemedText>
-                  <ThemedText style={[Typography.small, { color: theme.textSecondary }]}>
-                    {p.priceLabel}
-                  </ThemedText>
-                </View>
-                {featuredKey === p.key ? (
-                  <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
-                ) : null}
-              </Pressable>
-            ))}
-          </ScrollView>
-          {featuredKey ? (
-            <Pressable
-              style={[styles.clearRow, { borderTopColor: theme.border }]}
-              onPress={() => clearMutation.mutate()}
-            >
-              <ThemedText style={[Typography.smallBold, { color: Colors.liveRed }]}>
-                Remove featured product
-              </ThemedText>
-            </Pressable>
+      {/* ------------------------------------------------------------------ */}
+      {/* PRE-LIVE overlay — shown while phase === "preview"                  */}
+      {/* ------------------------------------------------------------------ */}
+      {phase === "preview" ? (
+        <View style={[styles.preLiveOverlay, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
+          <View style={styles.liveIconCircle}>
+            <Ionicons name="radio-outline" size={28} color={Colors.liveRed} />
+          </View>
+          <ThemedText style={styles.preLiveTitle}>Ready to go live?</ThemedText>
+          <ThemedText style={styles.preLiveBody}>
+            Your camera is on. Tap below to start broadcasting to Travony viewers.
+          </ThemedText>
+          <Pressable
+            style={[styles.goLiveButton]}
+            onPress={() => {
+              setPhase("starting");
+              startMutation.mutate();
+            }}
+            disabled={startMutation.isPending || !engine}
+          >
+            {startMutation.isPending ? (
+              <ActivityIndicator color="#fff" size="small" />
+            ) : (
+              <ThemedText style={styles.primaryButtonText}>Go Live</ThemedText>
+            )}
+          </Pressable>
+          {startMutation.isError ? (
+            <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed, marginTop: Spacing.sm }]}>
+              {(startMutation.error as any)?.message || "Could not start the stream"}
+            </ThemedText>
           ) : null}
         </View>
       ) : null}
 
-      <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
-        <Pressable
-          style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
-          onPress={() => setShopOpen((s) => !s)}
+      {/* ------------------------------------------------------------------ */}
+      {/* STARTING overlay — waiting for token / joining channel               */}
+      {/* ------------------------------------------------------------------ */}
+      {phase === "starting" ? (
+        <View style={[styles.center, StyleSheet.absoluteFill, { zIndex: 10, elevation: 10 }]}
+          pointerEvents="none"
         >
-          <Ionicons name="bag-handle-outline" size={20} color="#fff" />
-        </Pressable>
-        <Pressable
-          style={({ pressed }) => [
-            styles.stopButton,
-            { opacity: pressed || stopMutation.isPending ? 0.85 : 1 },
-          ]}
-          onPress={() => stopMutation.mutate()}
-          disabled={stopMutation.isPending}
-        >
-          {stopMutation.isPending ? (
+          <View style={styles.startingBadge}>
             <ActivityIndicator color="#fff" size="small" />
-          ) : (
-            <ThemedText style={styles.primaryButtonText}>End stream</ThemedText>
-          )}
-        </Pressable>
-        <View style={styles.roundButton} pointerEvents="none">
-          <Ionicons name={publishing ? "wifi-outline" : "hourglass-outline"} size={20} color="#fff" />
+            <ThemedText style={[styles.preLiveBody, { color: "#fff", marginTop: 0 }]}>
+              Going live…
+            </ThemedText>
+          </View>
         </View>
-      </View>
+      ) : null}
+
+      {/* ------------------------------------------------------------------ */}
+      {/* LIVE controls                                                        */}
+      {/* ------------------------------------------------------------------ */}
+      {phase === "live" ? (
+        <>
+          {shopOpen ? (
+            <View
+              style={[
+                styles.shopSheet,
+                { bottom: SHOP_BOTTOM, backgroundColor: theme.backgroundElevated, zIndex: 11, elevation: 11 },
+              ]}
+            >
+              <ThemedText style={styles.shopTitle}>Feature a product</ThemedText>
+              <ScrollView style={{ maxHeight: 220 }}>
+                {products.map((p) => (
+                  <Pressable
+                    key={p.key}
+                    style={({ pressed }) => [styles.shopRow, { opacity: pressed ? 0.7 : 1 }]}
+                    onPress={() => featureMutation.mutate(p.key)}
+                    disabled={featureMutation.isPending}
+                  >
+                    <View style={[styles.shopThumb, { backgroundColor: theme.backgroundSecondary }]}>
+                      <Ionicons name="bag-handle-outline" size={18} color={theme.textSecondary} />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <ThemedText style={Typography.bodyBold}>{p.title}</ThemedText>
+                      <ThemedText style={[Typography.small, { color: theme.textSecondary }]}>
+                        {p.priceLabel}
+                      </ThemedText>
+                    </View>
+                    {featuredKey === p.key ? (
+                      <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+                    ) : null}
+                  </Pressable>
+                ))}
+              </ScrollView>
+              {featuredKey ? (
+                <Pressable
+                  style={[styles.clearRow, { borderTopColor: theme.border }]}
+                  onPress={() => clearMutation.mutate()}
+                >
+                  <ThemedText style={[Typography.smallBold, { color: Colors.liveRed }]}>
+                    Remove featured product
+                  </ThemedText>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
+
+          <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
+            <Pressable
+              style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
+              onPress={() => setShopOpen((s) => !s)}
+            >
+              <Ionicons name="bag-handle-outline" size={20} color="#fff" />
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.stopButton,
+                { opacity: pressed || stopMutation.isPending ? 0.85 : 1 },
+              ]}
+              onPress={() => stopMutation.mutate()}
+              disabled={stopMutation.isPending}
+            >
+              {stopMutation.isPending ? (
+                <ActivityIndicator color="#fff" size="small" />
+              ) : (
+                <ThemedText style={styles.primaryButtonText}>End stream</ThemedText>
+              )}
+            </Pressable>
+            <View style={styles.roundButton} pointerEvents="none">
+              <Ionicons
+                name={publishing ? "wifi-outline" : "hourglass-outline"}
+                size={20}
+                color="#fff"
+              />
+            </View>
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -445,14 +532,6 @@ const styles = StyleSheet.create({
     ...Typography.bodyBold,
     color: "#fff",
   },
-  liveIconCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    backgroundColor: "rgba(233,25,22,0.15)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
   topBar: {
     position: "absolute",
     left: Spacing.lg,
@@ -462,6 +541,11 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   topLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  topRight: {
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
@@ -480,6 +564,55 @@ const styles = StyleSheet.create({
     right: Spacing.lg,
     alignItems: "flex-start",
   },
+  // Pre-live overlay
+  preLiveOverlay: {
+    position: "absolute",
+    left: Spacing.xl,
+    right: Spacing.xl,
+    alignItems: "center",
+    backgroundColor: "rgba(0,0,0,0.6)",
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.xl,
+    gap: Spacing.sm,
+  },
+  liveIconCircle: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: "rgba(233,25,22,0.18)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  preLiveTitle: {
+    ...Typography.h3,
+    color: "#fff",
+    textAlign: "center",
+  },
+  preLiveBody: {
+    ...Typography.small,
+    color: "rgba(255,255,255,0.75)",
+    textAlign: "center",
+  },
+  goLiveButton: {
+    height: 48,
+    borderRadius: BorderRadius.full,
+    backgroundColor: Colors.liveRed,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: Spacing["2xl"],
+    marginTop: Spacing.sm,
+    minWidth: 160,
+  },
+  startingBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+  },
+  // Live controls
   bottomBar: {
     position: "absolute",
     left: Spacing.lg,
