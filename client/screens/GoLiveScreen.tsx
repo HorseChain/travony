@@ -11,7 +11,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCameraPermissions, useMicrophonePermissions } from "expo-camera";
+import { CameraView, useCameraPermissions, useMicrophonePermissions } from "expo-camera";
 import { useKeepAwake } from "expo-keep-awake";
 import Ionicons from "@expo/vector-icons/Ionicons";
 
@@ -62,7 +62,6 @@ export default function GoLiveScreen() {
 
   useKeepAwake();
 
-  // Hide tab bar while this full-screen live view is active.
   useFocusEffect(
     useCallback(() => {
       const parent = (navigation as any).getParent?.();
@@ -73,11 +72,7 @@ export default function GoLiveScreen() {
     }, [navigation])
   );
 
-  // ---------------------------------------------------------------------------
-  // Fetch the Agora App ID from the server before anything else.
-  // The App ID is not a secret — security comes from RTC tokens.
-  // We need it to initialize the engine BEFORE the user taps "Go Live".
-  // ---------------------------------------------------------------------------
+  // App ID — needed to initialize Agora when going live.
   const appIdQuery = useQuery<{ appId: string }>({
     queryKey: ["/api/agora/app-id"],
     staleTime: Infinity,
@@ -86,58 +81,21 @@ export default function GoLiveScreen() {
   const agoraAppId = appIdQuery.data?.appId ?? "";
 
   // ---------------------------------------------------------------------------
-  // Engine lifecycle — created once we have the real App ID + permissions.
-  // Camera preview starts immediately so the user sees themselves before
-  // tapping "Go Live". The RtcTextureView native surface is already mounted
-  // by the time joinChannel is called — no black-screen race.
+  // Agora engine — created ONLY after the user taps Go Live and the server
+  // has created the stream post. By that point CameraView is unmounted and
+  // the camera hardware is released, so Agora can open it cleanly.
   // ---------------------------------------------------------------------------
+  const engineRef = useRef<any>(null);
+
   useEffect(() => {
-    if (!rtc || !agoraAppId) return;
-    if (!cameraPermission?.granted || !micPermission?.granted) return;
-    if (!nativeOk) return;
-
-    let localEngine: any = null;
-    try {
-      const { createAgoraRtcEngine, ChannelProfileType } = rtc;
-      localEngine = createAgoraRtcEngine();
-      localEngine.initialize({
-        appId: agoraAppId,
-        channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
-      });
-      localEngine.registerEventHandler({
-        onJoinChannelSuccess: () => setPublishing(true),
-        onError: (err: number, msg: string) =>
-          console.log("[GoLive] RTC error", err, msg),
-      });
-      // Agora SDK v4.x docs (RtcTextureView + RtcSurfaceView) say:
-      // "If not joined: call startPreview FIRST, then enableVideo."
-      // LiveBroadcasting also defaults to Audience — must setClientRole
-      // BROADCASTER before startPreview or camera capture never starts.
-      const { ClientRoleType } = rtc;
-      localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
-      localEngine.startPreview();   // ← FIRST per SDK docs
-      localEngine.enableVideo();    // ← SECOND per SDK docs
-      localEngine.enableDualStreamMode?.(true);
-      localEngine.setVideoEncoderConfiguration?.({
-        dimensions: { width: 1280, height: 720 },
-        frameRate: 24,
-        bitrate: 0,
-      });
-      setEngine(localEngine); // ← view mounts after this
-    } catch (err) {
-      console.log("[GoLive] RTC init failed:", (err as any)?.message ?? err);
-    }
-
     return () => {
       try {
-        localEngine?.stopPreview?.();
-        localEngine?.leaveChannel?.();
-        localEngine?.release?.();
+        engineRef.current?.leaveChannel?.();
+        engineRef.current?.release?.();
       } catch {}
-      setEngine(null);
-      setPublishing(false);
+      engineRef.current = null;
     };
-  }, [rtc, agoraAppId, cameraPermission?.granted, micPermission?.granted, nativeOk]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Go Live flow
@@ -177,14 +135,38 @@ export default function GoLiveScreen() {
   });
   const tokens = tokenQuery.data ?? null;
 
-  // Join the channel once the publisher token arrives.
-  // Engine is already initialized with real appId + camera already running.
+  // Initialize Agora and join the channel once the token arrives.
+  // By this point, CameraView is already unmounted (phase !== "preview"),
+  // so the camera hardware is free for Agora to capture.
   useEffect(() => {
-    if (!engine || !tokens || tokens.role !== "publisher") return;
-    if (phase !== "starting") return;
+    if (!rtc || !tokens || tokens.role !== "publisher") return;
+    if (phase !== "starting" || !agoraAppId) return;
+
+    let localEngine: any = null;
     try {
-      const { ClientRoleType } = rtc ?? {};
-      engine.joinChannelWithUserAccount(
+      const { createAgoraRtcEngine, ChannelProfileType, ClientRoleType } = rtc;
+      localEngine = createAgoraRtcEngine();
+      localEngine.initialize({
+        appId: agoraAppId,
+        channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
+      });
+      localEngine.registerEventHandler({
+        onJoinChannelSuccess: () => {
+          setPublishing(true);
+          setPhase("live");
+        },
+        onError: (err: number, msg: string) =>
+          console.log("[GoLive] RTC error", err, msg),
+      });
+      localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
+      localEngine.enableVideo();
+      localEngine.enableDualStreamMode?.(true);
+      localEngine.setVideoEncoderConfiguration?.({
+        dimensions: { width: 1280, height: 720 },
+        frameRate: 24,
+        bitrate: 0,
+      });
+      localEngine.joinChannelWithUserAccount(
         tokens.rtcToken,
         tokens.channel,
         tokens.uid,
@@ -194,12 +176,14 @@ export default function GoLiveScreen() {
           publishMicrophoneTrack: true,
         }
       );
-      setPhase("live");
+      engineRef.current = localEngine;
+      setEngine(localEngine);
     } catch (err) {
-      console.log("[GoLive] joinChannel failed:", (err as any)?.message ?? err);
+      console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
       setPhase("preview");
+      try { localEngine?.release?.(); } catch {}
     }
-  }, [engine, tokens, phase, rtc]);
+  }, [rtc, tokens, phase, agoraAppId]);
 
   const catalogQuery = useQuery<{ products: CatalogProduct[] }>({
     queryKey: ["/api/agora/products/catalog"],
@@ -297,35 +281,38 @@ export default function GoLiveScreen() {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Camera view — use SurfaceView for local preview (more reliable for camera
-  // capture on Android). SurfaceView renders below regular Views by default so
-  // the controls (elevation: 10) appear on top without z-index tricks.
-  // ---------------------------------------------------------------------------
-  const AgoraLocalView = rtc?.RtcSurfaceView ?? rtc?.RtcTextureView;
   const products = catalogQuery.data?.products ?? [];
   const BOTTOM_OFFSET = insets.bottom + Spacing["2xl"];
   const SHOP_BOTTOM = BOTTOM_OFFSET + 48 + Spacing.lg;
 
   return (
     <View style={styles.root}>
-      {/* Camera — already capturing because engine started in useEffect */}
-      {AgoraLocalView && engine ? (
-        <AgoraLocalView
+
+      {/* ------------------------------------------------------------------ */}
+      {/* Background layer                                                    */}
+      {/* Preview: expo-camera CameraView (always works, no Agora rendering) */}
+      {/* Live: dark background — Agora is capturing and streaming            */}
+      {/* ------------------------------------------------------------------ */}
+      {phase === "preview" ? (
+        <CameraView
           style={StyleSheet.absoluteFill}
-          canvas={{ uid: 0, renderMode: 1, mirrorMode: frontCamera ? 0 : 2 }}
+          facing={frontCamera ? "front" : "back"}
         />
       ) : (
-        <View style={[StyleSheet.absoluteFill, styles.center, { backgroundColor: "#101014" }]}>
-          <ActivityIndicator color="#fff" />
-          <ThemedText style={styles.permBody}>
-            {!agoraAppId ? "Connecting to Travony…" : "Starting your camera…"}
-          </ThemedText>
+        <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
+          {phase === "starting" ? (
+            <ActivityIndicator color="#fff" size="large" />
+          ) : (
+            <>
+              <View style={styles.liveDot} />
+              <ThemedText style={styles.liveLabel}>Broadcasting to viewers</ThemedText>
+            </>
+          )}
         </View>
       )}
 
       {/* Top bar */}
-      <View style={[styles.topBar, { top: insets.top + Spacing.md, zIndex: 10, elevation: 10 }]}>
+      <View style={[styles.topBar, { top: insets.top + Spacing.md }]}>
         <View style={styles.topLeft}>
           {phase === "live" ? <LiveBadge /> : null}
           {phase === "live" ? <ViewerCountChip count={viewerCount} /> : null}
@@ -348,7 +335,7 @@ export default function GoLiveScreen() {
 
       {/* Gift overlay */}
       <View
-        style={[styles.giftLayer, { top: insets.top + 90, zIndex: 10, elevation: 10 }]}
+        style={[styles.giftLayer, { top: insets.top + 90 }]}
         pointerEvents="none"
       >
         <GiftAnimationLayer gift={currentGift} />
@@ -356,7 +343,7 @@ export default function GoLiveScreen() {
 
       {/* Pre-live panel */}
       {phase === "preview" ? (
-        <View style={[styles.preLiveOverlay, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
+        <View style={[styles.preLiveOverlay, { bottom: BOTTOM_OFFSET }]}>
           <View style={styles.liveIconCircle}>
             <Ionicons name="radio-outline" size={28} color={Colors.liveRed} />
           </View>
@@ -370,7 +357,7 @@ export default function GoLiveScreen() {
               setPhase("starting");
               startMutation.mutate();
             }}
-            disabled={startMutation.isPending || !engine}
+            disabled={startMutation.isPending || !agoraAppId}
           >
             {startMutation.isPending ? (
               <ActivityIndicator color="#fff" size="small" />
@@ -386,21 +373,6 @@ export default function GoLiveScreen() {
         </View>
       ) : null}
 
-      {/* Starting spinner */}
-      {phase === "starting" ? (
-        <View
-          style={[styles.center, StyleSheet.absoluteFill, { zIndex: 10, elevation: 10 }]}
-          pointerEvents="none"
-        >
-          <View style={styles.startingBadge}>
-            <ActivityIndicator color="#fff" size="small" />
-            <ThemedText style={[styles.preLiveBody, { color: "#fff", marginTop: 0 }]}>
-              Going live…
-            </ThemedText>
-          </View>
-        </View>
-      ) : null}
-
       {/* Live controls */}
       {phase === "live" ? (
         <>
@@ -408,7 +380,7 @@ export default function GoLiveScreen() {
             <View
               style={[
                 styles.shopSheet,
-                { bottom: SHOP_BOTTOM, backgroundColor: theme.backgroundElevated, zIndex: 11, elevation: 11 },
+                { bottom: SHOP_BOTTOM, backgroundColor: theme.backgroundElevated },
               ]}
             >
               <ThemedText style={styles.shopTitle}>Feature a product</ThemedText>
@@ -448,7 +420,7 @@ export default function GoLiveScreen() {
             </View>
           ) : null}
 
-          <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET, zIndex: 10, elevation: 10 }]}>
+          <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET }]}>
             <Pressable
               style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
               onPress={() => setShopOpen((s) => !s)}
@@ -483,6 +455,22 @@ export default function GoLiveScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   center: { alignItems: "center", justifyContent: "center", gap: Spacing.md, padding: Spacing.xl },
+  liveBg: {
+    backgroundColor: "#0d0d0d",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: Spacing.md,
+  },
+  liveDot: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    backgroundColor: Colors.liveRed,
+  },
+  liveLabel: {
+    ...Typography.small,
+    color: "rgba(255,255,255,0.6)",
+  },
   permTitle: { ...Typography.h3, color: "#fff", textAlign: "center" },
   permBody: { ...Typography.small, color: "rgba(255,255,255,0.7)", textAlign: "center" },
   primaryButton: {
@@ -493,6 +481,7 @@ const styles = StyleSheet.create({
   topBar: {
     position: "absolute", left: Spacing.lg, right: Spacing.lg,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    zIndex: 10, elevation: 10,
   },
   topLeft: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   topRight: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
@@ -500,11 +489,15 @@ const styles = StyleSheet.create({
     width: 40, height: 40, borderRadius: 20,
     backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center",
   },
-  giftLayer: { position: "absolute", left: Spacing.lg, right: Spacing.lg, alignItems: "flex-start" },
+  giftLayer: {
+    position: "absolute", left: Spacing.lg, right: Spacing.lg,
+    alignItems: "flex-start", zIndex: 10, elevation: 10,
+  },
   preLiveOverlay: {
     position: "absolute", left: Spacing.xl, right: Spacing.xl,
     alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)",
     borderRadius: BorderRadius.lg, padding: Spacing.xl, gap: Spacing.sm,
+    zIndex: 10, elevation: 10,
   },
   liveIconCircle: {
     width: 56, height: 56, borderRadius: 28,
@@ -517,20 +510,20 @@ const styles = StyleSheet.create({
     alignItems: "center", justifyContent: "center",
     paddingHorizontal: Spacing["2xl"], marginTop: Spacing.sm, minWidth: 160,
   },
-  startingBadge: {
-    flexDirection: "row", alignItems: "center", gap: Spacing.sm,
-    backgroundColor: "rgba(0,0,0,0.65)", borderRadius: BorderRadius.full,
-    paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
-  },
   bottomBar: {
     position: "absolute", left: Spacing.lg, right: Spacing.lg,
-    flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: Spacing.md,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    gap: Spacing.md, zIndex: 10, elevation: 10,
   },
   stopButton: {
     flex: 1, height: 48, borderRadius: BorderRadius.full,
     backgroundColor: Colors.liveRed, alignItems: "center", justifyContent: "center",
   },
-  shopSheet: { position: "absolute", left: Spacing.lg, right: Spacing.lg, borderRadius: BorderRadius.md, padding: Spacing.md },
+  shopSheet: {
+    position: "absolute", left: Spacing.lg, right: Spacing.lg,
+    borderRadius: BorderRadius.md, padding: Spacing.md,
+    zIndex: 11, elevation: 11,
+  },
   shopTitle: { ...Typography.h4, marginBottom: Spacing.sm },
   shopRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
   shopThumb: { width: 40, height: 40, borderRadius: BorderRadius.sm, alignItems: "center", justifyContent: "center" },
