@@ -110,6 +110,12 @@ export default function GoLiveScreen() {
           console.log("[GoLive] RTC error", err, msg),
       });
       localEngine.enableVideo();
+      // LiveBroadcasting default role is Audience — camera is disabled for
+      // Audience. Must switch to Broadcaster BEFORE startPreview() or the
+      // camera surface stays black. This is a pre-join call; the role is
+      // confirmed again via clientRoleType when joinChannel is called.
+      const { ClientRoleType } = rtc;
+      localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableDualStreamMode?.(true);
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
