@@ -109,22 +109,21 @@ export default function GoLiveScreen() {
         onError: (err: number, msg: string) =>
           console.log("[GoLive] RTC error", err, msg),
       });
-      localEngine.enableVideo();
-      // LiveBroadcasting default role is Audience — camera is disabled for
-      // Audience. Must switch to Broadcaster BEFORE startPreview() or the
-      // camera surface stays black. This is a pre-join call; the role is
-      // confirmed again via clientRoleType when joinChannel is called.
+      // Agora SDK v4.x docs (RtcTextureView + RtcSurfaceView) say:
+      // "If not joined: call startPreview FIRST, then enableVideo."
+      // LiveBroadcasting also defaults to Audience — must setClientRole
+      // BROADCASTER before startPreview or camera capture never starts.
       const { ClientRoleType } = rtc;
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
+      localEngine.startPreview();   // ← FIRST per SDK docs
+      localEngine.enableVideo();    // ← SECOND per SDK docs
       localEngine.enableDualStreamMode?.(true);
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
         frameRate: 24,
         bitrate: 0,
       });
-      // Do NOT call startPreview() here — RtcTextureView is not mounted yet.
-      // A second effect calls it after engine state is set and the view renders.
-      setEngine(localEngine);
+      setEngine(localEngine); // ← view mounts after this
     } catch (err) {
       console.log("[GoLive] RTC init failed:", (err as any)?.message ?? err);
     }
@@ -139,19 +138,6 @@ export default function GoLiveScreen() {
       setPublishing(false);
     };
   }, [rtc, agoraAppId, cameraPermission?.granted, micPermission?.granted, nativeOk]);
-
-  // ---------------------------------------------------------------------------
-  // Start preview AFTER engine is set — RtcTextureView is now mounted and
-  // the native surface exists. A 150 ms delay lets the view fully attach
-  // before Agora starts pushing frames into it (Agora SDK v4.x requirement).
-  // ---------------------------------------------------------------------------
-  useEffect(() => {
-    if (!engine) return;
-    const t = setTimeout(() => {
-      try { engine.startPreview(); } catch {}
-    }, 150);
-    return () => clearTimeout(t);
-  }, [engine]);
 
   // ---------------------------------------------------------------------------
   // Go Live flow
@@ -312,9 +298,11 @@ export default function GoLiveScreen() {
   }
 
   // ---------------------------------------------------------------------------
-  // Camera view — TextureView avoids SurfaceView z-index black on Android.
+  // Camera view — use SurfaceView for local preview (more reliable for camera
+  // capture on Android). SurfaceView renders below regular Views by default so
+  // the controls (elevation: 10) appear on top without z-index tricks.
   // ---------------------------------------------------------------------------
-  const AgoraLocalView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
+  const AgoraLocalView = rtc?.RtcSurfaceView ?? rtc?.RtcTextureView;
   const products = catalogQuery.data?.products ?? [];
   const BOTTOM_OFFSET = insets.bottom + Spacing["2xl"];
   const SHOP_BOTTOM = BOTTOM_OFFSET + 48 + Spacing.lg;
