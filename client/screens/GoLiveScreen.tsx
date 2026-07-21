@@ -59,6 +59,7 @@ export default function GoLiveScreen() {
   const [shopOpen, setShopOpen] = useState(false);
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
   const [post, setPost] = useState<any>(null);
+  const [liveError, setLiveError] = useState<string | null>(null);
 
   useKeepAwake();
 
@@ -135,12 +136,36 @@ export default function GoLiveScreen() {
   });
   const tokens = tokenQuery.data ?? null;
 
+  // If the token query errors out, bounce back to preview so we're not stuck.
+  useEffect(() => {
+    if (tokenQuery.isError && phase === "starting") {
+      setLiveError("Couldn't get a stream token — check your connection and try again.");
+      setPhase("preview");
+    }
+  }, [tokenQuery.isError, phase]);
+
+  // Safety timeout: if still "starting" after 25s, something silently failed.
+  useEffect(() => {
+    if (phase !== "starting") return;
+    const t = setTimeout(() => {
+      setLiveError("Stream took too long to start. Please try again.");
+      setPhase("preview");
+    }, 25000);
+    return () => clearTimeout(t);
+  }, [phase]);
+
   // Initialize Agora and join the channel once the token arrives.
   // By this point, CameraView is already unmounted (phase !== "preview"),
   // so the camera hardware is free for Agora to capture.
   useEffect(() => {
-    if (!rtc || !tokens || tokens.role !== "publisher") return;
-    if (phase !== "starting" || !agoraAppId) return;
+    if (!rtc || !tokens || !agoraAppId) return;
+    if (phase !== "starting") return;
+
+    if (tokens.role !== "publisher") {
+      setLiveError("You are not a participant on this ride.");
+      setPhase("preview");
+      return;
+    }
 
     let localEngine: any = null;
     try {
@@ -155,8 +180,14 @@ export default function GoLiveScreen() {
           setPublishing(true);
           setPhase("live");
         },
-        onError: (err: number, msg: string) =>
-          console.log("[GoLive] RTC error", err, msg),
+        onError: (err: number, msg: string) => {
+          console.log("[GoLive] RTC error", err, msg);
+          // Any Agora error while starting means the join failed.
+          setLiveError(`Stream error (${err}). Please try again.`);
+          setPhase("preview");
+          try { localEngine?.leaveChannel?.(); } catch {}
+          try { localEngine?.release?.(); } catch {}
+        },
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
@@ -180,6 +211,7 @@ export default function GoLiveScreen() {
       setEngine(localEngine);
     } catch (err) {
       console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
+      setLiveError("Failed to start stream. Please try again.");
       setPhase("preview");
       try { localEngine?.release?.(); } catch {}
     }
@@ -354,6 +386,7 @@ export default function GoLiveScreen() {
           <Pressable
             style={styles.goLiveButton}
             onPress={() => {
+              setLiveError(null);
               setPhase("starting");
               startMutation.mutate();
             }}
@@ -365,7 +398,11 @@ export default function GoLiveScreen() {
               <ThemedText style={styles.primaryButtonText}>Go Live</ThemedText>
             )}
           </Pressable>
-          {startMutation.isError ? (
+          {liveError ? (
+            <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed }]}>
+              {liveError}
+            </ThemedText>
+          ) : startMutation.isError ? (
             <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed }]}>
               {(startMutation.error as any)?.message || "Could not start the stream"}
             </ThemedText>
