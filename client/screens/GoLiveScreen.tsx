@@ -328,24 +328,32 @@ export default function GoLiveScreen() {
 
       {/* ------------------------------------------------------------------ */}
       {/* Background layer                                                    */}
-      {/* Preview: expo-camera CameraView (always works, no Agora rendering) */}
-      {/* Live: dark background — Agora is capturing and streaming            */}
+      {/* Preview: expo-camera CameraView (reliable, no Agora rendering)     */}
+      {/* Starting: dark spinner while joining                                */}
+      {/* Live: Agora RtcSurfaceView — expo-camera is fully released by now  */}
+      {/*   so Agora has exclusive camera access; startPreview() was already  */}
+      {/*   called so setupLocalVideo fires after the view mounts.            */}
       {/* ------------------------------------------------------------------ */}
       {phase === "preview" ? (
         <CameraView
           style={StyleSheet.absoluteFill}
           facing={frontCamera ? "front" : "back"}
         />
+      ) : phase === "starting" ? (
+        <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
+          <ActivityIndicator color="#fff" size="large" />
+        </View>
+      ) : engine && rtc?.RtcSurfaceView ? (
+        <rtc.RtcSurfaceView
+          style={StyleSheet.absoluteFill}
+          canvas={{ uid: 0, renderMode: 1, mirrorMode: frontCamera ? 0 : 2 }}
+          zOrderMediaOverlay={false}
+          zOrderOnTop={false}
+        />
       ) : (
         <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
-          {phase === "starting" ? (
-            <ActivityIndicator color="#fff" size="large" />
-          ) : (
-            <>
-              <View style={styles.liveDot} />
-              <ThemedText style={styles.liveLabel}>Broadcasting to viewers</ThemedText>
-            </>
-          )}
+          <View style={styles.liveDot} />
+          <ThemedText style={styles.liveLabel}>Broadcasting to viewers</ThemedText>
         </View>
       )}
 
