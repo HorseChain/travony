@@ -182,19 +182,14 @@ export default function GoLiveScreen() {
         try { localEngine?.release?.(); } catch {}
       };
       localEngine.registerEventHandler({
-        onJoinChannelSuccess: () => {
-          setPublishing(true);
-          setPhase("live");
-        },
-        onError: (err: number, msg: string) => {
-          console.log("[GoLive] RTC error", err, msg);
-          bail(`Stream error (${err}). Please try again.`);
-        },
-        onConnectionStateChanged: (connection: any, state: number, reason: number) => {
-          console.log("[GoLive] connection state", state, "reason", reason);
-          // state 5 = ConnectionStateFailed
-          if (state === 5) bail(`Connection failed (reason ${reason}). Please try again.`);
-        },
+        // onJoinChannelSuccess confirms the server-side connection —
+        // we go LIVE immediately after calling join (same as original code),
+        // and use this callback only to light up the wifi icon.
+        onJoinChannelSuccess: () => setPublishing(true),
+        onError: (err: number, msg: string) =>
+          console.log("[GoLive] RTC error", err, msg),
+        onConnectionStateChanged: (_conn: any, state: number, reason: number) =>
+          console.log("[GoLive] connection state", state, "reason", reason),
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
@@ -217,6 +212,9 @@ export default function GoLiveScreen() {
       );
       engineRef.current = localEngine;
       setEngine(localEngine);
+      // Go live immediately — same pattern as working builds 77-80.
+      // onJoinChannelSuccess above only lights the wifi icon.
+      setPhase("live");
     } catch (err) {
       console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
       setLiveError("Failed to start stream. Please try again.");
