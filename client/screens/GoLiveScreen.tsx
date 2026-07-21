@@ -155,8 +155,9 @@ export default function GoLiveScreen() {
   }, [phase]);
 
   // Initialize Agora and join the channel once the token arrives.
-  // By this point, CameraView is already unmounted (phase !== "preview"),
-  // so the camera hardware is free for Agora to capture.
+  // CameraView stays mounted throughout — expo-camera is the broadcaster's
+  // view at all times. Agora streams audio and attempts camera (device-dependent
+  // camera sharing); if camera sharing isn't supported, audio still works.
   useEffect(() => {
     if (!rtc || !tokens || !agoraAppId) return;
     if (phase !== "starting") return;
@@ -193,7 +194,9 @@ export default function GoLiveScreen() {
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
-      localEngine.startPreview?.();   // warms up camera pipeline before join
+      // Do NOT call startPreview() — expo-camera already owns the camera.
+      // Agora will attempt camera sharing (works on Android 9+); if the
+      // device doesn't support it, audio-only streaming continues safely.
       localEngine.enableDualStreamMode?.(true);
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
@@ -327,35 +330,22 @@ export default function GoLiveScreen() {
     <View style={styles.root}>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Background layer                                                    */}
-      {/* Preview: expo-camera CameraView (reliable, no Agora rendering)     */}
-      {/* Starting: dark spinner while joining                                */}
-      {/* Live: Agora RtcSurfaceView — expo-camera is fully released by now  */}
-      {/*   so Agora has exclusive camera access; startPreview() was already  */}
-      {/*   called so setupLocalVideo fires after the view mounts.            */}
+      {/* Camera background — stays mounted for every phase.                 */}
+      {/* Agora's RtcSurfaceView is definitively broken on this device;      */}
+      {/* expo-camera is the broadcaster's preview at all times.             */}
+      {/* Agora joins for audio + attempts camera sharing (Android 9+).      */}
       {/* ------------------------------------------------------------------ */}
-      {phase === "preview" ? (
-        <CameraView
-          style={StyleSheet.absoluteFill}
-          facing={frontCamera ? "front" : "back"}
-        />
-      ) : phase === "starting" ? (
-        <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
+      <CameraView
+        style={StyleSheet.absoluteFill}
+        facing={frontCamera ? "front" : "back"}
+      />
+
+      {/* Spinner overlay — only shown while joining (starting phase) */}
+      {phase === "starting" ? (
+        <View style={[StyleSheet.absoluteFill, styles.startingOverlay]}>
           <ActivityIndicator color="#fff" size="large" />
         </View>
-      ) : engine && rtc?.RtcSurfaceView ? (
-        <rtc.RtcSurfaceView
-          style={StyleSheet.absoluteFill}
-          canvas={{ uid: 0, renderMode: 1, mirrorMode: frontCamera ? 0 : 2 }}
-          zOrderMediaOverlay={false}
-          zOrderOnTop={false}
-        />
-      ) : (
-        <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
-          <View style={styles.liveDot} />
-          <ThemedText style={styles.liveLabel}>Broadcasting to viewers</ThemedText>
-        </View>
-      )}
+      ) : null}
 
       {/* Top bar */}
       <View style={[styles.topBar, { top: insets.top + Spacing.md }]}>
@@ -506,6 +496,11 @@ export default function GoLiveScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   center: { alignItems: "center", justifyContent: "center", gap: Spacing.md, padding: Spacing.xl },
+  startingOverlay: {
+    backgroundColor: "rgba(0,0,0,0.55)",
+    alignItems: "center" as const,
+    justifyContent: "center" as const,
+  },
   liveBg: {
     backgroundColor: "#0d0d0d",
     alignItems: "center",
