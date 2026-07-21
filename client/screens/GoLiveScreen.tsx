@@ -175,6 +175,12 @@ export default function GoLiveScreen() {
         appId: agoraAppId,
         channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
       });
+      const bail = (msg: string) => {
+        setLiveError(msg);
+        setPhase("preview");
+        try { localEngine?.leaveChannel?.(); } catch {}
+        try { localEngine?.release?.(); } catch {}
+      };
       localEngine.registerEventHandler({
         onJoinChannelSuccess: () => {
           setPublishing(true);
@@ -182,15 +188,17 @@ export default function GoLiveScreen() {
         },
         onError: (err: number, msg: string) => {
           console.log("[GoLive] RTC error", err, msg);
-          // Any Agora error while starting means the join failed.
-          setLiveError(`Stream error (${err}). Please try again.`);
-          setPhase("preview");
-          try { localEngine?.leaveChannel?.(); } catch {}
-          try { localEngine?.release?.(); } catch {}
+          bail(`Stream error (${err}). Please try again.`);
+        },
+        onConnectionStateChanged: (connection: any, state: number, reason: number) => {
+          console.log("[GoLive] connection state", state, "reason", reason);
+          // state 5 = ConnectionStateFailed
+          if (state === 5) bail(`Connection failed (reason ${reason}). Please try again.`);
         },
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
+      localEngine.startPreview?.();   // warms up camera pipeline before join
       localEngine.enableDualStreamMode?.(true);
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
