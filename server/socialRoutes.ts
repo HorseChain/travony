@@ -15,13 +15,12 @@ import {
   prayerRideDispatches,
 } from "@shared/schema";
 import { eq, ne, and, or, desc, gte, inArray, isNull, count, ilike, sql } from "drizzle-orm";
-import { verifyTwitchChannel, getLiveChannels } from "./twitchClient";
 import { getAgoraViewerCount } from "./agoraStreaming";
 import { scorePeopleMatches, recordImpressions, type ScoredMatch } from "./matchAgent";
 
 // Social layer: follows between users + rides published or live-streamed to
 // the feed via Twitch. Privacy rules: social payloads only ever expose
-// id / name / avatar / twitchChannel — never email, phone or coordinates.
+// id / name / avatar — never email, phone or coordinates.
 // Posts store server-derived coarse data only (city name, distance).
 
 export const socialRouter = Router();
@@ -100,8 +99,8 @@ function coarsenCoord(v: number): number | null {
   return Math.round(v * 100) / 100;
 }
 
-function publicUser(u: { id: string; name: string; avatar: string | null; twitchChannel: string | null }) {
-  return { id: u.id, name: u.name, avatar: u.avatar, twitchChannel: u.twitchChannel };
+function publicUser(u: { id: string; name: string; avatar: string | null }) {
+  return { id: u.id, name: u.name, avatar: u.avatar };
 }
 
 // Display-only @handle derived deterministically from name + id — no new
@@ -332,31 +331,7 @@ async function attachSocialMeta<T extends { id: string; authorId: string }>(post
   }));
 }
 
-// ---------------------------------------------------------------------------
-// Twitch channel on my profile
-// ---------------------------------------------------------------------------
-
-socialRouter.patch("/api/me/twitch-channel", async (req, res) => {
-  try {
-    const user = await getWriteUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-
-    const raw = req.body?.channel;
-    if (raw === null || raw === "" || raw === undefined) {
-      await db.update(users).set({ twitchChannel: null, updatedAt: new Date() }).where(eq(users.id, user.id));
-      return res.json({ twitchChannel: null });
-    }
-    const info = await verifyTwitchChannel(String(raw));
-    if (!info) {
-      return res.status(400).json({ error: "That Twitch channel was not found. Check the spelling." });
-    }
-    await db.update(users).set({ twitchChannel: info.login, updatedAt: new Date() }).where(eq(users.id, user.id));
-    res.json({ twitchChannel: info.login, displayName: info.displayName });
-  } catch (error: any) {
-    console.error("[Social] twitch-channel error:", error);
-    res.status(502).json({ error: "Could not reach Twitch. Try again in a moment." });
-  }
-});
+// (Twitch channel endpoint removed — Agora in-app streaming only)
 
 // ---------------------------------------------------------------------------
 // Follows
@@ -399,7 +374,7 @@ socialRouter.get("/api/social/followers", async (req, res) => {
     const session = await getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
     const rows = await db
-      .select({ id: users.id, name: users.name, avatar: users.avatar, twitchChannel: users.twitchChannel })
+      .select({ id: users.id, name: users.name, avatar: users.avatar })
       .from(userFollows)
       .innerJoin(users, eq(users.id, userFollows.followerId))
       .where(eq(userFollows.followingId, session.userId))
@@ -416,7 +391,7 @@ socialRouter.get("/api/social/following", async (req, res) => {
     const session = await getSessionUser(req);
     if (!session) return res.status(401).json({ error: "Unauthorized" });
     const rows = await db
-      .select({ id: users.id, name: users.name, avatar: users.avatar, twitchChannel: users.twitchChannel })
+      .select({ id: users.id, name: users.name, avatar: users.avatar })
       .from(userFollows)
       .innerJoin(users, eq(users.id, userFollows.followingId))
       .where(eq(userFollows.followerId, session.userId))
@@ -449,7 +424,6 @@ socialRouter.get("/api/social/counts", async (req, res) => {
       following: Number(following.n),
       likes: Number(likes.n),
       posts: Number(postCount.n),
-      twitchChannel: me?.twitchChannel || null,
       bio: me?.bio || null,
       handle: me ? handleFor(me) : null,
     });
@@ -460,7 +434,7 @@ socialRouter.get("/api/social/counts", async (req, res) => {
 
 // ---------------------------------------------------------------------------
 // Ride social context — who is the other person on this ride (for follow UI).
-// Only exposes id / name / avatar / twitchChannel of the counterpart.
+// Only exposes id / name / avatar of the counterpart.
 // ---------------------------------------------------------------------------
 
 socialRouter.get("/api/rides/:id/social-context", async (req, res) => {
@@ -515,7 +489,6 @@ socialRouter.get("/api/rides/:id/social-context", async (req, res) => {
 
     res.json({
       counterpart,
-      myTwitchChannel: me?.twitchChannel || null,
       isStreaming: !!myStream,
       hasPublished: !!myPublished,
     });
@@ -525,56 +498,8 @@ socialRouter.get("/api/rides/:id/social-context", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// Stream a ride (live on Twitch) + publish a completed ride
+// Stream stop (Agora streams are started via /api/agora/streams/:id/start)
 // ---------------------------------------------------------------------------
-
-socialRouter.post("/api/rides/:id/stream/start", async (req, res) => {
-  try {
-    const user = await getWriteUser(req);
-    if (!user) return res.status(401).json({ error: "Unauthorized" });
-    if (!user.twitchChannel) {
-      return res.status(400).json({ error: "Add your Twitch channel to your profile first" });
-    }
-    const ride = await storage.getRide(req.params.id);
-    if (!ride) return res.status(404).json({ error: "Ride not found" });
-    const { customerId, driverUserId } = await getRideParticipants(ride);
-    if (user.id !== customerId && user.id !== driverUserId) {
-      return res.status(403).json({ error: "Not your ride" });
-    }
-    if (!STREAMABLE_STATUSES.includes(ride.status)) {
-      return res.status(400).json({ error: "You can only stream while the ride is happening" });
-    }
-
-    // One active stream post per ride+user — reactivate instead of duplicating.
-    const [existing] = await db
-      .select()
-      .from(ridePosts)
-      .where(and(
-        eq(ridePosts.rideId, ride.id),
-        eq(ridePosts.userId, user.id),
-        eq(ridePosts.type, "stream"),
-        isNull(ridePosts.endedAt),
-      ));
-    if (existing) return res.json({ post: existing });
-
-    const cityName = await deriveCityName(parseFloat(String(ride.pickupLat)), parseFloat(String(ride.pickupLng)));
-    const [post] = await db
-      .insert(ridePosts)
-      .values({
-        rideId: ride.id,
-        userId: user.id,
-        type: "stream",
-        twitchChannel: user.twitchChannel,
-        cityName,
-        distanceKm: ride.distance ?? null,
-        isLive: true,
-      })
-      .returning();
-    res.json({ post });
-  } catch (error: any) {
-    res.status(500).json({ error: error.message });
-  }
-});
 
 socialRouter.post("/api/rides/:id/stream/stop", async (req, res) => {
   try {
@@ -658,7 +583,6 @@ socialRouter.post("/api/rides/:id/publish", async (req, res) => {
 const POST_FIELDS = {
   id: ridePosts.id,
   type: ridePosts.type,
-  twitchChannel: ridePosts.twitchChannel,
   streamProvider: ridePosts.streamProvider,
   caption: ridePosts.caption,
   photoUrl: ridePosts.photoUrl,
@@ -672,30 +596,16 @@ const POST_FIELDS = {
   authorAvatar: users.avatar,
 };
 
-// Re-derive live status from Twitch (never trust the stored flag alone) and
-// persist obvious flips so stale rows age out.
-async function withLiveStatus<T extends { id: string; type: string; twitchChannel: string | null; isLive: boolean; endedAt: Date | null }>(posts: T[]): Promise<T[]> {
-  const open = posts.filter((p) => p.type === "stream" && !p.endedAt && p.twitchChannel);
-  if (open.length === 0) return posts;
-  let live: Set<string>;
-  try {
-    live = await getLiveChannels(open.map((p) => p.twitchChannel as string));
-  } catch (error) {
-    console.error("[Social] twitch live check failed:", error);
-    return posts; // degrade to stored flags rather than erroring the feed
-  }
-  const flips: string[] = [];
-  for (const p of open) {
-    const actuallyLive = live.has((p.twitchChannel as string).toLowerCase());
-    if (p.isLive && !actuallyLive) flips.push(p.id);
-    p.isLive = actuallyLive;
-  }
-  if (flips.length > 0) {
-    Promise.resolve(
-      db.update(ridePosts).set({ isLive: false }).where(inArray(ridePosts.id, flips)),
-    ).catch(() => {});
-  }
-  return posts;
+// Agora stream lifecycle is fully server-managed (start/stop via host-grace
+// loop), so the DB isLive flag + endedAt are authoritative — no external
+// API check needed. Filter out stale rows where endedAt was set.
+function withLiveStatus<T extends { id: string; type: string; isLive: boolean; endedAt: Date | null }>(posts: T[]): T[] {
+  return posts.map((p) => {
+    if (p.type === "stream" && p.endedAt) {
+      return { ...p, isLive: false };
+    }
+    return p;
+  });
 }
 
 // tab=following (default): me + people I follow, newest first.
@@ -743,7 +653,7 @@ socialRouter.get("/api/social/feed", async (req, res) => {
         .limit(50);
     }
 
-    const withLive = await withLiveStatus(posts as any);
+    const withLive = withLiveStatus(posts as any);
     let full: any[] = await attachSocialMeta(withLive as any, session.userId);
 
     if (tab === "foryou") {
@@ -832,7 +742,7 @@ socialRouter.get("/api/social/suggested-creators", async (req, res) => {
 
     const [userRows, badgeMap, recentPosts] = await Promise.all([
       db
-        .select({ id: users.id, name: users.name, avatar: users.avatar, twitchChannel: users.twitchChannel })
+        .select({ id: users.id, name: users.name, avatar: users.avatar })
         .from(users)
         .where(inArray(users.id, ids)),
       computeBadges(ids),
@@ -866,7 +776,6 @@ socialRouter.get("/api/social/suggested-creators", async (req, res) => {
           id: u.id,
           name: u.name,
           avatar: u.avatar,
-          twitchChannel: u.twitchChannel,
           followers: followersById.get(u.id) || 0,
           rides: postsById.get(u.id) || 0,
           photoUrl: photoBy.get(u.id) || null,
@@ -886,7 +795,7 @@ socialRouter.get("/api/social/suggested-creators", async (req, res) => {
 // ---------------------------------------------------------------------------
 // PUBLIC live broadcasts for the landing page. Streaming is an explicitly
 // public act (the Twitch channel is a public broadcast), so this exposes only
-// name / avatar / twitchChannel / city / country — never coordinates, phones
+// name / avatar / city / country — never coordinates, phones
 // or ride details. Cached so public traffic can't hammer the DB or Twitch.
 // ---------------------------------------------------------------------------
 
@@ -903,22 +812,16 @@ socialRouter.get("/api/network/live-streams", async (_req, res) => {
       .select(POST_FIELDS)
       .from(ridePosts)
       .innerJoin(users, eq(users.id, ridePosts.userId))
-      // Twitch broadcasts + in-app (Agora) streams, both watchable on the
-      // landing page. Twitch live status is re-derived from the Twitch API;
-      // Agora lifecycle is server-managed (host-grace loop), so the DB row
-      // is authoritative for those.
       .where(and(
         eq(ridePosts.type, "stream"),
         isNull(ridePosts.endedAt),
-        inArray(ridePosts.streamProvider, ["twitch", "agora"]),
+        eq(ridePosts.streamProvider, "agora"),
+        eq(ridePosts.isLive, true),
       ))
       .orderBy(desc(ridePosts.createdAt))
       .limit(100);
 
-    const twitchPosts = posts.filter((p: any) => p.streamProvider === "twitch");
-    const agoraPosts = posts.filter((p: any) => p.streamProvider === "agora" && p.isLive);
-    const liveTwitch = (await withLiveStatus(twitchPosts as any)).filter((p: any) => p.isLive);
-    const live = [...liveTwitch, ...agoraPosts];
+    const live = posts;
 
     // Map the stored city name to its country via the cities table.
     let countryByCity = new Map<string, string>();
@@ -932,14 +835,11 @@ socialRouter.get("/api/network/live-streams", async (_req, res) => {
     }
 
     const streams = live.map((p: any) => ({
-      provider: p.streamProvider === "agora" ? "agora" : "twitch",
+      provider: "agora",
       name: p.authorName,
       avatar: p.authorAvatar,
-      twitchChannel: p.streamProvider === "twitch" ? p.twitchChannel : null,
-      // postId is only needed (and only exposed) for in-app streams — the
-      // landing page trades it for an audience-only viewer token.
-      postId: p.streamProvider === "agora" ? p.id : undefined,
-      viewerCount: p.streamProvider === "agora" ? getAgoraViewerCount(p.id) : undefined,
+      postId: p.id,
+      viewerCount: getAgoraViewerCount(p.id),
       city: p.cityName || null,
       country: (p.cityName && countryByCity.get(p.cityName)) || null,
       startedAt: p.createdAt,
@@ -967,8 +867,14 @@ socialRouter.get("/api/social/live", async (req, res) => {
       .orderBy(desc(ridePosts.createdAt))
       .limit(50);
 
-    const refreshed = await withLiveStatus(posts as any);
-    res.json({ streams: refreshed.filter((p: any) => p.isLive) });
+    const refreshed = withLiveStatus(posts as any);
+    const live = refreshed.filter((p: any) => p.isLive);
+    res.json({
+      streams: live.map((p: any) => ({
+        ...p,
+        viewerCount: p.streamProvider === "agora" ? getAgoraViewerCount(p.id) : 0,
+      })),
+    });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }
@@ -1200,6 +1106,26 @@ socialRouter.delete("/api/social/posts/:id/react", async (req, res) => {
       .delete(ridePostReactions)
       .where(and(eq(ridePostReactions.postId, req.params.id), eq(ridePostReactions.userId, user.id)));
     res.json(await reactionSummary(req.params.id, user.id));
+  } catch (error: any) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Delete a post — author only; cascades reactions and comments.
+socialRouter.delete("/api/social/posts/:id", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const [post] = await db
+      .select({ id: ridePosts.id, userId: ridePosts.userId })
+      .from(ridePosts)
+      .where(eq(ridePosts.id, req.params.id));
+    if (!post) return res.status(404).json({ error: "Post not found" });
+    if (post.userId !== user.id) return res.status(403).json({ error: "Not your post" });
+    await db.delete(ridePostReactions).where(eq(ridePostReactions.postId, post.id));
+    await db.delete(ridePostComments).where(eq(ridePostComments.postId, post.id));
+    await db.delete(ridePosts).where(eq(ridePosts.id, post.id));
+    res.json({ ok: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });
   }

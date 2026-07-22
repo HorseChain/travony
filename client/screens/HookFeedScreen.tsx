@@ -637,6 +637,13 @@ export default function HookFeedScreen() {
   const insets = useSafeAreaInsets();
   const qc = useQueryClient();
 
+  // Logged-in users skip the hook feed — go straight to the assistant
+  useEffect(() => {
+    if (isAuthenticated) {
+      navigation.replace("AssistantHome", {});
+    }
+  }, [isAuthenticated, navigation]);
+
   // Delegate booking params to AssistantHome
   useEffect(() => {
     const params = route.params as any;

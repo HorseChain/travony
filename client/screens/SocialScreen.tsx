@@ -7,6 +7,7 @@ import {
   RefreshControl,
   ScrollView,
   Image,
+  Alert,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
@@ -20,6 +21,8 @@ import Animated, {
   useAnimatedStyle,
   withSpring,
   withTiming,
+  withRepeat,
+  withSequence,
 } from "react-native-reanimated";
 
 import { ThemedText } from "@/components/ThemedText";
@@ -70,7 +73,8 @@ const REACTIONS: {
 interface SocialPost {
   id: string;
   type: "published" | "stream";
-  twitchChannel: string | null;
+  streamProvider: string | null;
+  viewerCount?: number;
   caption: string | null;
   photoUrl: string | null;
   cityName: string | null;
@@ -98,7 +102,6 @@ interface Creator {
   id: string;
   name: string;
   avatar: string | null;
-  twitchChannel: string | null;
   followers: number;
   rides: number;
   photoUrl: string | null;
@@ -186,6 +189,36 @@ function Avatar({ uri, name, size }: { uri: string | null; name: string; size: n
 // Top bar — LIVE | Explore Following For You | Search
 // ---------------------------------------------------------------------------
 
+function LiveTvButton({ liveCount, onLive }: { liveCount: number; onLive: () => void }) {
+  const { theme } = useTheme();
+  const pulse = useSharedValue(1);
+
+  useEffect(() => {
+    if (liveCount > 0) {
+      pulse.value = withRepeat(
+        withSequence(withTiming(0.55, { duration: 700 }), withTiming(1, { duration: 700 })),
+        -1,
+        false,
+      );
+    } else {
+      pulse.value = 1;
+    }
+  }, [liveCount, pulse]);
+
+  const pillStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <Pressable onPress={onLive} hitSlop={10} style={[styles.topBarIcon, { height: 44, justifyContent: "center", alignItems: "center" }]}>
+      <Ionicons name="tv-outline" size={22} color={liveCount > 0 ? Colors.liveRed : theme.text} />
+      {liveCount > 0 ? (
+        <Animated.View style={[styles.livePill, pillStyle]}>
+          <ThemedText style={styles.livePillText}>LIVE</ThemedText>
+        </Animated.View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 function TopBar({
   tab,
   onTab,
@@ -236,10 +269,7 @@ function TopBar({
       ]}
     >
       <View style={styles.topBarRow}>
-        <Pressable onPress={onLive} hitSlop={10} style={styles.topBarIcon}>
-          <Ionicons name="tv-outline" size={23} color={theme.text} />
-          {liveCount > 0 ? <View style={[styles.liveIndicatorDot, { borderColor: theme.backgroundRoot }]} /> : null}
-        </Pressable>
+        <LiveTvButton liveCount={liveCount} onLive={onLive} />
 
         <View style={styles.tabsWrap}>
           {TABS.map((t) => {
@@ -287,6 +317,16 @@ function TopBar({
 
 function LiveCard({ post, onPress }: { post: SocialPost; onPress: () => void }) {
   const { theme } = useTheme();
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(withTiming(0.4, { duration: 600 }), withTiming(1, { duration: 600 })),
+      -1,
+      false,
+    );
+  }, [pulse]);
+  const dotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
   return (
     <Pressable
       style={({ pressed }) => [
@@ -297,8 +337,8 @@ function LiveCard({ post, onPress }: { post: SocialPost; onPress: () => void }) 
     >
       <View style={styles.liveCardTop}>
         <Avatar uri={post.authorAvatar} name={post.authorName} size={36} />
-        <View style={[styles.liveBadge, { backgroundColor: theme.error }]}>
-          <View style={styles.liveDot} />
+        <View style={[styles.liveBadge, { backgroundColor: Colors.liveRed }]}>
+          <Animated.View style={[styles.liveDot, dotStyle]} />
           <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
         </View>
       </View>
@@ -308,9 +348,14 @@ function LiveCard({ post, onPress }: { post: SocialPost; onPress: () => void }) 
       <ThemedText style={[styles.liveCardCity, { color: theme.textSecondary }]} numberOfLines={1}>
         {post.cityName ? `Riding in ${post.cityName}` : "On a ride"}
       </ThemedText>
+      {(post.viewerCount ?? 0) > 0 ? (
+        <ThemedText style={[styles.liveCardCity, { color: theme.textMuted }]} numberOfLines={1}>
+          {post.viewerCount} watching
+        </ThemedText>
+      ) : null}
       <View style={[styles.liveWatchRow, { borderTopColor: theme.border }]}>
         <Ionicons name="play-circle" size={16} color={theme.primary} />
-        <ThemedText style={[styles.liveWatchText, { color: theme.primary }]}>Watch</ThemedText>
+        <ThemedText style={[styles.liveWatchText, { color: theme.primary }]}>Watch live</ThemedText>
       </View>
     </Pressable>
   );
@@ -445,17 +490,22 @@ function FeedCard({
   onReact,
   onOpenComments,
   onGift,
+  currentUserId,
+  onDelete,
 }: {
   post: SocialPost;
   onWatch: () => void;
   onReact: (post: SocialPost, type: string) => void;
   onOpenComments: (post: SocialPost) => void;
   onGift?: (post: SocialPost) => void;
+  currentUserId?: string;
+  onDelete?: (post: SocialPost) => void;
 }) {
   const { theme } = useTheme();
   const isStream = post.type === "stream";
   const streamOver = isStream && (!!post.endedAt || !post.isLive);
   const distance = post.distanceKm ? parseFloat(post.distanceKm) : null;
+  const isAuthor = !!currentUserId && currentUserId === post.authorId;
 
   return (
     <Card style={styles.feedCard}>
@@ -474,71 +524,67 @@ function FeedCard({
             <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
           </View>
         ) : null}
-      </View>
-
-      <View style={styles.feedBody}>
-        <View style={[styles.feedIconWrap, { backgroundColor: theme.backgroundSecondary }]}>
-          <Ionicons
-            name={isStream ? "videocam-outline" : "car-outline"}
-            size={18}
-            color={theme.primary}
-          />
-        </View>
-        <View style={{ flex: 1 }}>
-          <ThemedText style={styles.feedTitle}>
-            {isStream
-              ? streamOver
-                ? "Streamed a ride"
-                : "Streaming a ride live"
-              : "Completed a ride"}
-          </ThemedText>
-          <ThemedText style={[styles.feedMeta, { color: theme.textSecondary }]}>
-            {[post.cityName, distance ? `${distance.toFixed(1)} km` : null]
-              .filter(Boolean)
-              .join(" · ") || "On the Travony network"}
-          </ThemedText>
-        </View>
-      </View>
-
-      {post.caption ? (
-        <ThemedText style={styles.feedCaption}>{post.caption}</ThemedText>
-      ) : null}
-
-      {post.photoUrl ? (
-        <Image source={{ uri: post.photoUrl }} style={styles.feedPhoto} resizeMode="cover" />
-      ) : null}
-
-      {isStream && post.twitchChannel ? (
-        post.isLive ? (
+        {isAuthor && onDelete ? (
           <Pressable
-            style={({ pressed }) => [
-              styles.watchButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
-            ]}
-            onPress={onWatch}
+            hitSlop={10}
+            onPress={() => onDelete(post)}
+            style={{ paddingLeft: Spacing.sm }}
           >
-            <Ionicons name="play" size={14} color={theme.textOnPrimary} />
-            <ThemedText style={styles.watchButtonText}>Watch live</ThemedText>
+            <Ionicons name="ellipsis-horizontal" size={20} color={theme.textMuted} />
           </Pressable>
-        ) : (
-          <Pressable
-            style={({ pressed }) => [
-              styles.watchButton,
-              {
-                backgroundColor: theme.backgroundSecondary,
-                borderWidth: 1,
-                borderColor: theme.border,
-                opacity: pressed ? 0.8 : 1,
-              },
-            ]}
-            onPress={onWatch}
-          >
-            <Ionicons name="logo-twitch" size={14} color={theme.primary} />
-            <ThemedText style={[styles.watchButtonText, { color: theme.text }]}>
-              View on Twitch
+        ) : null}
+      </View>
+
+      <Pressable onPress={() => onOpenComments(post)} style={{ flexShrink: 1 }}>
+        <View style={styles.feedBody}>
+          <View style={[styles.feedIconWrap, { backgroundColor: theme.backgroundSecondary }]}>
+            <Ionicons
+              name={isStream ? "videocam-outline" : "car-outline"}
+              size={18}
+              color={theme.primary}
+            />
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={styles.feedTitle}>
+              {isStream
+                ? streamOver
+                  ? "Streamed a ride"
+                  : "Streaming a ride live"
+                : "Completed a ride"}
             </ThemedText>
-          </Pressable>
-        )
+            <ThemedText style={[styles.feedMeta, { color: theme.textSecondary }]}>
+              {[post.cityName, distance ? `${distance.toFixed(1)} km` : null]
+                .filter(Boolean)
+                .join(" · ") || "On the Travony network"}
+            </ThemedText>
+          </View>
+        </View>
+
+        {post.caption ? (
+          <ThemedText style={styles.feedCaption}>{post.caption}</ThemedText>
+        ) : null}
+
+        {post.photoUrl ? (
+          <Image source={{ uri: post.photoUrl }} style={styles.feedPhoto} resizeMode="cover" />
+        ) : null}
+      </Pressable>
+
+      {isStream && post.isLive ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.watchButton,
+            { backgroundColor: Colors.liveRed, opacity: pressed ? 0.8 : 1 },
+          ]}
+          onPress={onWatch}
+        >
+          <Ionicons name="play" size={14} color="#fff" />
+          <ThemedText style={[styles.watchButtonText, { color: "#fff" }]}>Watch live</ThemedText>
+          {(post.viewerCount ?? 0) > 0 ? (
+            <ThemedText style={[styles.watchButtonText, { color: "rgba(255,255,255,0.75)", fontSize: 12 }]}>
+              · {post.viewerCount} watching
+            </ThemedText>
+          ) : null}
+        </Pressable>
       ) : null}
 
       <View style={[styles.reactionBar, { borderTopColor: theme.border }]}>
@@ -893,6 +939,7 @@ function FeedPage({
   openComments,
   onGift,
   currentUserId,
+  onDelete,
   creators,
   followedIds,
   onFollow,
@@ -912,6 +959,7 @@ function FeedPage({
   openComments: (post: SocialPost) => void;
   onGift: (post: SocialPost) => void;
   currentUserId?: string;
+  onDelete: (post: SocialPost) => void;
   creators: Creator[];
   followedIds: Set<string>;
   onFollow: (id: string) => void;
@@ -1007,6 +1055,8 @@ function FeedPage({
           onReact={onReact}
           onOpenComments={openComments}
           onGift={currentUserId && item.authorId === currentUserId ? undefined : onGift}
+          currentUserId={currentUserId}
+          onDelete={onDelete}
         />
       )}
       ListFooterComponent={
@@ -1142,18 +1192,8 @@ export default function SocialScreen() {
   const creators = suggestedQuery.data?.creators || [];
 
   const openStream = (post: SocialPost) => {
-    // In-app (Agora) streams open the native viewer; Twitch streams keep
-    // the existing WebView player.
-    if ((post as any).streamProvider === "agora") {
-      navigation.navigate("AgoraStreamViewer", {
-        postId: post.id,
-        name: post.authorName,
-      });
-      return;
-    }
-    if (!post.twitchChannel) return;
-    navigation.navigate("StreamViewer", {
-      channel: post.twitchChannel,
+    navigation.navigate("AgoraStreamViewer", {
+      postId: post.id,
       name: post.authorName,
     });
   };
@@ -1179,6 +1219,30 @@ export default function SocialScreen() {
   const handleGift = (post: SocialPost) => {
     if (user?.id && post.authorId === user.id) return;
     setGiftPost(post);
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: async (postId: string) =>
+      apiRequest(`/api/social/posts/${postId}`, { method: "DELETE" }),
+    onSuccess: (_result, postId) => {
+      for (const key of [FEED_KEYS.following, FEED_KEYS.foryou]) {
+        queryClient.setQueryData<{ posts: SocialPost[] }>([key], (prev) => {
+          if (!prev) return prev;
+          return { ...prev, posts: prev.posts.filter((p) => p.id !== postId) };
+        });
+      }
+    },
+  });
+
+  const handleDelete = (post: SocialPost) => {
+    Alert.alert("Delete post", "Remove this post from your feed?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => deleteMutation.mutate(post.id),
+      },
+    ]);
   };
 
   const onLivePress = () => {
@@ -1226,6 +1290,7 @@ export default function SocialScreen() {
             openComments={openComments}
             onGift={handleGift}
             currentUserId={user?.id}
+            onDelete={handleDelete}
             creators={creators}
             followedIds={followedIds}
             onFollow={handleFollow}
@@ -1280,15 +1345,18 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  liveIndicatorDot: {
-    position: "absolute",
-    top: 5,
-    right: 4,
-    width: 9,
-    height: 9,
-    borderRadius: 5,
-    backgroundColor: "#FF3B5C",
-    borderWidth: 1.5,
+  livePill: {
+    backgroundColor: Colors.liveRed,
+    borderRadius: 3,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    marginTop: 2,
+  },
+  livePillText: {
+    color: "#fff",
+    fontSize: 9,
+    fontWeight: "800",
+    letterSpacing: 0.8,
   },
   tabsWrap: {
     flexDirection: "row",

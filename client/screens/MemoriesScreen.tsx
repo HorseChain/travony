@@ -1,26 +1,33 @@
-import React, { useState } from "react";
+import React, { useState, useCallback, useRef } from "react";
 import {
   View,
   StyleSheet,
   FlatList,
   Pressable,
-  RefreshControl,
-  Image,
   Modal,
   TextInput,
   ActivityIndicator,
   Alert,
   Platform,
+  Dimensions,
+  ViewToken,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useTabBarInset } from "@/hooks/useTabBarInset";
-import { useHeaderHeight } from "@react-navigation/elements";
+import { Image } from "expo-image";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { LinearGradient } from "expo-linear-gradient";
 import * as ImagePicker from "expo-image-picker";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import Animated, {
+  FadeIn,
+  FadeInDown,
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+} from "react-native-reanimated";
 
 import { ThemedText } from "@/components/ThemedText";
-import { Card } from "@/components/Card";
 import RideMap from "@/components/RideMap";
 import LiteTripView from "@/components/LiteTripView";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -28,6 +35,8 @@ import { useTheme } from "@/hooks/useTheme";
 import { useLiteMode } from "@/hooks/useLiteMode";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+
+const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("screen");
 
 interface Memory {
   rideId: string;
@@ -60,14 +69,6 @@ interface MemoriesResponse {
   memories: Memory[];
 }
 
-function notify(title: string, message: string) {
-  if (Platform.OS === "web") {
-    window.alert(`${title}\n\n${message}`);
-  } else {
-    Alert.alert(title, message);
-  }
-}
-
 function formatDate(iso: string | null): string {
   if (!iso) return "";
   return new Date(iso).toLocaleDateString(undefined, {
@@ -85,7 +86,12 @@ function formatMoney(amount: number | null, currency: string): string | null {
 function Avatar({ uri, name, size }: { uri: string | null; name: string; size: number }) {
   const { theme } = useTheme();
   if (uri) {
-    return <Image source={{ uri }} style={{ width: size, height: size, borderRadius: size / 2 }} />;
+    return (
+      <Image
+        source={{ uri }}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+      />
+    );
   }
   return (
     <View
@@ -93,180 +99,173 @@ function Avatar({ uri, name, size }: { uri: string | null; name: string; size: n
         width: size,
         height: size,
         borderRadius: size / 2,
-        backgroundColor: theme.backgroundSecondary,
+        backgroundColor: "rgba(255,255,255,0.25)",
         alignItems: "center",
         justifyContent: "center",
       }}
     >
-      <ThemedText style={{ fontWeight: "600", fontSize: size * 0.4 }}>
+      <ThemedText style={{ fontWeight: "600", fontSize: size * 0.4, color: "#fff" }}>
         {(name || "?").charAt(0).toUpperCase()}
       </ThemedText>
     </View>
   );
 }
 
-function HighlightBanner({ data }: { data: MemoriesResponse }) {
-  const { theme } = useTheme();
-  const { monthly, onThisDay } = data.highlight;
-  if (!monthly && !onThisDay) return null;
-
-  return (
-    <View style={styles.highlightWrap}>
-      {monthly ? (
-        <View style={[styles.highlightCard, { backgroundColor: theme.primary }]}>
-          <ThemedText style={styles.highlightLabel}>This month</ThemedText>
-          <ThemedText style={styles.highlightBig}>
-            {monthly.rides} {monthly.rides === 1 ? "ride" : "rides"}
-          </ThemedText>
-          <ThemedText style={styles.highlightSub}>
-            {[
-              monthly.distanceKm ? `${monthly.distanceKm.toFixed(1)} km` : null,
-              formatMoney(monthly.amount, data.currency),
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </ThemedText>
-        </View>
-      ) : null}
-      {onThisDay ? (
-        <View style={[styles.highlightCard, { backgroundColor: theme.backgroundDefault }]}>
-          <View style={styles.onThisDayTop}>
-            <Ionicons name="time-outline" size={16} color={theme.primary} />
-            <ThemedText style={[styles.highlightLabel, { color: theme.textSecondary }]}>
-              On this day
-            </ThemedText>
-          </View>
-          <ThemedText style={[styles.highlightBig, { color: theme.text }]}>
-            {onThisDay.yearsAgo} {onThisDay.yearsAgo === 1 ? "year" : "years"} ago
-          </ThemedText>
-          <ThemedText style={[styles.highlightSub, { color: theme.textSecondary }]}>
-            {onThisDay.cityName ? `You rode in ${onThisDay.cityName}` : "You took a ride"}
-          </ThemedText>
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function MemoryCard({ memory, onShare }: { memory: Memory; onShare: (m: Memory) => void }) {
-  const { theme } = useTheme();
+function MemorySlide({
+  memory,
+  itemHeight,
+  isVisible,
+  onShare,
+}: {
+  memory: Memory;
+  itemHeight: number;
+  isVisible: boolean;
+  onShare: (m: Memory) => void;
+}) {
   const { liteMode } = useLiteMode();
 
-  const meta = [
-    memory.cityName,
-    memory.distanceKm ? `${memory.distanceKm.toFixed(1)} km` : null,
-    formatMoney(memory.fare, memory.currency),
-  ]
-    .filter(Boolean)
-    .join(" · ");
-
-  const cityLabel = memory.cityName || "This ride";
   const hasCoords =
     memory.pickup.lat != null &&
     memory.pickup.lng != null &&
     memory.dropoff.lat != null &&
     memory.dropoff.lng != null;
 
-  return (
-    <Card style={styles.memoryCard}>
-      <View style={styles.memoryTop}>
-        <ThemedText style={styles.memoryDate}>{formatDate(memory.date)}</ThemedText>
-        <View style={[styles.roleChip, { backgroundColor: theme.backgroundSecondary }]}>
-          <Ionicons
-            name={memory.role === "driver" ? "car-sport-outline" : "person-outline"}
-            size={12}
-            color={theme.primary}
-          />
-          <ThemedText style={styles.roleChipText}>
-            {memory.role === "driver" ? "Driver" : "Rider"}
-          </ThemedText>
-        </View>
-      </View>
+  const city = memory.cityName || "Your ride";
+  const distance = memory.distanceKm ? `${memory.distanceKm.toFixed(1)} km` : null;
+  const fare = formatMoney(memory.fare, memory.currency);
+  const date = formatDate(memory.date);
 
-      <View style={styles.mapWrap}>
-        {liteMode || !hasCoords ? (
-          <LiteTripView
-            pickupAddress={cityLabel}
-            dropoffAddress={cityLabel}
-            distance={memory.distanceKm}
-            height={140}
-          />
-        ) : (
+  return (
+    <View style={[styles.slide, { height: itemHeight }]}>
+      {/* Background — map or dark gradient */}
+      <View style={StyleSheet.absoluteFill}>
+        {hasCoords && !liteMode ? (
           <RideMap
-            pickupLocation={{ lat: memory.pickup.lat as number, lng: memory.pickup.lng as number }}
-            dropoffLocation={{ lat: memory.dropoff.lat as number, lng: memory.dropoff.lng as number }}
+            pickupLocation={{
+              lat: memory.pickup.lat as number,
+              lng: memory.pickup.lng as number,
+            }}
+            dropoffLocation={{
+              lat: memory.dropoff.lat as number,
+              lng: memory.dropoff.lng as number,
+            }}
             showRoute
             interactive={false}
-            height={140}
+            height={itemHeight}
+          />
+        ) : (
+          <LinearGradient
+            colors={["#0d1117", "#1a1f2e", "#0d1117"]}
+            style={StyleSheet.absoluteFill}
           />
         )}
+        {/* Always darken the map so text is readable */}
+        <LinearGradient
+          colors={["rgba(0,0,0,0.25)", "transparent", "rgba(0,0,0,0.75)"]}
+          style={StyleSheet.absoluteFill}
+          locations={[0, 0.4, 1]}
+        />
       </View>
 
-      <ThemedText style={[styles.memoryMeta, { color: theme.textSecondary }]}>
-        {meta || "A ride on the Travony network"}
-      </ThemedText>
+      {/* Top row — date + role chip */}
+      {isVisible ? (
+        <Animated.View entering={FadeIn.duration(300)} style={styles.topRow}>
+          <View style={styles.datePill}>
+            <ThemedText style={styles.datePillText}>{date}</ThemedText>
+          </View>
+          <View style={styles.rolePill}>
+            <Ionicons
+              name={memory.role === "driver" ? "car-sport-outline" : "person-outline"}
+              size={12}
+              color="#fff"
+            />
+            <ThemedText style={styles.rolePillText}>
+              {memory.role === "driver" ? "Driver" : "Rider"}
+            </ThemedText>
+          </View>
+        </Animated.View>
+      ) : null}
 
-      {(memory.isEvRide || memory.isPmgthRide) ? (
-        <View style={styles.tagRow}>
+      {/* Right sidebar — TikTok style */}
+      {isVisible ? (
+        <Animated.View entering={FadeInDown.delay(120).duration(350)} style={styles.sidebar}>
           {memory.isEvRide ? (
-            <View style={[styles.tag, { backgroundColor: theme.backgroundSecondary }]}>
-              <Ionicons name="flash-outline" size={12} color={theme.primary} />
-              <ThemedText style={styles.tagText}>EV</ThemedText>
+            <View style={styles.sideAction}>
+              <Ionicons name="flash" size={26} color="#4ade80" />
+              <ThemedText style={styles.sideLabel}>EV</ThemedText>
             </View>
           ) : null}
           {memory.isPmgthRide ? (
-            <View style={[styles.tag, { backgroundColor: theme.backgroundSecondary }]}>
-              <Ionicons name="home-outline" size={12} color={theme.primary} />
-              <ThemedText style={styles.tagText}>Going Home</ThemedText>
+            <View style={styles.sideAction}>
+              <Ionicons name="home" size={26} color="#60a5fa" />
+              <ThemedText style={styles.sideLabel}>Home</ThemedText>
             </View>
           ) : null}
-        </View>
-      ) : null}
-
-      <View style={styles.memoryBottom}>
-        {memory.counterpart ? (
-          <View style={styles.counterpart}>
-            <Avatar uri={memory.counterpart.avatar} name={memory.counterpart.name} size={28} />
-            <ThemedText style={[styles.counterpartName, { color: theme.textSecondary }]} numberOfLines={1}>
-              with {memory.counterpart.name}
-            </ThemedText>
-          </View>
-        ) : (
-          <View style={{ flex: 1 }} />
-        )}
-
-        {memory.hasPosted ? (
-          <View style={styles.postedBadge}>
-            <Ionicons name="checkmark-circle" size={16} color={theme.primary} />
-            <ThemedText style={[styles.postedText, { color: theme.primary }]}>On your feed</ThemedText>
-          </View>
-        ) : (
           <Pressable
-            style={({ pressed }) => [
-              styles.shareButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
-            ]}
+            style={({ pressed }) => [styles.sideAction, { opacity: pressed ? 0.7 : 1 }]}
             onPress={() => onShare(memory)}
           >
-            <Ionicons name="share-social-outline" size={14} color={Colors.light.textOnPrimary} />
-            <ThemedText style={styles.shareButtonText}>Share</ThemedText>
+            {memory.hasPosted ? (
+              <>
+                <Ionicons name="checkmark-circle" size={30} color="#4ade80" />
+                <ThemedText style={styles.sideLabel}>Shared</ThemedText>
+              </>
+            ) : (
+              <>
+                <Ionicons name="share-social" size={30} color="#fff" />
+                <ThemedText style={styles.sideLabel}>Share</ThemedText>
+              </>
+            )}
           </Pressable>
-        )}
-      </View>
-    </Card>
+        </Animated.View>
+      ) : null}
+
+      {/* Bottom overlay */}
+      <LinearGradient
+        colors={["transparent", "rgba(0,0,0,0.85)"]}
+        style={styles.bottomGradient}
+        locations={[0, 1]}
+      >
+        {isVisible ? (
+          <Animated.View entering={FadeInDown.delay(80).duration(350)} style={styles.bottomContent}>
+            <ThemedText style={styles.cityName} numberOfLines={1}>
+              {city}
+            </ThemedText>
+            <ThemedText style={styles.statsLine}>
+              {[distance, fare].filter(Boolean).join(" · ") || "On the Travony network"}
+            </ThemedText>
+
+            {memory.counterpart ? (
+              <View style={styles.counterpartRow}>
+                <Avatar
+                  uri={memory.counterpart.avatar}
+                  name={memory.counterpart.name}
+                  size={28}
+                />
+                <ThemedText style={styles.counterpartName} numberOfLines={1}>
+                  with {memory.counterpart.name}
+                </ThemedText>
+              </View>
+            ) : null}
+          </Animated.View>
+        ) : null}
+      </LinearGradient>
+    </View>
   );
 }
 
 export default function MemoriesScreen() {
   const insets = useSafeAreaInsets();
   const tabBarInset = useTabBarInset();
-  const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
   const queryClient = useQueryClient();
+
+  const itemHeight = SCREEN_H - tabBarInset;
 
   const [shareMemory, setShareMemory] = useState<Memory | null>(null);
   const [caption, setCaption] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
+  const [visibleIndex, setVisibleIndex] = useState(0);
 
   const memoriesQuery = useQuery<MemoriesResponse>({
     queryKey: ["/api/social/memories"],
@@ -285,10 +284,13 @@ export default function MemoriesScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/social/memories"] });
       queryClient.invalidateQueries({ queryKey: ["/api/social/feed"] });
       closeShare();
-      notify("Shared", "Your ride memory is now on the feed.");
+      if (Platform.OS === "web") window.alert("Shared!\nYour ride memory is now on the feed.");
+      else Alert.alert("Shared", "Your ride memory is now on the feed.");
     },
     onError: (error: any) => {
-      notify("Share", error.message || "Could not share this memory");
+      const msg = error.message || "Could not share this memory";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Share", msg);
     },
   });
 
@@ -301,7 +303,8 @@ export default function MemoriesScreen() {
   const pickPhoto = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
-      notify("Permission needed", "Allow photo access to add a photo to your memory.");
+      if (Platform.OS === "web") window.alert("Allow photo access to add a photo to your memory.");
+      else Alert.alert("Permission needed", "Allow photo access to add a photo to your memory.");
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -315,48 +318,82 @@ export default function MemoriesScreen() {
     }
   };
 
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
+      if (viewableItems.length > 0 && viewableItems[0].index != null) {
+        setVisibleIndex(viewableItems[0].index);
+      }
+    },
+    [],
+  );
+  const viewabilityConfig = useRef({ itemVisiblePercentThreshold: 60 });
+
   const memories = memoriesQuery.data?.memories || [];
 
   return (
-    <View style={{ flex: 1, backgroundColor: theme.backgroundRoot }}>
-      <FlatList
-        contentContainerStyle={{
-          paddingTop: headerHeight + Spacing.lg,
-          paddingBottom: tabBarInset + Spacing.xl,
-          paddingHorizontal: Spacing.lg,
-        }}
-        scrollIndicatorInsets={{ bottom: tabBarInset }}
-        data={memories}
-        keyExtractor={(item) => item.rideId}
-        initialNumToRender={4}
-        maxToRenderPerBatch={4}
-        windowSize={5}
-        removeClippedSubviews
-        refreshControl={
-          <RefreshControl
-            refreshing={memoriesQuery.isRefetching}
-            onRefresh={() => memoriesQuery.refetch()}
-            tintColor={theme.primary}
-          />
-        }
-        ListHeaderComponent={
-          memoriesQuery.data ? <HighlightBanner data={memoriesQuery.data} /> : null
-        }
-        renderItem={({ item }) => <MemoryCard memory={item} onShare={setShareMemory} />}
-        ListEmptyComponent={
-          memoriesQuery.isLoading ? null : (
-            <View style={styles.emptyState}>
-              <Ionicons name="images-outline" size={48} color={theme.textMuted} />
-              <ThemedText style={styles.emptyTitle}>No memories yet</ThemedText>
-              <ThemedText style={[styles.emptyText, { color: theme.textSecondary }]}>
-                When you complete a ride, it becomes a memory here. Share the ones
-                you love to your network.
-              </ThemedText>
-            </View>
-          )
-        }
-      />
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      {memories.length > 0 ? (
+        <FlatList
+          data={memories}
+          keyExtractor={(item) => item.rideId}
+          pagingEnabled
+          snapToInterval={itemHeight}
+          decelerationRate="fast"
+          showsVerticalScrollIndicator={false}
+          onViewableItemsChanged={onViewableItemsChanged}
+          viewabilityConfig={viewabilityConfig.current}
+          renderItem={({ item, index }) => (
+            <MemorySlide
+              memory={item}
+              itemHeight={itemHeight}
+              isVisible={index === visibleIndex}
+              onShare={setShareMemory}
+            />
+          )}
+          getItemLayout={(_data, index) => ({
+            length: itemHeight,
+            offset: itemHeight * index,
+            index,
+          })}
+          initialNumToRender={2}
+          maxToRenderPerBatch={2}
+          windowSize={3}
+          removeClippedSubviews
+        />
+      ) : memoriesQuery.isLoading ? (
+        <View style={styles.emptyState}>
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : (
+        <View style={[styles.emptyState, { paddingBottom: tabBarInset }]}>
+          <Ionicons name="images-outline" size={52} color="rgba(255,255,255,0.3)" />
+          <ThemedText style={styles.emptyTitle}>No memories yet</ThemedText>
+          <ThemedText style={styles.emptyText}>
+            When you complete a ride, it shows up here. Share the ones you love to your network.
+          </ThemedText>
+        </View>
+      )}
 
+      {/* Scroll indicator dots */}
+      {memories.length > 1 ? (
+        <View style={[styles.dots, { top: insets.top + Spacing.md }]}>
+          {memories.slice(0, Math.min(memories.length, 8)).map((_, i) => (
+            <View
+              key={i}
+              style={[
+                styles.dot,
+                {
+                  backgroundColor:
+                    i === visibleIndex ? "#fff" : "rgba(255,255,255,0.35)",
+                  width: i === visibleIndex ? 18 : 6,
+                },
+              ]}
+            />
+          ))}
+        </View>
+      ) : null}
+
+      {/* Share modal */}
       <Modal
         visible={!!shareMemory}
         animationType="slide"
@@ -364,7 +401,12 @@ export default function MemoriesScreen() {
         onRequestClose={closeShare}
       >
         <View style={styles.modalBackdrop}>
-          <View style={[styles.modalSheet, { backgroundColor: theme.backgroundRoot, paddingBottom: insets.bottom + Spacing.lg }]}>
+          <View
+            style={[
+              styles.modalSheet,
+              { backgroundColor: theme.backgroundRoot, paddingBottom: insets.bottom + Spacing.lg },
+            ]}
+          >
             <KeyboardAwareScrollViewCompat
               contentContainerStyle={{ padding: Spacing.lg }}
               keyboardShouldPersistTaps="handled"
@@ -379,7 +421,11 @@ export default function MemoriesScreen() {
               <TextInput
                 style={[
                   styles.captionInput,
-                  { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border },
+                  {
+                    backgroundColor: theme.backgroundDefault,
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
                 ]}
                 placeholder="Say something about this ride (optional)"
                 placeholderTextColor={theme.textMuted}
@@ -415,7 +461,10 @@ export default function MemoriesScreen() {
               <Pressable
                 style={({ pressed }) => [
                   styles.publishButton,
-                  { backgroundColor: theme.primary, opacity: pressed || publishMutation.isPending ? 0.8 : 1 },
+                  {
+                    backgroundColor: theme.primary,
+                    opacity: pressed || publishMutation.isPending ? 0.8 : 1,
+                  },
                 ]}
                 onPress={() => publishMutation.mutate()}
                 disabled={publishMutation.isPending}
@@ -424,7 +473,11 @@ export default function MemoriesScreen() {
                   <ActivityIndicator color={Colors.light.textOnPrimary} />
                 ) : (
                   <>
-                    <Ionicons name="share-social-outline" size={16} color={Colors.light.textOnPrimary} />
+                    <Ionicons
+                      name="share-social-outline"
+                      size={16}
+                      color={Colors.light.textOnPrimary}
+                    />
                     <ThemedText style={styles.publishButtonText}>Share to feed</ThemedText>
                   </>
                 )}
@@ -438,136 +491,126 @@ export default function MemoriesScreen() {
 }
 
 const styles = StyleSheet.create({
-  highlightWrap: {
-    flexDirection: "row",
-    gap: Spacing.md,
-    marginBottom: Spacing.xl,
-  },
-  highlightCard: {
-    flex: 1,
-    borderRadius: BorderRadius.lg,
-    padding: Spacing.lg,
-    minHeight: 104,
-    justifyContent: "center",
-  },
-  onThisDayTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-  },
-  highlightLabel: {
-    ...Typography.smallBold,
-    color: "rgba(255,255,255,0.85)",
-  },
-  highlightBig: {
-    ...Typography.h3,
-    color: Colors.light.textOnPrimary,
-    marginTop: 4,
-  },
-  highlightSub: {
-    ...Typography.small,
-    color: "rgba(255,255,255,0.9)",
-    marginTop: 2,
-  },
-  memoryCard: {
-    marginBottom: Spacing.lg,
-    padding: Spacing.lg,
-  },
-  memoryTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: Spacing.md,
-  },
-  memoryDate: {
-    ...Typography.bodyBold,
-  },
-  roleChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: BorderRadius.full,
-  },
-  roleChipText: {
-    ...Typography.captionBold,
-  },
-  mapWrap: {
-    height: 140,
-    borderRadius: BorderRadius.md,
+  slide: {
+    width: SCREEN_W,
+    backgroundColor: "#000",
     overflow: "hidden",
   },
-  memoryMeta: {
-    ...Typography.small,
-    marginTop: Spacing.md,
-  },
-  tagRow: {
-    flexDirection: "row",
-    gap: Spacing.xs,
-    marginTop: Spacing.sm,
-  },
-  tag: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: Spacing.sm,
-    paddingVertical: 3,
-    borderRadius: BorderRadius.full,
-  },
-  tagText: {
-    ...Typography.captionBold,
-  },
-  memoryBottom: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginTop: Spacing.md,
-  },
-  counterpart: {
+  topRow: {
+    position: "absolute",
+    top: Spacing["3xl"],
+    left: Spacing.lg,
+    right: Spacing.lg,
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    flex: 1,
-    marginRight: Spacing.md,
+    zIndex: 10,
   },
-  counterpartName: {
-    ...Typography.small,
-    flexShrink: 1,
+  datePill: {
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 4,
   },
-  postedBadge: {
+  datePillText: {
+    ...Typography.caption,
+    color: "#fff",
+  },
+  rolePill: {
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
   },
-  postedText: {
-    ...Typography.smallBold,
+  rolePillText: {
+    ...Typography.caption,
+    color: "#fff",
   },
-  shareButton: {
+  sidebar: {
+    position: "absolute",
+    right: Spacing.lg,
+    bottom: 140,
+    alignItems: "center",
+    gap: Spacing.xl,
+    zIndex: 10,
+  },
+  sideAction: {
+    alignItems: "center",
+    gap: 4,
+  },
+  sideLabel: {
+    ...Typography.caption,
+    color: "#fff",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  bottomGradient: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 80,
+    paddingBottom: Spacing.xl,
+    paddingHorizontal: Spacing.xl,
+  },
+  bottomContent: {
+    gap: Spacing.sm,
+  },
+  cityName: {
+    ...Typography.h2,
+    color: "#fff",
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  statsLine: {
+    ...Typography.body,
+    color: "rgba(255,255,255,0.85)",
+  },
+  counterpartRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    paddingHorizontal: Spacing.lg,
-    height: 36,
-    borderRadius: BorderRadius.full,
+    gap: Spacing.sm,
+    marginTop: 2,
   },
-  shareButtonText: {
-    ...Typography.smallHeavy,
-    color: Colors.light.textOnPrimary,
+  counterpartName: {
+    ...Typography.small,
+    color: "rgba(255,255,255,0.8)",
+    flexShrink: 1,
+  },
+  dots: {
+    position: "absolute",
+    right: Spacing.md,
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 5,
+    zIndex: 20,
+  },
+  dot: {
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#fff",
   },
   emptyState: {
+    flex: 1,
     alignItems: "center",
-    paddingTop: Spacing["3xl"],
-    paddingHorizontal: Spacing.xl,
+    justifyContent: "center",
+    gap: Spacing.md,
+    paddingHorizontal: Spacing["3xl"],
   },
   emptyTitle: {
     ...Typography.h4,
-    marginTop: Spacing.lg,
+    color: "#fff",
+    textAlign: "center",
   },
   emptyText: {
     ...Typography.body,
+    color: "rgba(255,255,255,0.6)",
     textAlign: "center",
-    marginTop: Spacing.sm,
   },
   modalBackdrop: {
     flex: 1,
