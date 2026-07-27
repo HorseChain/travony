@@ -4,9 +4,10 @@ import { db } from "./db";
 import { storage } from "./storage";
 import {
   hubs, hubCheckIns, evDemandSignals,
-  drivers, vehicles, users,
+  drivers, vehicles, users, ridePosts, rides,
 } from "@shared/schema";
 import { eq, and, gte, desc, sql, isNull, count } from "drizzle-orm";
+import { getAgoraViewerCount } from "./agoraStreaming";
 
 const router = Router();
 
@@ -319,6 +320,57 @@ router.get("/api/fleet/dashboard/dispatch-suggestions", async (req: Request, res
     res.json({ suggestions: scored });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to compute dispatch suggestions";
+    res.status(500).json({ error: message });
+  }
+});
+
+// GET /api/fleet/dashboard/live-streams — all live Agora streams for this fleet
+// Returns every stream whose driver belongs to the requesting fleet owner.
+// Admins see all streams across every fleet.
+router.get("/api/fleet/dashboard/live-streams", async (req: Request, res: Response) => {
+  try {
+    const session = await getSessionUser(req);
+    if (denyAccess(session, res)) return;
+    const fleetSession = session as SessionUser;
+
+    const baseConditions = and(
+      eq(ridePosts.type, "stream"),
+      eq(ridePosts.streamProvider, "agora"),
+      eq(ridePosts.isLive, true),
+      isNull(ridePosts.endedAt),
+    );
+
+    const rows = await db
+      .select({
+        postId: ridePosts.id,
+        driverName: users.name,
+        driverPhoto: users.avatar,
+        startedAt: ridePosts.createdAt,
+        rideStatus: rides.status,
+      })
+      .from(ridePosts)
+      .innerJoin(users, eq(users.id, ridePosts.userId))
+      .innerJoin(drivers, eq(drivers.userId, ridePosts.userId))
+      .leftJoin(rides, eq(rides.id, ridePosts.rideId))
+      .where(
+        fleetSession.role === "admin"
+          ? baseConditions
+          : and(baseConditions, eq(drivers.fleetOwnerId, fleetSession.userId)),
+      )
+      .orderBy(desc(ridePosts.createdAt));
+
+    const streams = rows.map((r) => ({
+      postId: r.postId,
+      driverName: r.driverName ?? "Driver",
+      driverPhoto: r.driverPhoto ?? null,
+      startedAt: r.startedAt,
+      rideStatus: r.rideStatus ?? null,
+      viewerCount: getAgoraViewerCount(r.postId),
+    }));
+
+    res.json({ streams, total: streams.length });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to fetch live streams";
     res.status(500).json({ error: message });
   }
 });

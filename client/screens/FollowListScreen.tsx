@@ -15,7 +15,6 @@ interface FollowUser {
   id: string;
   name: string;
   avatar: string | null;
-  twitchChannel: string | null;
 }
 
 export default function FollowListScreen() {
@@ -60,11 +59,6 @@ export default function FollowListScreen() {
               <ThemedText style={styles.name} numberOfLines={1}>
                 {item.name}
               </ThemedText>
-              {item.twitchChannel ? (
-                <ThemedText style={[styles.meta, { color: theme.textMuted }]} numberOfLines={1}>
-                  twitch.tv/{item.twitchChannel}
-                </ThemedText>
-              ) : null}
             </View>
           </View>
         )}

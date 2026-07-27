@@ -17,6 +17,7 @@ import FindFriendsScreen from "@/screens/FindFriendsScreen";
 import ActivityCentreScreen from "@/screens/ActivityCentreScreen";
 import RewardsScreen from "@/screens/RewardsScreen";
 import FollowListScreen from "@/screens/FollowListScreen";
+import ClaudeAgentScreen from "@/screens/ClaudeAgentScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type ProfileStackParamList = {
@@ -37,6 +38,7 @@ export type ProfileStackParamList = {
   ActivityCentre: undefined;
   Rewards: undefined;
   FollowList: { mode: "followers" | "following" };
+  TravonyAI: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -130,6 +132,11 @@ export default function ProfileStackNavigator() {
         name="FollowList"
         component={FollowListScreen}
         options={{ headerTitle: "Followers" }}
+      />
+      <Stack.Screen
+        name="TravonyAI"
+        component={ClaudeAgentScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, StyleSheet, Pressable, TextInput, ActivityIndicator, Alert, Platform, Linking } from "react-native";
+import { View, StyleSheet, Pressable, TextInput, ActivityIndicator, Alert, Platform, Share } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigation } from "@react-navigation/native";
@@ -15,10 +15,8 @@ export interface RideSocialContext {
     id: string;
     name: string;
     avatar: string | null;
-    twitchChannel: string | null;
     isFollowing: boolean;
   } | null;
-  myTwitchChannel: string | null;
   isStreaming: boolean;
   hasPublished: boolean;
 }
@@ -35,37 +33,6 @@ function notify(title: string, message: string) {
     window.alert(`${title}\n\n${message}`);
   } else {
     Alert.alert(title, message);
-  }
-}
-
-function confirmDialog(title: string, message: string, confirmText: string, onConfirm: () => void) {
-  if (Platform.OS === "web") {
-    if (window.confirm(`${title}\n\n${message}`)) {
-      onConfirm();
-    }
-  } else {
-    Alert.alert(title, message, [
-      { text: "Cancel", style: "cancel" },
-      { text: confirmText, onPress: onConfirm },
-    ]);
-  }
-}
-
-async function openTwitchBroadcast() {
-  if (Platform.OS === "web") {
-    return;
-  }
-  try {
-    // Jumps straight to the Twitch app's mobile Go Live (camera) screen.
-    await Linking.openURL("twitch://broadcast");
-  } catch {
-    try {
-      // Twitch app not installed — universal link opens the app if present,
-      // otherwise the Twitch site where the app can be installed.
-      await Linking.openURL("https://www.twitch.tv/");
-    } catch {
-      // Nothing we can open; the ride is still marked live on the feed.
-    }
   }
 }
 
@@ -127,106 +94,69 @@ export function FollowCounterpartButton({ rideId }: { rideId: string }) {
   );
 }
 
-export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideStatus?: string }) {
-  const { theme } = useTheme();
-  const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const { data } = useRideSocialContext(rideId);
-  const linkChannelHint =
-    user?.role === "driver"
-      ? "Link your Twitch channel first: open the Profile tab, tap Personal Information, enter your Twitch username, and save. Then you can stream your rides live from here."
-      : "Link your Twitch channel first: open the Profile tab, tap Edit Profile, enter your Twitch username, and save. Then you can stream your rides live from here.";
+// ---------------------------------------------------------------------------
+// Share Live button — shown to the rider when the driver is live-streaming.
+// Generates a short-lived public URL via POST /api/rides/:id/stream-share so a
+// trusted contact can watch in any browser, no account required.
+// ---------------------------------------------------------------------------
 
-  const streamMutation = useMutation({
-    mutationFn: async (action: "start" | "stop") => {
-      return apiRequest(`/api/rides/${rideId}/stream/${action}`, { method: "POST" });
-    },
-    onSuccess: (_data, action) => {
-      invalidateSocial(queryClient, rideId);
-      if (action === "start") {
-        openTwitchBroadcast();
+interface LiveStreamStatus {
+  isLive: boolean;
+  postId: string | null;
+  hostName?: string | null;
+}
+
+export function ShareLiveButton({ rideId }: { rideId: string }) {
+  const { theme } = useTheme();
+
+  const { data: streamStatus } = useQuery<LiveStreamStatus>({
+    queryKey: [`/api/rides/${rideId}/stream`],
+    refetchInterval: 10_000,
+    enabled: !!rideId,
+  });
+
+  const shareMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/rides/${rideId}/stream-share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: async (data: any) => {
+      try {
+        await Share.share({
+          message: `Watch my Travony ride live 📍: ${data.shareUrl}`,
+          title: "Travony — Live ride",
+        });
+      } catch {
+        // User dismissed the share sheet — not an error.
       }
     },
     onError: (error: any) => {
-      notify("Streaming", error.message || "Could not update the stream");
+      Alert.alert("Couldn't share", error.message || "Please try again");
     },
   });
 
-  const streamable = ["accepted", "arriving", "started", "in_progress"].includes(rideStatus || "");
-  if (!data || !streamable) return null;
-
-  if (!data.myTwitchChannel) {
-    return (
-      <Pressable
-        style={({ pressed }) => [
-          styles.streamButton,
-          {
-            backgroundColor: theme.backgroundSecondary,
-            borderWidth: 1,
-            borderColor: theme.border,
-            opacity: pressed ? 0.8 : 1,
-          },
-        ]}
-        onPress={() => notify("Go Live on Twitch", linkChannelHint)}
-      >
-        <Ionicons name="videocam-outline" size={16} color={theme.textMuted} />
-        <ThemedText style={[styles.streamButtonText, { color: theme.textSecondary }]}>
-          Go Live on Twitch · Link your channel
-        </ThemedText>
-      </Pressable>
-    );
-  }
-
-  if (data.isStreaming) {
-    return (
-      <Pressable
-        style={({ pressed }) => [
-          styles.streamButton,
-          { backgroundColor: Colors.liveRed, opacity: pressed || streamMutation.isPending ? 0.8 : 1 },
-        ]}
-        onPress={() => streamMutation.mutate("stop")}
-        disabled={streamMutation.isPending}
-      >
-        {streamMutation.isPending ? (
-          <ActivityIndicator color={Colors.light.textOnPrimary} size="small" />
-        ) : (
-          <>
-            <View style={styles.liveDot} />
-            <ThemedText style={styles.streamButtonText}>Live on Twitch · Stop sharing</ThemedText>
-          </>
-        )}
-      </Pressable>
-    );
-  }
+  if (!streamStatus?.isLive || Platform.OS === "web") return null;
 
   return (
     <Pressable
       style={({ pressed }) => [
-        styles.streamButton,
+        styles.shareLiveButton,
         {
-          backgroundColor: theme.backgroundSecondary,
-          borderWidth: 1,
-          borderColor: theme.border,
-          opacity: pressed || streamMutation.isPending ? 0.8 : 1,
+          borderColor: Colors.liveRed + "60",
+          opacity: pressed || shareMutation.isPending ? 0.75 : 1,
         },
       ]}
-      onPress={() =>
-        confirmDialog(
-          "Go Live on Twitch",
-          `This shares your ride on the Travony feed as live on Twitch (${data.myTwitchChannel}) and opens the Twitch camera so you can start broadcasting.`,
-          "Go Live",
-          () => streamMutation.mutate("start"),
-        )
-      }
-      disabled={streamMutation.isPending}
+      onPress={() => shareMutation.mutate()}
+      disabled={shareMutation.isPending}
     >
-      {streamMutation.isPending ? (
-        <ActivityIndicator color={theme.primary} size="small" />
+      {shareMutation.isPending ? (
+        <ActivityIndicator size="small" color={Colors.liveRed} />
       ) : (
         <>
-          <Ionicons name="videocam-outline" size={16} color={theme.primary} />
-          <ThemedText style={[styles.streamButtonText, { color: theme.text }]}>
-            Go Live on Twitch
+          <Ionicons name="share-outline" size={15} color={Colors.liveRed} />
+          <ThemedText style={[styles.shareLiveText, { color: Colors.liveRed }]}>
+            Share Live
           </ThemedText>
         </>
       )}
@@ -234,9 +164,8 @@ export function StreamRideButton({ rideId, rideStatus }: { rideId: string; rideS
   );
 }
 
-// In-app live streaming (Agora) — broadcasts inside Travony instead of via
-// the Twitch app. Shown alongside the Twitch button on active ride screens;
-// the GoLive screen itself handles permissions, native-module availability
+// In-app live streaming (Agora) — broadcasts inside Travony.
+// The GoLive screen itself handles permissions, native-module availability
 // and the stream lifecycle.
 export function GoLiveInAppButton({ rideId, rideStatus }: { rideId: string; rideStatus?: string }) {
   const { theme } = useTheme();
@@ -393,6 +322,20 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: BorderRadius.sm,
     marginTop: Spacing.md,
+  },
+  shareLiveButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    height: 40,
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginTop: Spacing.sm,
+    backgroundColor: "rgba(229,62,62,0.08)",
+  },
+  shareLiveText: {
+    ...Typography.bodyBold,
   },
   publishedBanner: {
     flexDirection: "row",

@@ -18,6 +18,7 @@ interface ProfileSidebarProps {
   onActivity: () => void;
   onQRCode: () => void;
   onSettings: () => void;
+  onTravonyAI?: () => void;
 }
 
 interface RowProps {
@@ -56,6 +57,7 @@ export default function ProfileSidebar({
   onActivity,
   onQRCode,
   onSettings,
+  onTravonyAI,
 }: ProfileSidebarProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
@@ -103,6 +105,16 @@ export default function ProfileSidebar({
           <ThemedText style={[styles.sectionHeader, { color: theme.textMuted }]}>
             Personal tools
           </ThemedText>
+          {onTravonyAI ? (
+            <SidebarRow
+              icon="sparkles-outline"
+              label="Travony AI"
+              onPress={() => {
+                onClose();
+                onTravonyAI();
+              }}
+            />
+          ) : null}
           <SidebarRow
             icon="pulse-outline"
             label="Activity centre"

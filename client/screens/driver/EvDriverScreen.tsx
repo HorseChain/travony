@@ -78,7 +78,7 @@ function sourceLabel(source: string, theme: Theme): { text: string; color: strin
     case "live":
       return { text: "Live from your car", color: Colors.travonyGreen };
     case "simulated":
-      return { text: "Simulated (demo data)", color: theme.warning };
+      return { text: "Estimated data", color: theme.warning };
     case "stale":
       return { text: "Last known reading", color: theme.warning };
     case "manual":
@@ -327,9 +327,7 @@ export default function EvDriverScreen() {
                     ) : (
                       <>
                         <Ionicons name="link" size={16} color={Colors.light.textOnPrimary} />
-                        <ThemedText style={styles.btnText}>
-                          {conn?.liveDataAvailable ? "Connect my car" : "Connect (demo)"}
-                        </ThemedText>
+                        <ThemedText style={styles.btnText}>Connect my car</ThemedText>
                       </>
                     )}
                   </Pressable>
@@ -373,8 +371,7 @@ export default function EvDriverScreen() {
                 <View style={[styles.infoNote, { backgroundColor: theme.backgroundElevated }]}>
                   <Ionicons name="information-circle-outline" size={14} color={theme.textMuted} />
                   <ThemedText style={[styles.infoNoteText, { color: theme.textMuted }]}>
-                    Live car data isn't set up yet, so this uses demo readings. Everything still works — once
-                    your car account is linked, real battery data appears here automatically.
+                    Connect your car account to see live battery and range automatically.
                   </ThemedText>
                 </View>
               ) : null}
@@ -408,7 +405,7 @@ export default function EvDriverScreen() {
             {chargers ? (
               <ThemedText style={[styles.metaText, { color: theme.textMuted }]}>
                 {chargers.source === "simulated"
-                  ? "Demo list"
+                  ? "Estimated"
                   : chargers.source === "unavailable"
                   ? "Unavailable"
                   : "Live"}

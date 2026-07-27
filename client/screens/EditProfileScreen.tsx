@@ -29,34 +29,22 @@ export default function EditProfileScreen() {
   const [name, setName] = useState(user?.name || "");
   const [phone, setPhone] = useState(user?.phone || "");
   const [avatar, setAvatar] = useState(user?.avatar || "");
-  const [twitchChannel, setTwitchChannel] = useState<string | null>(null);
-  const [twitchTouched, setTwitchTouched] = useState(false);
   const [bio, setBio] = useState<string | null>(null);
   const [bioTouched, setBioTouched] = useState(false);
 
-  const socialQuery = useQuery<{ followers: number; following: number; twitchChannel: string | null; bio: string | null }>({
+  const socialQuery = useQuery<{ followers: number; following: number; bio: string | null }>({
     queryKey: ["/api/social/counts"],
   });
-  const savedTwitch = socialQuery.data?.twitchChannel || "";
-  const twitchValue = twitchTouched ? twitchChannel || "" : savedTwitch;
   const savedBio = socialQuery.data?.bio || "";
   const bioValue = bioTouched ? bio || "" : savedBio;
 
   const updateProfileMutation = useMutation({
     mutationFn: async () => {
-      const result = await apiRequest(`/api/users/${user?.id}`, {
+      return apiRequest(`/api/users/${user?.id}`, {
         method: "PATCH",
         body: JSON.stringify({ name, phone, avatar, bio: bioValue.trim() }),
         headers: { "Content-Type": "application/json" },
       });
-      if (twitchTouched && (twitchChannel || "").trim() !== savedTwitch) {
-        await apiRequest("/api/me/twitch-channel", {
-          method: "PATCH",
-          body: JSON.stringify({ channel: (twitchChannel || "").trim() || null }),
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      return result;
     },
     onSuccess: async (data) => {
       await updateUser({ name, phone, avatar });
@@ -216,32 +204,6 @@ export default function EditProfileScreen() {
             </ThemedText>
           </View>
 
-          <View style={styles.inputGroup}>
-            <ThemedText style={styles.label}>Twitch Channel</ThemedText>
-            <View
-              style={[
-                styles.inputContainer,
-                { backgroundColor: theme.backgroundDefault, borderColor: theme.border },
-              ]}
-            >
-              <Ionicons name="videocam-outline" size={20} color={theme.textMuted} />
-              <TextInput
-                style={[styles.input, { color: theme.text }]}
-                placeholder="Your Twitch username (optional)"
-                placeholderTextColor={theme.textMuted}
-                value={twitchValue}
-                onChangeText={(text) => {
-                  setTwitchTouched(true);
-                  setTwitchChannel(text);
-                }}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-            </View>
-            <ThemedText style={[styles.helperText, { color: theme.textMuted }]}>
-              Link your Twitch channel to stream rides live. Leave empty to remove.
-            </ThemedText>
-          </View>
         </View>
 
         <Pressable

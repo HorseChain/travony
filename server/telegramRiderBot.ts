@@ -22,6 +22,7 @@ import {
 } from "./coffeeService";
 import { randomUUID } from "crypto";
 import { getRegionByCode, detectRegionFromCoordinates } from "./regionService";
+import { getLiveTelegramStreams, getTravonyBaseUrl } from "./telegramStreaming";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -496,6 +497,9 @@ function riderHelp(): string {
 
 <b>Hubs</b>
 /hubs — see lively pickup spots near you, and book or order coffee straight from one.
+
+<b>Live Streams</b>
+/live — watch drivers who are streaming live right now, right here in Telegram.
 
 <b>Anytime</b>
 /mytrip — your current ride · /myorders — your coffee orders
@@ -1771,6 +1775,27 @@ ${driverLine}
 
 Type a message to chat with your driver, or /cancelride to cancel.`,
     );
+    return true;
+  }
+
+  if (command === "/live") {
+    const liveStreams = await getLiveTelegramStreams();
+    if (liveStreams.length === 0) {
+      await sendTelegramMessage(
+        chatId,
+        "No drivers are streaming live right now.\n\nCheck back soon — drivers use /golive to broadcast their rides.",
+      );
+      return true;
+    }
+    const base = getTravonyBaseUrl();
+    const inlineKeyboard = liveStreams.map((s) => {
+      const watchUrl = `${base}/tg-watch?postId=${encodeURIComponent(s.postId)}&name=${encodeURIComponent(s.driverName)}`;
+      const minutesLive = Math.max(1, Math.round((Date.now() - s.startedAt.getTime()) / 60000));
+      return [{ text: `${s.driverName} — ${minutesLive} min live`, web_app: { url: watchUrl } }];
+    });
+    await sendTelegramMessage(chatId, `<b>Live Streams (${liveStreams.length})</b>\n\nTap a button to watch:`, {
+      reply_markup: { inline_keyboard: inlineKeyboard },
+    } as any);
     return true;
   }
 

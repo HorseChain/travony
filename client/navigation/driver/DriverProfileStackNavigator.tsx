@@ -20,6 +20,7 @@ import FindFriendsScreen from "@/screens/FindFriendsScreen";
 import ActivityCentreScreen from "@/screens/ActivityCentreScreen";
 import RewardsScreen from "@/screens/RewardsScreen";
 import FollowListScreen from "@/screens/FollowListScreen";
+import ClaudeAgentScreen from "@/screens/ClaudeAgentScreen";
 
 export type DriverProfileStackParamList = {
   DriverProfile: undefined;
@@ -41,6 +42,7 @@ export type DriverProfileStackParamList = {
   ActivityCentre: undefined;
   Rewards: undefined;
   FollowList: { mode: "followers" | "following" };
+  TravonyAI: undefined;
 };
 
 const Stack = createNativeStackNavigator<DriverProfileStackParamList>();
@@ -144,6 +146,11 @@ export default function DriverProfileStackNavigator() {
         name="FollowList"
         component={FollowListScreen}
         options={{ headerTitle: "Followers" }}
+      />
+      <Stack.Screen
+        name="TravonyAI"
+        component={ClaudeAgentScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

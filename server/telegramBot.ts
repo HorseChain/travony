@@ -1,6 +1,14 @@
 import { db } from "./db";
 import { users, drivers, rides } from "@shared/schema";
 import { eq, and, desc, sql, count } from "drizzle-orm";
+import {
+  startTelegramStream,
+  endTelegramStreamByUserId,
+  getLiveTelegramStreams,
+  getTelegramStreamPostId,
+  getTravonyBaseUrl,
+} from "./telegramStreaming";
+import { agoraEnabled } from "./agoraStreaming";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -64,6 +72,31 @@ export async function sendTelegramMessage(chatId: number | string, text: string,
     return result.ok;
   } catch (error) {
     console.error("[Telegram] Error sending message:", error);
+    return false;
+  }
+}
+
+async function sendTelegramMessageWithButtons(
+  chatId: number | string,
+  text: string,
+  buttons: Array<Array<Record<string, unknown>>>,
+): Promise<boolean> {
+  if (!TELEGRAM_BOT_TOKEN) return false;
+  try {
+    const response = await fetch(`${TELEGRAM_API_URL}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: "HTML",
+        reply_markup: { inline_keyboard: buttons },
+      }),
+    });
+    const result = await response.json();
+    return result.ok;
+  } catch (error) {
+    console.error("[Telegram] Error sending message with buttons:", error);
     return false;
   }
 }
@@ -381,6 +414,65 @@ Visit: https://travony.replit.app/support`;
       await db.update(drivers).set({ isOnline: false }).where(eq(drivers.id, driver.drivers.id));
       return "Vehicle deactivated. Activate again to receive route requests.";
 
+    case "/golive": {
+      if (!driver) {
+        return "Account not linked. Use /link [phone] to connect your account before going live.";
+      }
+      if (!agoraEnabled()) {
+        return "Live streaming is not available yet. Check back soon.";
+      }
+      const existingPostId = await getTelegramStreamPostId(driver.users.id);
+      if (existingPostId) {
+        const base = getTravonyBaseUrl();
+        const watchUrl = `${base}/tg-watch?postId=${encodeURIComponent(existingPostId)}&name=${encodeURIComponent(driver.users.name)}`;
+        await sendTelegramMessageWithButtons(
+          chatId,
+          `You already have a live stream running.\nShare the button or copy this link:\n${watchUrl}\n\nType /endlive to stop.`,
+          [[{ text: "Watch Live", web_app: { url: watchUrl } }]],
+        );
+        return "";
+      }
+      const { postId } = await startTelegramStream(driver.users.id, driver.users.name);
+      const base = getTravonyBaseUrl();
+      const watchUrl = `${base}/tg-watch?postId=${encodeURIComponent(postId)}&name=${encodeURIComponent(driver.users.name)}`;
+      await sendTelegramMessageWithButtons(
+        chatId,
+        `<b>You are live!</b>\n\nStart an Agora broadcast in the T Driver app on channel:\n<code>stream:${postId}</code>\n\nShare the Watch Live button or copy this link:\n${watchUrl}\n\nType /endlive when done.`,
+        [[{ text: "Watch Live", web_app: { url: watchUrl } }]],
+      );
+      return "";
+    }
+
+    case "/endlive": {
+      if (!driver) {
+        return "Account not linked. Use /link [phone] to connect your account.";
+      }
+      const result = await endTelegramStreamByUserId(driver.users.id);
+      if (!result) {
+        return "You don't have an active stream to end.";
+      }
+      return `<b>Stream ended</b>\n\nDuration: ${result.durationMinutes} min\nPeak viewers: ${result.peakViewers}\n\nThanks for streaming on Travony!`;
+    }
+
+    case "/streams": {
+      const live = await getLiveTelegramStreams();
+      if (live.length === 0) {
+        return "No drivers are streaming right now. Be the first — type /golive!";
+      }
+      const base = getTravonyBaseUrl();
+      const inlineKeyboard = live.map((s) => {
+        const watchUrl = `${base}/tg-watch?postId=${encodeURIComponent(s.postId)}&name=${encodeURIComponent(s.driverName)}`;
+        const minutesLive = Math.max(1, Math.round((Date.now() - s.startedAt.getTime()) / 60000));
+        return [{ text: `${s.driverName} — ${minutesLive} min live`, web_app: { url: watchUrl } }];
+      });
+      await sendTelegramMessageWithButtons(
+        chatId,
+        `<b>Live Streams (${live.length})</b>\n\nTap a button to watch:`,
+        inlineKeyboard,
+      );
+      return "";
+    }
+
     case "/invite":
       return `<b>Invite Operators to Travony</b>
 
@@ -428,7 +520,10 @@ Join the network: https://play.google.com/store/apps/details?id=com.travony.driv
 /community - Network stats
 /invite - Share invite message
 /whytravony - Why operate on Travony
-/support - Get help`;
+/support - Get help
+/golive - Start a live stream
+/endlive - End your stream
+/streams - See who is live now`;
   }
 }
 
@@ -449,7 +544,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
       const command = parts[0];
       const args = parts.slice(1);
       const response = await handleCommand(chatId, command, args, cbQuery.from.first_name);
-      await sendTelegramMessage(chatId, response);
+      if (response) await sendTelegramMessage(chatId, response);
     }
     return;
   }
@@ -465,7 +560,7 @@ export async function processTelegramUpdate(update: TelegramUpdate): Promise<voi
     const command = parts[0].toLowerCase().split("@")[0];
     const args = parts.slice(1);
     const response = await handleCommand(chatId, command, args, firstName);
-    await sendTelegramMessage(chatId, response);
+    if (response) await sendTelegramMessage(chatId, response);
   } else {
     const lowerText = text.toLowerCase();
     if (lowerText.includes("book") || lowerText.includes("ride") || lowerText.includes("car") || lowerText.includes("taxi")) {
@@ -649,6 +744,7 @@ export async function setBotCommands(): Promise<boolean> {
           { command: "book", description: "Book a ride" },
           { command: "coffee", description: "Order a coffee" },
           { command: "hubs", description: "Explore hubs near you" },
+          { command: "live", description: "Watch live driver streams" },
           { command: "mytrip", description: "Check your current trip" },
           { command: "myorders", description: "Track your coffee orders" },
           { command: "cancelride", description: "Cancel your current ride" },
@@ -667,6 +763,9 @@ export async function setBotCommands(): Promise<boolean> {
           { command: "help", description: "How to use Travony" },
           { command: "support", description: "Get help" },
           { command: "feedback", description: "Send feedback" },
+          { command: "golive", description: "Start a live stream (drivers)" },
+          { command: "endlive", description: "End your live stream" },
+          { command: "streams", description: "See who is streaming live" },
         ],
       }),
     });

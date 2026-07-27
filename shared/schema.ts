@@ -1661,7 +1661,7 @@ export const ridePostTypeEnum = pgEnum("ride_post_type", ["published", "stream"]
 // addresses or coordinates. twitchChannel is snapshotted at post time.
 export const ridePosts = pgTable("ride_posts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  rideId: varchar("ride_id").references(() => rides.id).notNull(),
+  rideId: varchar("ride_id").references(() => rides.id),
   userId: varchar("user_id").references(() => users.id).notNull(),
   type: ridePostTypeEnum("type").notNull(),
   twitchChannel: text("twitch_channel"),
@@ -1682,10 +1682,40 @@ export const ridePosts = pgTable("ride_posts", {
 export type RidePost = typeof ridePosts.$inferSelect;
 export type InsertRidePost = typeof ridePosts.$inferInsert;
 
+// ---------------------------------------------------------------------------
+// Hyper-local geo stream ads — businesses registered by admins (or via the
+// partner API) that are auto-pinned as a product card when a live-streaming
+// driver passes within the business's radius. One ad slot per stream;
+// highest-priority match wins. Manual host pins always take precedence.
+// ---------------------------------------------------------------------------
+export const streamAdBusinesses = pgTable("stream_ad_businesses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  logoUrl: text("logo_url"),
+  description: text("description"),
+  offerText: text("offer_text").notNull(),
+  lat: decimal("lat", { precision: 10, scale: 8 }).notNull(),
+  lng: decimal("lng", { precision: 11, scale: 8 }).notNull(),
+  radiusMetres: integer("radius_metres").notNull().default(500),
+  startsAt: timestamp("starts_at"),
+  endsAt: timestamp("ends_at"),
+  // Higher priority = preferred when multiple businesses overlap the driver.
+  priority: integer("priority").default(0).notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type StreamAdBusiness = typeof streamAdBusinesses.$inferSelect;
+export type InsertStreamAdBusiness = typeof streamAdBusinesses.$inferInsert;
+
 // A "Shop the Look" product card featured by the host during a live Agora
 // stream. The snapshot (title / image / price label) is always derived
 // server-side from the curated catalog — hosts can only pick a productKey,
 // never author the label. One active card per stream at a time.
+// adBusinessId is set when the card was auto-pinned by the geo-ad engine
+// (null = manually pinned by host). Manual pins always take precedence.
 export const streamProducts = pgTable("stream_products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "cascade" }).notNull(),
@@ -1695,6 +1725,10 @@ export const streamProducts = pgTable("stream_products", {
   priceLabel: text("price_label").notNull(),
   ttlSeconds: integer("ttl_seconds").default(45).notNull(),
   tapCount: integer("tap_count").default(0).notNull(),
+  // Nullable FK — set only when this card was auto-pinned by the geo-ad engine.
+  // ON DELETE SET NULL: allows admins to hard-delete a business without
+  // violating the constraint when old pinned cards still reference it.
+  adBusinessId: varchar("ad_business_id").references(() => streamAdBusinesses.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   clearedAt: timestamp("cleared_at"),
 });
@@ -2020,3 +2054,62 @@ export const matchWeights = pgTable("match_weights", {
 
 export type MatchWeightsRow = typeof matchWeights.$inferSelect;
 export type InsertMatchWeightsRow = typeof matchWeights.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Claude Execution Agent — per-user learned profile.
+// The agent reads this at session start (system prompt) and writes it via the
+// remember_preference tool to persist habits across conversations.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// Claude Execution Agent — session log for tool-call-based learning.
+// ---------------------------------------------------------------------------
+
+export const agentSessions = pgTable("agent_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  messageText: text("message_text"),
+  replyText: text("reply_text"),
+  toolCallLog: jsonb("tool_call_log").default([]).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type InsertAgentSession = typeof agentSessions.$inferInsert;
+
+export const agentUserProfile = pgTable("agent_user_profile", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull().unique(),
+  preferences: jsonb("preferences").default({}).notNull(),
+  notes: text("notes"),
+  sessionCount: integer("session_count").default(0).notNull(),
+  lastInteractionAt: timestamp("last_interaction_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type AgentUserProfile = typeof agentUserProfile.$inferSelect;
+export type InsertAgentUserProfile = typeof agentUserProfile.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// HRS Payment Intents — tracks pending coin top-ups paid with HRS tokens
+// ---------------------------------------------------------------------------
+
+export const hrsPaymentIntents = pgTable("hrs_payment_intents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  packId: varchar("pack_id").notNull(),
+  hrsAmount: decimal("hrs_amount", { precision: 18, scale: 6 }).notNull(),
+  coins: integer("coins").notNull(),
+  platformAddress: varchar("platform_address").notNull(),
+  userEthAddress: varchar("user_eth_address").notNull(),
+  status: text("status").default("pending").notNull(),
+  txHash: varchar("tx_hash"),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("hrs_intents_user_idx").on(table.userId, table.createdAt),
+  index("hrs_intents_tx_idx").on(table.txHash),
+]);
+
+export type HrsPaymentIntent = typeof hrsPaymentIntents.$inferSelect;
+export type InsertHrsPaymentIntent = typeof hrsPaymentIntents.$inferInsert;

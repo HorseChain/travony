@@ -39,7 +39,17 @@ interface Mission {
 interface CoinPack {
   id: string;
   coins: number;
-  priceAed: number;
+  priceHrs: number;
+  label: string;
+}
+
+type ModalStep = "closed" | "wallet" | "packs" | "payment" | "verifying" | "success";
+
+interface IntentData {
+  intentId: string;
+  hrsAmount: number;
+  coins: number;
+  platformAddress: string;
 }
 
 interface RewardsData {
@@ -66,6 +76,8 @@ interface RewardsData {
   };
   giftTotals: { diamondsReceived: number; coinsGifted: number };
   packs: CoinPack[];
+  ethWalletAddress: string | null;
+  platformHrsAddress: string | null;
 }
 
 function useRewardsInvalidate() {
@@ -84,7 +96,9 @@ export default function RewardsScreen() {
   const queryClient = useQueryClient();
   const invalidate = useRewardsInvalidate();
 
-  const [packsVisible, setPacksVisible] = useState(false);
+  const [modalStep, setModalStep] = useState<ModalStep>("closed");
+  const [ethAddress, setEthAddress] = useState("");
+  const [intentData, setIntentData] = useState<IntentData | null>(null);
   const [codeInput, setCodeInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -121,24 +135,63 @@ export default function RewardsScreen() {
     onError: (err: any) => flash(err?.message || "Claim failed"),
   });
 
-  const purchaseMutation = useMutation({
+  const initiateMutation = useMutation({
     mutationFn: (packId: string) =>
-      apiRequest("/api/rewards/coins/purchase", {
+      apiRequest("/api/rewards/coins/hrs-initiate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ packId }),
+        body: JSON.stringify({ packId, ethAddress }),
       }),
     onSuccess: (res: any) => {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setPacksVisible(false);
-      flash(`+${res.coins} coins added`);
-      invalidate();
-      queryClient.invalidateQueries({
-        predicate: (q) => String(q.queryKey[0] ?? "").startsWith("/api/wallet"),
+      setIntentData({
+        intentId: res.intentId,
+        hrsAmount: res.hrsAmount,
+        coins: res.coins,
+        platformAddress: res.platformAddress,
       });
+      setModalStep("payment");
     },
-    onError: (err: any) => flash(err?.message || "Purchase failed"),
+    onError: (err: any) => flash(err?.message || "Could not create payment"),
   });
+
+  const verifyMutation = useMutation({
+    mutationFn: (intentId: string) =>
+      apiRequest("/api/rewards/coins/hrs-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intentId }),
+      }),
+    onSuccess: (res: any) => {
+      if (res.verified) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        setModalStep("success");
+        invalidate();
+      } else {
+        flash("Payment not found yet — wait a moment and try again");
+      }
+    },
+    onError: (err: any) => flash(err?.message || "Verification failed"),
+  });
+
+  const saveWalletMutation = useMutation({
+    mutationFn: (address: string) =>
+      apiRequest("/api/rewards/wallet-address", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ethAddress: address }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/rewards/me"] });
+      setModalStep("packs");
+    },
+    onError: (err: any) => flash(err?.message || "Could not save wallet address"),
+  });
+
+  const openPacks = () => {
+    const addr = data?.ethWalletAddress || "";
+    setEthAddress(addr);
+    setModalStep(addr ? "packs" : "wallet");
+  };
 
   const cashoutMutation = useMutation({
     mutationFn: () => apiRequest("/api/rewards/diamonds/cashout", { method: "POST" }),
@@ -213,7 +266,7 @@ export default function RewardsScreen() {
               <ThemedText style={styles.balanceValue}>{data.coins}</ThemedText>
               <Pressable
                 style={[styles.smallButton, { backgroundColor: COIN_COLOR }]}
-                onPress={() => setPacksVisible(true)}
+                onPress={() => openPacks()}
               >
                 <ThemedText style={styles.smallButtonText}>Get Coins</ThemedText>
               </Pressable>
@@ -468,15 +521,15 @@ export default function RewardsScreen() {
         </View>
       </ScrollView>
 
-      {/* Coin packs sheet */}
+      {/* HRS coin top-up — multi-step modal */}
       <Modal
-        visible={packsVisible}
+        visible={modalStep !== "closed"}
         transparent
         animationType="slide"
-        onRequestClose={() => setPacksVisible(false)}
+        onRequestClose={() => setModalStep("closed")}
       >
         <View style={styles.sheetOverlay}>
-          <Pressable style={styles.sheetBackdrop} onPress={() => setPacksVisible(false)} />
+          <Pressable style={styles.sheetBackdrop} onPress={() => setModalStep("closed")} />
           <View
             style={[
               styles.sheet,
@@ -486,26 +539,188 @@ export default function RewardsScreen() {
               },
             ]}
           >
-            <ThemedText style={styles.sheetTitle}>Get Coins</ThemedText>
-            <ThemedText style={[styles.sheetSub, { color: theme.textSecondary }]}>
-              Paid from your Travony wallet balance
-            </ThemedText>
-            <View style={styles.packGrid}>
-              {data.packs.map((p) => (
+            {/* Step: wallet address */}
+            {modalStep === "wallet" ? (
+              <>
+                <ThemedText style={styles.sheetTitle}>Your wallet address</ThemedText>
+                <ThemedText style={[styles.sheetSub, { color: theme.textSecondary }]}>
+                  Enter your Ethereum wallet address. We use it to confirm your payment.
+                </ThemedText>
+                <TextInput
+                  style={[
+                    styles.walletInput,
+                    { backgroundColor: theme.backgroundRoot, color: theme.text },
+                  ]}
+                  placeholder="0x..."
+                  placeholderTextColor={theme.textMuted}
+                  value={ethAddress}
+                  onChangeText={setEthAddress}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
                 <Pressable
-                  key={p.id}
-                  style={[styles.packCard, { backgroundColor: theme.backgroundRoot }]}
-                  onPress={() => purchaseMutation.mutate(p.id)}
-                  disabled={purchaseMutation.isPending}
+                  style={[
+                    styles.wideSheetButton,
+                    {
+                      backgroundColor:
+                        ethAddress.length > 10 ? theme.primary : theme.backgroundRoot,
+                    },
+                  ]}
+                  onPress={() => {
+                    if (ethAddress.trim().length > 10) {
+                      saveWalletMutation.mutate(ethAddress.trim());
+                    }
+                  }}
+                  disabled={saveWalletMutation.isPending || ethAddress.length <= 10}
                 >
-                  <Ionicons name="server" size={20} color={COIN_COLOR} />
-                  <ThemedText style={styles.packCoins}>{p.coins}</ThemedText>
-                  <ThemedText style={[styles.packPrice, { color: theme.textSecondary }]}>
-                    AED {p.priceAed}
+                  <ThemedText
+                    style={[
+                      styles.wideSheetButtonText,
+                      { color: ethAddress.length > 10 ? "#FFFFFF" : theme.textMuted },
+                    ]}
+                  >
+                    {saveWalletMutation.isPending ? "Saving..." : "Save & continue"}
                   </ThemedText>
                 </Pressable>
-              ))}
-            </View>
+              </>
+            ) : null}
+
+            {/* Step: pick a pack */}
+            {modalStep === "packs" ? (
+              <>
+                <ThemedText style={styles.sheetTitle}>Choose a pack</ThemedText>
+                <ThemedText style={[styles.sheetSub, { color: theme.textSecondary }]}>
+                  1 coin = 1 HRS · sent from your Ethereum wallet
+                </ThemedText>
+                <View style={styles.packGrid}>
+                  {(data?.packs || []).map((p) => (
+                    <Pressable
+                      key={p.id}
+                      style={[styles.packCard, { backgroundColor: theme.backgroundRoot }]}
+                      onPress={() => initiateMutation.mutate(p.id)}
+                      disabled={initiateMutation.isPending}
+                    >
+                      <Ionicons name="server" size={20} color={COIN_COLOR} />
+                      <ThemedText style={styles.packCoins}>{p.coins}</ThemedText>
+                      <ThemedText style={[styles.packLabel, { color: theme.textSecondary }]}>
+                        {p.label}
+                      </ThemedText>
+                      <ThemedText style={[styles.packPrice, { color: theme.textMuted }]}>
+                        {p.priceHrs} HRS
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </View>
+                {initiateMutation.isPending ? (
+                  <ActivityIndicator color={theme.primary} style={{ marginTop: Spacing.md }} />
+                ) : null}
+              </>
+            ) : null}
+
+            {/* Step: send payment */}
+            {modalStep === "payment" && intentData ? (
+              <>
+                <ThemedText style={styles.sheetTitle}>Send payment</ThemedText>
+                <ThemedText style={[styles.sheetSub, { color: theme.textSecondary }]}>
+                  Send exactly {intentData.hrsAmount} HRS to this address:
+                </ThemedText>
+                <View style={[styles.addressBox, { backgroundColor: theme.backgroundRoot }]}>
+                  <ThemedText
+                    style={[styles.addressText, { color: theme.text }]}
+                    numberOfLines={2}
+                    selectable
+                  >
+                    {intentData.platformAddress}
+                  </ThemedText>
+                  <Pressable
+                    onPress={async () => {
+                      try {
+                        await Share.share({ message: intentData.platformAddress });
+                      } catch {}
+                    }}
+                    style={[styles.copyBtn, { backgroundColor: theme.backgroundElevated }]}
+                  >
+                    <Ionicons name="copy-outline" size={18} color={theme.primary} />
+                  </Pressable>
+                </View>
+                <View style={[styles.paymentDetail, { borderColor: theme.border }]}>
+                  <View style={styles.paymentRow}>
+                    <ThemedText style={[styles.paymentLabel, { color: theme.textMuted }]}>
+                      Amount
+                    </ThemedText>
+                    <ThemedText style={[styles.paymentValue, { color: COIN_COLOR }]}>
+                      {intentData.hrsAmount} HRS
+                    </ThemedText>
+                  </View>
+                  <View style={[styles.paymentRow, { borderTopWidth: 1, borderColor: theme.border }]}>
+                    <ThemedText style={[styles.paymentLabel, { color: theme.textMuted }]}>
+                      You receive
+                    </ThemedText>
+                    <ThemedText style={[styles.paymentValue, { color: theme.text }]}>
+                      {intentData.coins} coins
+                    </ThemedText>
+                  </View>
+                  <View style={[styles.paymentRow, { borderTopWidth: 1, borderColor: theme.border }]}>
+                    <ThemedText style={[styles.paymentLabel, { color: theme.textMuted }]}>
+                      Your wallet
+                    </ThemedText>
+                    <ThemedText
+                      style={[styles.paymentValue, { color: theme.textSecondary }]}
+                      numberOfLines={1}
+                    >
+                      {ethAddress.slice(0, 8)}...{ethAddress.slice(-6)}
+                    </ThemedText>
+                  </View>
+                </View>
+                <Pressable
+                  style={[styles.wideSheetButton, { backgroundColor: theme.primary }]}
+                  onPress={() => {
+                    if (intentData) verifyMutation.mutate(intentData.intentId);
+                  }}
+                  disabled={verifyMutation.isPending}
+                >
+                  <ThemedText style={[styles.wideSheetButtonText, { color: "#FFFFFF" }]}>
+                    {verifyMutation.isPending ? "Checking..." : "I've sent the payment"}
+                  </ThemedText>
+                </Pressable>
+                <Pressable onPress={() => setModalStep("packs")} style={styles.changePack}>
+                  <ThemedText style={[styles.changePackText, { color: theme.textMuted }]}>
+                    Change pack
+                  </ThemedText>
+                </Pressable>
+              </>
+            ) : null}
+
+            {/* Step: success */}
+            {modalStep === "success" ? (
+              <>
+                <View style={styles.successIcon}>
+                  <Ionicons name="checkmark-circle" size={56} color={theme.success} />
+                </View>
+                <ThemedText style={[styles.sheetTitle, { textAlign: "center" }]}>
+                  Coins added!
+                </ThemedText>
+                <ThemedText
+                  style={[styles.sheetSub, { color: theme.textSecondary, textAlign: "center" }]}
+                >
+                  +{intentData?.coins ?? ""} coins have been added to your balance.
+                </ThemedText>
+                <Pressable
+                  style={[
+                    styles.wideSheetButton,
+                    { backgroundColor: theme.primary, marginTop: Spacing.xl },
+                  ]}
+                  onPress={() => {
+                    setModalStep("closed");
+                    setIntentData(null);
+                  }}
+                >
+                  <ThemedText style={[styles.wideSheetButtonText, { color: "#FFFFFF" }]}>
+                    Done
+                  </ThemedText>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -792,5 +1007,77 @@ const styles = StyleSheet.create({
   },
   noticeText: {
     ...Typography.bodySmallMedium,
+  },
+  walletInput: {
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.md,
+    ...Typography.body,
+    marginBottom: Spacing.md,
+  },
+  wideSheetButton: {
+    height: 50,
+    borderRadius: BorderRadius.full,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: Spacing.sm,
+  },
+  wideSheetButtonText: {
+    ...Typography.bodyMedium,
+  },
+  addressBox: {
+    flexDirection: "row",
+    alignItems: "center",
+    borderRadius: BorderRadius.sm,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    gap: Spacing.sm,
+  },
+  addressText: {
+    flex: 1,
+    ...Typography.small,
+    letterSpacing: 0.3,
+  },
+  copyBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: BorderRadius.xs,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  paymentDetail: {
+    borderRadius: BorderRadius.sm,
+    borderWidth: 1,
+    marginBottom: Spacing.md,
+    overflow: "hidden",
+  },
+  paymentRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+  },
+  paymentLabel: {
+    ...Typography.bodySmall,
+  },
+  paymentValue: {
+    ...Typography.bodySmallMedium,
+  },
+  changePack: {
+    alignItems: "center",
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.xs,
+  },
+  changePackText: {
+    ...Typography.small,
+  },
+  successIcon: {
+    alignItems: "center",
+    marginBottom: Spacing.md,
+    marginTop: Spacing.sm,
+  },
+  packLabel: {
+    ...Typography.small,
+    marginTop: 2,
   },
 });

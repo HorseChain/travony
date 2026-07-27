@@ -224,6 +224,40 @@ export function getPlatformAddress(): string | null {
   return platformAddress;
 }
 
+export async function verifyHrsTransfer(
+  fromAddress: string,
+  toAddress: string,
+  requiredHrs: number,
+  lookbackBlocks = 1000,
+): Promise<{ found: boolean; txHash?: string; amount?: string }> {
+  try {
+    const p = await getProvider();
+    if (!hrsContract) {
+      hrsContract = new ethers.Contract(HRS_CONTRACT_ADDRESS, HRS_ABI, p);
+    }
+    const latestBlock = await p.getBlockNumber();
+    const fromBlock = Math.max(0, latestBlock - lookbackBlocks);
+    const filter = hrsContract.filters.Transfer(fromAddress, toAddress);
+    const events = await hrsContract.queryFilter(filter, fromBlock, latestBlock);
+    const requiredRaw = ethers.parseUnits(requiredHrs.toFixed(6), HRS_DECIMALS);
+    for (const event of events) {
+      const log = event as any;
+      const amount: bigint = log.args?.[2] ?? log.args?.value;
+      if (amount !== undefined && amount >= requiredRaw) {
+        return {
+          found: true,
+          txHash: event.transactionHash,
+          amount: ethers.formatUnits(amount, HRS_DECIMALS),
+        };
+      }
+    }
+    return { found: false };
+  } catch (error: any) {
+    console.warn("[HRS] Transfer scan failed:", error.message);
+    return { found: false };
+  }
+}
+
 export function isValidEthAddress(address: string): boolean {
   try {
     return ethers.isAddress(address);

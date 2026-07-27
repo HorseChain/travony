@@ -1,3 +1,14 @@
+/**
+ * HookFeedScreen — TikTok-style driver discovery feed.
+ *
+ * Full-screen vertical pager: each card is a driver profile with a live
+ * Agora stream (or blurred vehicle photo) as the background, a right-side
+ * action panel, a floating mini-map, and a scrolling data ticker.
+ *
+ * Two tabs — Nearby (public) and Following (auth) — sit below the wordmark
+ * with an animated underline. Tab switch resets the list to index 0.
+ */
+
 import React, {
   useRef,
   useState,
@@ -14,6 +25,11 @@ import {
   Pressable,
   StatusBar,
   Platform,
+  Share,
+  Text,
+  Modal,
+  ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
@@ -22,8 +38,6 @@ import Animated, {
   useSharedValue,
   useAnimatedStyle,
   withTiming,
-  withSpring,
-  withSequence,
   withRepeat,
   FadeIn,
   FadeInDown,
@@ -31,156 +45,70 @@ import Animated, {
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BlurView } from "expo-blur";
+import * as Location from "expo-location";
 
 import { ThemedText } from "@/components/ThemedText";
-import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthGate } from "@/hooks/useAuthGate";
 import { apiRequest } from "@/lib/query-client";
 import { Colors, Spacing, BorderRadius } from "@/constants/theme";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
+import WebViewMap from "@/components/WebViewMap";
+import { loadAgoraRtc, agoraNativeAvailable } from "@/lib/agoraNative";
+import { useLiteMode } from "@/hooks/useLiteMode";
+import type { StreamTokenBundle } from "@/hooks/useStreamChannel";
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const { width: SCREEN_W, height: SCREEN_H } = Dimensions.get("screen");
-const AUTO_ADVANCE_MS = 7000;
 const TAB_BAR_H = 80;
+// Dubai fallback coords when location permission is denied
+const DEFAULT_LAT = 25.2048;
+const DEFAULT_LNG = 55.2708;
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type CardType = "live" | "post" | "route" | "feature";
-
-interface LiveStream {
+interface DiscoveryDriver {
+  driverId: string;
+  userId: string;
   name: string;
   avatar: string | null;
-  twitchChannel: string | null;
-  city: string | null;
-  country: string | null;
-  startedAt: string;
-  provider: string;
-  viewerCount?: number;
-}
-
-interface SocialPost {
-  id: string;
-  caption: string | null;
-  photoUrl: string | null;
-  cityName: string | null;
-  distanceKm: string | null;
+  rating: string | null;
+  totalTrips: number | null;
+  vehicle: {
+    make: string;
+    model: string;
+    color: string | null;
+    licensePlate: string;
+    photo: string | null;
+    type: string | null;
+  } | null;
+  distanceKm: number;
+  etaMinutes: number;
+  upfrontFare: number;
+  currency: string;
+  currencySymbol: string;
   isLive: boolean;
+  postId: string | null;
+  streamProvider: "agora" | "twitch" | null;
+  approxLat: number | null;
+  approxLng: number | null;
+}
+
+type FeedTab = "nearby" | "following";
+
+interface RatingRow {
+  id: string;
+  rating: number;
+  comment: string | null;
   createdAt: string;
-  authorName: string;
-  authorAvatar: string | null;
-  reactions: Record<string, number>;
-  reactionCount: number;
-  myReaction: string | null;
-  commentCount: number;
-}
-
-interface TrendingRoute {
-  label: string;
-  score: number;
-  velocity: number;
-  rising: boolean;
-  driversLive: number;
-  openRequests: number;
-  city: string | null;
-}
-
-interface FeatureDef {
-  id: string;
-  title: string;
-  subtitle: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  gradient: readonly [string, string, string];
-  cta: string;
-  ctaRoute?: keyof HomeStackParamList;
-}
-
-interface FeedCard {
-  id: string;
-  type: CardType;
-  liveStream?: LiveStream;
-  post?: SocialPost;
-  route?: TrendingRoute;
-  feature?: FeatureDef;
-}
-
-// ---------------------------------------------------------------------------
-// Static feature cards — represent every pillar of Travony
-// ---------------------------------------------------------------------------
-
-const FEATURE_CARDS: FeatureDef[] = [
-  {
-    id: "feat-welcome",
-    title: "Welcome to Travony",
-    subtitle: "Social. Live. Rides. Community. Education. Entertainment — all in one place.",
-    icon: "globe-outline",
-    gradient: ["#00B14F", "#007A38", "#003D1C"],
-    cta: "Explore",
-  },
-  {
-    id: "feat-ride",
-    title: "Book a Ride in Seconds",
-    subtitle: "Tell our AI where you're going. Smart matching finds your ideal driver.",
-    icon: "car-outline",
-    gradient: ["#0f3460", "#16213e", "#1a1a2e"],
-    cta: "Book Now",
-    ctaRoute: "AssistantHome",
-  },
-  {
-    id: "feat-golive",
-    title: "Go Live on Your Ride",
-    subtitle: "Stream your journey live. Build an audience. Receive gifts from viewers.",
-    icon: "radio-outline",
-    gradient: ["#7C4DFF", "#5C35CC", "#3D1F99"],
-    cta: "Go Live",
-  },
-  {
-    id: "feat-prayer",
-    title: "Free Prayer Rides",
-    subtitle: "Community-first mobility. Volunteer drivers offer free rides to prayer.",
-    icon: "heart-outline",
-    gradient: ["#00A3A3", "#007A7A", "#004D4D"],
-    cta: "Learn More",
-    ctaRoute: "PrayerRides",
-  },
-  {
-    id: "feat-coffee",
-    title: "Coffee Ordered, Ride Incoming",
-    subtitle: "Karak, Arabic coffee, Turkish, and more — ordered right inside your app.",
-    icon: "cafe-outline",
-    gradient: ["#8B4513", "#6B3410", "#4A2309"],
-    cta: "See Menu",
-    ctaRoute: "Coffee",
-  },
-  {
-    id: "feat-earn",
-    title: "Drive. Earn. Grow.",
-    subtitle: "Every ride builds toward your next vehicle. The Car Ladder rewards you.",
-    icon: "trending-up-outline",
-    gradient: ["#CC9200", "#997000", "#664B00"],
-    cta: "Join as Driver",
-  },
-];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function timeAgo(iso: string): string {
-  const mins = Math.floor((Date.now() - new Date(iso).getTime()) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const h = Math.floor(mins / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
+  riderName: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -210,1025 +138,120 @@ function Avatar({ uri, name, size }: { uri: string | null; name: string; size: n
         borderColor: "rgba(255,255,255,0.3)",
       }}
     >
-      <ThemedText style={{ fontWeight: "700", fontSize: size * 0.4, color: "#fff" }}>
+      <Text style={{ fontWeight: "700", fontSize: size * 0.4, color: "#fff" }}>
         {(name || "?").charAt(0).toUpperCase()}
-      </ThemedText>
+      </Text>
     </View>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Right-side action button
+// NearbyFollowingTabs — wordmark + animated tab strip + AI button
 // ---------------------------------------------------------------------------
 
-interface ActionBtnProps {
-  icon: keyof typeof Ionicons.glyphMap;
-  activeIcon?: keyof typeof Ionicons.glyphMap;
-  label?: string;
-  active?: boolean;
-  color?: string;
-  onPress: () => void;
-}
-
-function ActionBtn({ icon, activeIcon, label, active, color = "#fff", onPress }: ActionBtnProps) {
-  const scale = useSharedValue(1);
-  const animStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: scale.value }],
-  }));
-
-  const handlePress = () => {
-    scale.value = withSequence(withSpring(0.75, { damping: 5 }), withSpring(1, { damping: 8 }));
-    onPress();
-  };
-
-  return (
-    <Pressable onPress={handlePress} style={styles.actionBtn}>
-      <Animated.View style={[animStyle, styles.actionBtnInner]}>
-        <Ionicons
-          name={active && activeIcon ? activeIcon : icon}
-          size={30}
-          color={active ? (color !== "#fff" ? color : Colors.reactionLove) : "#fff"}
-        />
-        {label ? (
-          <ThemedText style={styles.actionBtnLabel}>{label}</ThemedText>
-        ) : null}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Live Card
-// ---------------------------------------------------------------------------
-
-function LiveHookCard({
-  stream,
-  bottomInset,
-  onTap,
-}: {
-  stream: LiveStream;
-  bottomInset: number;
-  onTap: () => void;
-}) {
-  const pulse = useSharedValue(1);
-  useEffect(() => {
-    pulse.value = withRepeat(
-      withSequence(withTiming(0.6, { duration: 800 }), withTiming(1, { duration: 800 })),
-      -1,
-      false,
-    );
-  }, [pulse]);
-  const pulseStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
-
-  return (
-    <Pressable style={styles.cardRoot} onPress={onTap}>
-      <LinearGradient
-        colors={["#1a0010", "#3D0020", "#1a0010"]}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Large pulsing avatar */}
-      <View style={styles.liveAvatarWrap}>
-        <Animated.View style={[styles.livePulseRing, pulseStyle]} />
-        <View style={styles.liveAvatarInner}>
-          <Avatar uri={stream.avatar} name={stream.name} size={120} />
-        </View>
-      </View>
-
-      {/* LIVE badge */}
-      <Animated.View entering={FadeIn.delay(200)} style={styles.liveBadge}>
-        <View style={styles.liveBadgeDot} />
-        <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
-        {stream.viewerCount ? (
-          <ThemedText style={styles.liveBadgeCount}>{stream.viewerCount}</ThemedText>
-        ) : null}
-      </Animated.View>
-
-      {/* Right sidebar */}
-      <View style={[styles.sidebar, { bottom: bottomInset }]}>
-        <ActionBtn icon="heart-outline" activeIcon="heart" label="" onPress={onTap} />
-        <ActionBtn icon="chatbubble-outline" label="" onPress={onTap} />
-        <ActionBtn icon="gift-outline" label="" onPress={onTap} />
-        <ActionBtn icon="share-outline" onPress={onTap} />
-      </View>
-
-      {/* Bottom overlay */}
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.85)"]}
-        style={[styles.bottomGradient, { paddingBottom: bottomInset + Spacing.sm }]}
-      >
-        <Animated.View entering={FadeInDown.delay(100)} style={styles.bottomContent}>
-          <View style={styles.authorRow}>
-            <Avatar uri={stream.avatar} name={stream.name} size={38} />
-            <View style={{ marginLeft: Spacing.sm, flex: 1 }}>
-              <ThemedText style={styles.authorName}>{stream.name}</ThemedText>
-              {stream.city ? (
-                <ThemedText style={styles.authorSub}>{stream.city}</ThemedText>
-              ) : null}
-            </View>
-          </View>
-          <ThemedText style={styles.caption} numberOfLines={2}>
-            Streaming live from{stream.city ? ` ${stream.city}` : " their ride"}
-          </ThemedText>
-        </Animated.View>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Post Card
-// ---------------------------------------------------------------------------
-
-function PostHookCard({
-  post,
-  bottomInset,
+function NearbyFollowingTabs({
+  activeTab,
+  onTabChange,
+  insetTop,
   isAuthenticated,
-  onTap,
-  onReact,
 }: {
-  post: SocialPost;
-  bottomInset: number;
+  activeTab: FeedTab;
+  onTabChange: (tab: FeedTab) => void;
+  insetTop: number;
   isAuthenticated: boolean;
-  onTap: () => void;
-  onReact: (type: string) => void;
 }) {
-  const liked = post.myReaction === "like" || post.myReaction === "love";
-
-  const GRADIENTS: readonly [string, string][] = [
-    ["#0f3460", "#1a1a2e"],
-    ["#004D22", "#001A0B"],
-    ["#3D0020", "#1a0010"],
-    ["#004D4D", "#001A1A"],
-    ["#1a0038", "#0f0020"],
-  ];
-  const fallback = GRADIENTS[Math.abs(post.id.charCodeAt(0)) % GRADIENTS.length];
-
-  return (
-    <Pressable style={styles.cardRoot} onPress={onTap}>
-      {post.photoUrl ? (
-        <Image
-          source={{ uri: post.photoUrl }}
-          style={StyleSheet.absoluteFill}
-          contentFit="cover"
-        />
-      ) : (
-        <LinearGradient colors={fallback} style={StyleSheet.absoluteFill} />
-      )}
-      {/* Scrim for readability when there's a photo */}
-      {post.photoUrl ? (
-        <LinearGradient
-          colors={["rgba(0,0,0,0.15)", "rgba(0,0,0,0.0)", "rgba(0,0,0,0.7)"]}
-          style={StyleSheet.absoluteFill}
-        />
-      ) : null}
-
-      {/* Right sidebar */}
-      <View style={[styles.sidebar, { bottom: bottomInset }]}>
-        <ActionBtn
-          icon="heart-outline"
-          activeIcon="heart"
-          label={post.reactionCount > 0 ? String(post.reactionCount) : ""}
-          active={liked}
-          onPress={() => onReact("love")}
-        />
-        <ActionBtn
-          icon="chatbubble-outline"
-          label={post.commentCount > 0 ? String(post.commentCount) : ""}
-          onPress={onTap}
-        />
-        <ActionBtn icon="share-outline" onPress={onTap} />
-      </View>
-
-      {/* Bottom overlay */}
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.88)"]}
-        style={[styles.bottomGradient, { paddingBottom: bottomInset + Spacing.sm }]}
-      >
-        <Animated.View entering={FadeInDown.delay(100)} style={styles.bottomContent}>
-          <View style={styles.authorRow}>
-            <Avatar uri={post.authorAvatar} name={post.authorName} size={38} />
-            <View style={{ marginLeft: Spacing.sm, flex: 1 }}>
-              <ThemedText style={styles.authorName}>{post.authorName}</ThemedText>
-              {post.cityName ? (
-                <ThemedText style={styles.authorSub}>
-                  {post.cityName}
-                  {post.distanceKm ? ` · ${post.distanceKm}km` : ""}
-                </ThemedText>
-              ) : null}
-            </View>
-            <ThemedText style={styles.timeAgo}>{timeAgo(post.createdAt)}</ThemedText>
-          </View>
-          {post.caption ? (
-            <ThemedText style={styles.caption} numberOfLines={2}>
-              {post.caption}
-            </ThemedText>
-          ) : null}
-        </Animated.View>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Route Card
-// ---------------------------------------------------------------------------
-
-function RouteHookCard({
-  route,
-  bottomInset,
-  onTap,
-}: {
-  route: TrendingRoute;
-  bottomInset: number;
-  onTap: () => void;
-}) {
-  const arrowScale = useSharedValue(1);
-  useEffect(() => {
-    arrowScale.value = withRepeat(
-      withSequence(withTiming(1.25, { duration: 600 }), withTiming(1, { duration: 600 })),
-      -1,
-      false,
-    );
-  }, [arrowScale]);
-  const arrowStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: arrowScale.value }],
-  }));
-
-  const parts = route.label.split(" → ");
-  const from = parts[0] || route.label;
-  const to = parts[1] || "";
-
-  return (
-    <Pressable style={styles.cardRoot} onPress={onTap}>
-      <LinearGradient
-        colors={["#4A0000", "#8B1A00", "#CC4400"]}
-        style={StyleSheet.absoluteFill}
-      />
-      {/* Grid pattern overlay */}
-      <View style={styles.routeGrid} pointerEvents="none" />
-
-      {/* Hot badge */}
-      <Animated.View entering={FadeIn.delay(200)} style={[styles.routeBadge]}>
-        <Ionicons name="flame" size={14} color="#fff" />
-        <ThemedText style={styles.routeBadgeText}>HOT ROUTE</ThemedText>
-      </Animated.View>
-
-      {/* Center content */}
-      <View style={styles.routeCenter} pointerEvents="none">
-        <Animated.View style={arrowStyle}>
-          <Ionicons name="trending-up" size={56} color="rgba(255,255,255,0.9)" />
-        </Animated.View>
-        <ThemedText style={styles.routeFrom} numberOfLines={1}>{from}</ThemedText>
-        <Ionicons name="arrow-down-outline" size={22} color="rgba(255,255,255,0.6)" />
-        {to ? (
-          <ThemedText style={styles.routeTo} numberOfLines={1}>{to}</ThemedText>
-        ) : null}
-      </View>
-
-      {/* Right sidebar */}
-      <View style={[styles.sidebar, { bottom: bottomInset }]}>
-        <ActionBtn icon="car-outline" label="" onPress={onTap} />
-        <ActionBtn icon="share-outline" onPress={onTap} />
-      </View>
-
-      {/* Bottom overlay */}
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.75)"]}
-        style={[styles.bottomGradient, { paddingBottom: bottomInset + Spacing.sm }]}
-      >
-        <Animated.View entering={FadeInDown.delay(100)} style={styles.bottomContent}>
-          <ThemedText style={styles.routeStats}>
-            {route.driversLive > 0 ? `${route.driversLive} drivers active` : ""}
-            {route.driversLive > 0 && route.openRequests > 0 ? "  ·  " : ""}
-            {route.openRequests > 0 ? `${route.openRequests} open requests` : ""}
-          </ThemedText>
-          {route.city ? (
-            <ThemedText style={styles.authorSub}>{route.city}</ThemedText>
-          ) : null}
-          <Pressable onPress={onTap} style={styles.bookRouteBtn}>
-            <ThemedText style={styles.bookRouteBtnText}>Book this route</ThemedText>
-          </Pressable>
-        </Animated.View>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Feature Card
-// ---------------------------------------------------------------------------
-
-function FeatureHookCard({
-  feat,
-  bottomInset,
-  onTap,
-}: {
-  feat: FeatureDef;
-  bottomInset: number;
-  onTap: () => void;
-}) {
-  const iconScale = useSharedValue(0.85);
-  useEffect(() => {
-    iconScale.value = withRepeat(
-      withSequence(
-        withTiming(1.0, { duration: 1800 }),
-        withTiming(0.85, { duration: 1800 }),
-      ),
-      -1,
-      false,
-    );
-  }, [iconScale]);
-  const iconStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: iconScale.value }],
-  }));
-
-  return (
-    <Pressable style={styles.cardRoot} onPress={onTap}>
-      <LinearGradient colors={feat.gradient} style={StyleSheet.absoluteFill} />
-
-      {/* Decorative circles */}
-      <View style={[styles.decoCircle, { width: 320, height: 320, top: -60, right: -80, opacity: 0.12 }]} />
-      <View style={[styles.decoCircle, { width: 200, height: 200, bottom: 140, left: -50, opacity: 0.09 }]} />
-
-      {/* Center icon */}
-      <View style={styles.featureCenter} pointerEvents="none">
-        <Animated.View style={[styles.featureIconWrap, iconStyle]}>
-          <Ionicons name={feat.icon} size={72} color="rgba(255,255,255,0.95)" />
-        </Animated.View>
-        <ThemedText style={styles.featureTitle}>{feat.title}</ThemedText>
-        <ThemedText style={styles.featureSubtitle}>{feat.subtitle}</ThemedText>
-      </View>
-
-      {/* Right sidebar */}
-      <View style={[styles.sidebar, { bottom: bottomInset }]}>
-        <ActionBtn icon="share-outline" onPress={onTap} />
-      </View>
-
-      {/* CTA */}
-      <LinearGradient
-        colors={["transparent", "rgba(0,0,0,0.6)"]}
-        style={[styles.bottomGradient, { paddingBottom: bottomInset + Spacing.sm }]}
-      >
-        <Animated.View entering={FadeInDown.delay(150)} style={[styles.bottomContent, { alignItems: "flex-start" }]}>
-          {feat.ctaRoute ? (
-            <Pressable onPress={onTap} style={styles.featureCta}>
-              <ThemedText style={styles.featureCtaText}>{feat.cta}</ThemedText>
-              <Ionicons name="arrow-forward" size={16} color="#fff" />
-            </Pressable>
-          ) : null}
-        </Animated.View>
-      </LinearGradient>
-    </Pressable>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Single hook card (dispatcher)
-// ---------------------------------------------------------------------------
-
-const HookCard = memo(function HookCard({
-  item,
-  bottomInset,
-  isAuthenticated,
-  onTap,
-  onReact,
-}: {
-  item: FeedCard;
-  bottomInset: number;
-  isAuthenticated: boolean;
-  onTap: () => void;
-  onReact: (type: string) => void;
-}) {
-  if (item.type === "live" && item.liveStream) {
-    return (
-      <LiveHookCard stream={item.liveStream} bottomInset={bottomInset} onTap={onTap} />
-    );
-  }
-  if (item.type === "post" && item.post) {
-    return (
-      <PostHookCard
-        post={item.post}
-        bottomInset={bottomInset}
-        isAuthenticated={isAuthenticated}
-        onTap={onTap}
-        onReact={onReact}
-      />
-    );
-  }
-  if (item.type === "route" && item.route) {
-    return <RouteHookCard route={item.route} bottomInset={bottomInset} onTap={onTap} />;
-  }
-  if (item.type === "feature" && item.feature) {
-    return <FeatureHookCard feat={item.feature} bottomInset={bottomInset} onTap={onTap} />;
-  }
-  return null;
-});
-
-// ---------------------------------------------------------------------------
-// Main screen
-// ---------------------------------------------------------------------------
-
-export default function HookFeedScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
-  const route = useRoute<any>();
-  const { isAuthenticated } = useAuth();
-  const { openLoginSheet } = useAuthGate();
-  const { theme, isDark } = useTheme();
-  const insets = useSafeAreaInsets();
-  const qc = useQueryClient();
-
-  // Logged-in users skip the hook feed — go straight to the assistant
-  useEffect(() => {
-    if (isAuthenticated) {
-      navigation.replace("AssistantHome", {});
-    }
-  }, [isAuthenticated, navigation]);
-
-  // Delegate booking params to AssistantHome
-  useEffect(() => {
-    const params = route.params as any;
-    if (params?.selectedLocation || params?.selectedPickup) {
-      navigation.navigate("AssistantHome", params as any);
-    }
-  }, [route.params, navigation]);
-
-  // Hide the parent tab bar on this screen so content is truly full-bleed
-  useFocusEffect(
-    useCallback(() => {
-      navigation.getParent()?.setOptions({ tabBarStyle: { display: "flex" } });
-    }, [navigation]),
-  );
-
-  // ---------------------------------------------------------------------------
-  // Data
-  // ---------------------------------------------------------------------------
-
-  const liveQuery = useQuery<any>({ queryKey: ["/api/network/live-streams"] });
-  const trendingQuery = useQuery<any>({ queryKey: ["/api/trending"] });
-  const feedQuery = useQuery<any>({
-    queryKey: ["/api/social/feed?tab=foryou"],
-    enabled: isAuthenticated,
-  });
-
-  const feedItems = useMemo<FeedCard[]>(() => {
-    const liveStreams: LiveStream[] = liveQuery.data?.streams ?? [];
-    const posts: SocialPost[] = feedQuery.data?.posts ?? [];
-    const routes: TrendingRoute[] = trendingQuery.data?.routes ?? [];
-
-    const items: FeedCard[] = [];
-
-    // Always lead with the welcome card
-    items.push({ id: "feat-welcome", type: "feature", feature: FEATURE_CARDS[0] });
-
-    // Add live streams first (max 3)
-    liveStreams.slice(0, 3).forEach((s, i) => {
-      items.push({ id: `live-${i}`, type: "live", liveStream: s });
-    });
-
-    // Interleave posts, routes, and feature cards
-    const postQ = [...posts];
-    const routeQ = [...routes];
-    const featureQ = FEATURE_CARDS.slice(1);
-
-    let slot = 0;
-    while (items.length < 25) {
-      const mod = slot % 5;
-      if (mod === 0 && postQ.length) {
-        const p = postQ.shift()!;
-        items.push({ id: `post-${p.id}`, type: "post", post: p });
-      } else if (mod === 1 && routeQ.length) {
-        const r = routeQ.shift()!;
-        items.push({ id: `route-${r.label}-${slot}`, type: "route", route: r });
-      } else if (mod === 2 && postQ.length) {
-        const p = postQ.shift()!;
-        items.push({ id: `post2-${p.id}`, type: "post", post: p });
-      } else if (mod === 3 && featureQ.length) {
-        const f = featureQ.shift()!;
-        items.push({ id: f.id, type: "feature", feature: f });
-      } else if (mod === 4 && postQ.length) {
-        const p = postQ.shift()!;
-        items.push({ id: `post3-${p.id}`, type: "post", post: p });
-      } else if (featureQ.length) {
-        const f = featureQ.shift()!;
-        items.push({ id: `${f.id}-${slot}`, type: "feature", feature: f });
-      } else {
-        // Cycle through static features
-        const f = FEATURE_CARDS[(slot % FEATURE_CARDS.length) + 1 < FEATURE_CARDS.length
-          ? (slot % FEATURE_CARDS.length) + 1 : 0];
-        items.push({ id: `feat-cycle-${slot}`, type: "feature", feature: f });
-      }
-      slot++;
-      if (slot > 60) break; // safety
-    }
-
-    return items;
-  }, [liveQuery.data, feedQuery.data, trendingQuery.data]);
-
-  // ---------------------------------------------------------------------------
-  // Auto-advance
-  // ---------------------------------------------------------------------------
-
-  const flatListRef = useRef<FlatList>(null);
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const progressAnim = useSharedValue(0);
-  const isUserScrolling = useRef(false);
-
-  const advanceTo = useCallback(
-    (nextIdx: number) => {
-      const target = nextIdx % feedItems.length;
-      setCurrentIndex(target);
-      flatListRef.current?.scrollToIndex({ index: target, animated: true });
-    },
-    [feedItems.length],
-  );
+  const underlineX = useSharedValue(activeTab === "nearby" ? 0 : 1);
 
   useEffect(() => {
-    // Reset and start progress bar
-    progressAnim.value = 0;
-    progressAnim.value = withTiming(1, { duration: AUTO_ADVANCE_MS - 200 });
+    underlineX.value = withTiming(activeTab === "nearby" ? 0 : 1, { duration: 220 });
+  }, [activeTab, underlineX]);
 
-    // Schedule auto-advance
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      if (!isUserScrolling.current) {
-        advanceTo(currentIndex + 1);
-      }
-    }, AUTO_ADVANCE_MS);
-
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [currentIndex, advanceTo, progressAnim]);
-
-  // ---------------------------------------------------------------------------
-  // Reactions
-  // ---------------------------------------------------------------------------
-
-  const reactMutation = useMutation({
-    mutationFn: ({ postId, type }: { postId: string; type: string }) =>
-      apiRequest(`/api/social/posts/${postId}/react`, {
-        method: "POST",
-        body: JSON.stringify({ type }),
-        headers: { "Content-Type": "application/json" },
-      }),
-    onSuccess: () => {
-      qc.invalidateQueries({
-        predicate: (q) => !!q.queryKey[0]?.toString().startsWith("/api/social"),
-      });
-    },
-  });
-
-  // ---------------------------------------------------------------------------
-  // Navigation helpers
-  // ---------------------------------------------------------------------------
-
-  const goToAssistant = useCallback(() => {
-    navigation.navigate("AssistantHome");
-  }, [navigation]);
-
-  const goToSocial = useCallback(() => {
-    const parent = navigation.getParent<any>();
-    parent?.navigate("SocialTab");
-  }, [navigation]);
-
-  const handleCardTap = useCallback(
-    (item: FeedCard) => {
-      if (item.type === "live") {
-        goToSocial();
-      } else if (item.type === "post") {
-        goToSocial();
-      } else if (item.type === "route") {
-        goToAssistant();
-      } else if (item.type === "feature") {
-        const r = item.feature?.ctaRoute;
-        if (r === "AssistantHome") goToAssistant();
-        else if (r === "Coffee") navigation.navigate("Coffee");
-        else if (r === "PrayerRides") navigation.navigate("PrayerRides");
-        else if (r === "ScheduledArrivals") navigation.navigate("ScheduledArrivals");
-      }
-    },
-    [goToSocial, goToAssistant, navigation],
-  );
-
-  // ---------------------------------------------------------------------------
-  // Layout
-  // ---------------------------------------------------------------------------
-
-  // Bottom inset for cards = safe area + tab bar, so content sits above tab bar
-  const cardBottomInset = insets.bottom + TAB_BAR_H + Spacing.md;
-
-  const progressBarStyle = useAnimatedStyle(() => ({
-    width: `${progressAnim.value * 100}%` as any,
+  // Each tab is 80 px wide; underline starts at left:20 within the first tab
+  const underlineStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: underlineX.value * 80 }],
   }));
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
-  const renderItem = useCallback(
-    ({ item, index }: { item: FeedCard; index: number }) => (
-      <View style={{ width: SCREEN_W, height: SCREEN_H }}>
-        <HookCard
-          item={item}
-          bottomInset={cardBottomInset}
-          isAuthenticated={isAuthenticated}
-          onTap={() => handleCardTap(item)}
-          onReact={(type) => {
-            if (item.type === "post" && item.post) {
-              if (!isAuthenticated) { openLoginSheet(); return; }
-              reactMutation.mutate({ postId: item.post.id, type });
-            }
-          }}
-        />
-      </View>
-    ),
-    [cardBottomInset, isAuthenticated, handleCardTap, openLoginSheet, reactMutation],
-  );
-
-  const getItemLayout = useCallback(
-    (_: any, index: number) => ({ length: SCREEN_H, offset: SCREEN_H * index, index }),
-    [],
-  );
-
   return (
-    <View style={styles.root}>
-      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+    <View style={[tabStyles.container, { paddingTop: insetTop }]} pointerEvents="box-none">
+      <View style={tabStyles.row} pointerEvents="box-none">
+        <ThemedText style={tabStyles.wordmark}>travony</ThemedText>
 
-      {/* Full-screen vertical pager */}
-      <FlatList
-        ref={flatListRef}
-        data={feedItems}
-        keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        pagingEnabled
-        showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        decelerationRate="fast"
-        getItemLayout={getItemLayout}
-        onScrollBeginDrag={() => {
-          isUserScrolling.current = true;
-          if (timerRef.current) clearTimeout(timerRef.current);
-        }}
-        onMomentumScrollEnd={(e) => {
-          isUserScrolling.current = false;
-          const idx = Math.round(e.nativeEvent.contentOffset.y / SCREEN_H);
-          setCurrentIndex(idx);
-        }}
-        windowSize={3}
-        maxToRenderPerBatch={3}
-        initialNumToRender={2}
-      />
-
-      {/* Top chrome — Travony wordmark + progress dots + AI button */}
-      <View
-        style={[styles.topChrome, { paddingTop: insets.top + Spacing.sm }]}
-        pointerEvents="box-none"
-      >
-        {/* Progress bar row */}
-        <View style={styles.progressRow} pointerEvents="none">
-          {feedItems.slice(0, Math.min(feedItems.length, 20)).map((item, i) => (
-            <View key={item.id} style={styles.progressTrack}>
-              {i === currentIndex ? (
-                <Animated.View style={[styles.progressFill, progressBarStyle]} />
-              ) : (
-                <View
-                  style={[
-                    styles.progressFill,
-                    { width: i < currentIndex ? "100%" : "0%" },
-                  ]}
-                />
-              )}
-            </View>
-          ))}
-        </View>
-
-        {/* Logo row */}
-        <View style={styles.logoRow} pointerEvents="box-none">
-          {/* Wordmark */}
-          <ThemedText style={styles.wordmark}>travony</ThemedText>
-
-          {/* Right: AI chat */}
-          <Pressable
-            onPress={goToAssistant}
-            style={styles.aiBtn}
-            hitSlop={12}
-          >
-            <BlurView
-              intensity={40}
-              tint="dark"
-              style={StyleSheet.absoluteFill}
-            />
-            <Ionicons name="chatbubble-ellipses-outline" size={21} color="#fff" />
+        <View style={tabStyles.tabs}>
+          <Pressable onPress={() => onTabChange("nearby")} style={tabStyles.tab} hitSlop={8}>
+            <Text style={[tabStyles.tabText, activeTab === "nearby" && tabStyles.tabTextActive]}>
+              Nearby
+            </Text>
           </Pressable>
+          <Pressable onPress={() => onTabChange("following")} style={tabStyles.tab} hitSlop={8}>
+            <Text style={[tabStyles.tabText, activeTab === "following" && tabStyles.tabTextActive]}>
+              Following
+            </Text>
+          </Pressable>
+          <Animated.View style={[tabStyles.underline, underlineStyle]} />
         </View>
+
+        <Pressable
+          onPress={() => navigation.navigate("AssistantHome")}
+          style={tabStyles.aiBtn}
+          hitSlop={12}
+        >
+          <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+          <Ionicons name="chatbubble-ellipses-outline" size={21} color="#fff" />
+        </Pressable>
       </View>
     </View>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Styles
-// ---------------------------------------------------------------------------
-
-const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: "#000",
-  },
-
-  // Card
-  cardRoot: {
-    width: SCREEN_W,
-    height: SCREEN_H,
-    backgroundColor: "#111",
-    overflow: "hidden",
-  },
-
-  // Live card
-  liveAvatarWrap: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  livePulseRing: {
-    position: "absolute",
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 3,
-    borderColor: Colors.liveRed,
-  },
-  liveAvatarInner: {
-    borderWidth: 3,
-    borderColor: Colors.liveRed,
-    borderRadius: 66,
-    overflow: "hidden",
-  },
-  liveBadge: {
-    position: "absolute",
-    top: 90,
-    left: Spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: Colors.liveRed,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    gap: 5,
-  },
-  liveBadgeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 3.5,
-    backgroundColor: "#fff",
-  },
-  liveBadgeText: {
-    fontSize: 12,
-    fontWeight: "800",
-    color: "#fff",
-    letterSpacing: 1,
-  },
-  liveBadgeCount: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.85)",
-  },
-
-  // Route card
-  routeGrid: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    opacity: 0.07,
-    borderWidth: 1,
-    borderColor: "#fff",
-  },
-  routeBadge: {
-    position: "absolute",
-    top: 90,
-    left: Spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,80,0,0.9)",
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    gap: 4,
-  },
-  routeBadgeText: {
-    fontSize: 11,
-    fontWeight: "800",
-    color: "#fff",
-    letterSpacing: 1.2,
-  },
-  routeCenter: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Spacing.xl,
-  },
-  routeFrom: {
-    fontSize: 32,
-    fontWeight: "800",
-    color: "#fff",
-    textAlign: "center",
-    marginTop: Spacing.lg,
-    letterSpacing: -0.5,
-  },
-  routeTo: {
-    fontSize: 26,
-    fontWeight: "700",
-    color: "rgba(255,255,255,0.85)",
-    textAlign: "center",
-    marginTop: Spacing.xs,
-    letterSpacing: -0.3,
-  },
-  routeStats: {
-    fontSize: 15,
-    fontWeight: "600",
-    color: "rgba(255,255,255,0.9)",
-    marginBottom: Spacing.xs,
-  },
-  bookRouteBtn: {
-    marginTop: Spacing.sm,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.35)",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    alignSelf: "flex-start",
-  },
-  bookRouteBtnText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: "#fff",
-  },
-
-  // Feature card
-  decoCircle: {
-    position: "absolute",
-    borderRadius: 1000,
-    backgroundColor: "#fff",
-  },
-  featureCenter: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: Spacing["2xl"],
-  },
-  featureIconWrap: {
-    marginBottom: Spacing.xl,
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  featureTitle: {
-    fontSize: 30,
-    fontWeight: "800",
-    color: "#fff",
-    textAlign: "center",
-    letterSpacing: -0.5,
-    marginBottom: Spacing.md,
-  },
-  featureSubtitle: {
-    fontSize: 16,
-    fontWeight: "400",
-    color: "rgba(255,255,255,0.82)",
-    textAlign: "center",
-    lineHeight: 24,
-  },
-  featureCta: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.18)",
-    borderRadius: BorderRadius.full,
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.3)",
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm + 2,
-    gap: 6,
-  },
-  featureCtaText: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
-  },
-
-  // Right sidebar
-  sidebar: {
-    position: "absolute",
-    right: Spacing.md,
-    alignItems: "center",
-    gap: Spacing.lg,
-  },
-  actionBtn: {
-    alignItems: "center",
-  },
-  actionBtnInner: {
-    alignItems: "center",
-  },
-  actionBtnLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: "#fff",
-    marginTop: 3,
-  },
-
-  // Bottom overlay
-  bottomGradient: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    paddingTop: 80,
-    paddingHorizontal: Spacing.lg,
-  },
-  bottomContent: {
-    paddingRight: 70,
-  },
-  authorRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginBottom: Spacing.sm,
-  },
-  authorName: {
-    fontSize: 15,
-    fontWeight: "700",
-    color: "#fff",
-  },
-  authorSub: {
-    fontSize: 12,
-    fontWeight: "400",
-    color: "rgba(255,255,255,0.75)",
-  },
-  timeAgo: {
-    fontSize: 12,
-    color: "rgba(255,255,255,0.6)",
-  },
-  caption: {
-    fontSize: 14,
-    fontWeight: "400",
-    color: "rgba(255,255,255,0.9)",
-    lineHeight: 20,
-  },
-
-  // Top chrome
-  topChrome: {
+const tabStyles = StyleSheet.create({
+  container: {
     position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     zIndex: 10,
     paddingHorizontal: Spacing.md,
-    gap: Spacing.xs,
   },
-  progressRow: {
-    flexDirection: "row",
-    gap: 3,
-    paddingHorizontal: Spacing.xs,
-  },
-  progressTrack: {
-    flex: 1,
-    height: 2,
-    backgroundColor: "rgba(255,255,255,0.25)",
-    borderRadius: 1,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#fff",
-    borderRadius: 1,
-  },
-  logoRow: {
+  row: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: Spacing.xs,
+    paddingVertical: Spacing.sm,
+    gap: Spacing.md,
   },
   wordmark: {
     fontSize: 22,
     fontWeight: "800",
     color: "#fff",
     letterSpacing: -0.5,
+  },
+  tabs: {
+    flexDirection: "row",
+    position: "relative",
+  },
+  tab: {
+    width: 80,
+    alignItems: "center",
+    paddingVertical: Spacing.xs,
+  },
+  tabText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "rgba(255,255,255,0.5)",
+  },
+  tabTextActive: {
+    color: "#fff",
+    fontWeight: "700",
+  },
+  underline: {
+    position: "absolute",
+    bottom: -2,
+    left: 20,
+    width: 40,
+    height: 2.5,
+    borderRadius: 2,
+    backgroundColor: "#fff",
   },
   aiBtn: {
     width: 40,
@@ -1241,3 +264,1127 @@ const styles = StyleSheet.create({
     borderColor: "rgba(255,255,255,0.25)",
   },
 });
+
+// ---------------------------------------------------------------------------
+// DataTicker — animated horizontal marquee
+// ---------------------------------------------------------------------------
+
+function DataTicker({ driver }: { driver: DiscoveryDriver }) {
+  const parts: string[] = [];
+  if (driver.vehicle?.make && driver.vehicle?.model)
+    parts.push(`${driver.vehicle.make} ${driver.vehicle.model}`);
+  if (driver.vehicle?.licensePlate) parts.push(driver.vehicle.licensePlate);
+  parts.push(`${driver.etaMinutes} min away`);
+  parts.push(`${driver.currencySymbol}${driver.upfrontFare}`);
+  const text = parts.join("  ·  ");
+
+  const x = useSharedValue(SCREEN_W);
+  const [textW, setTextW] = useState(0);
+  const animStyle = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+
+  useEffect(() => {
+    if (textW <= 0) return;
+    const travel = SCREEN_W + textW + 32;
+    x.value = SCREEN_W;
+    x.value = withRepeat(withTiming(-(textW + 32), { duration: travel * 14 }), -1, false);
+  }, [text, textW]);
+
+  return (
+    <View style={tickerStyles.outer}>
+      <LinearGradient
+        colors={["rgba(0,0,0,0)", "rgba(0,0,0,0.52)"]}
+        style={StyleSheet.absoluteFill}
+      />
+      <Animated.View
+        style={[tickerStyles.inner, animStyle]}
+        onLayout={(e) => setTextW(e.nativeEvent.layout.width)}
+      >
+        <Text style={tickerStyles.text} numberOfLines={1}>
+          {text}{"    ·    "}{text}
+        </Text>
+      </Animated.View>
+    </View>
+  );
+}
+
+const tickerStyles = StyleSheet.create({
+  outer: { height: 36, overflow: "hidden", justifyContent: "center" },
+  inner: { position: "absolute", flexDirection: "row", alignItems: "center" },
+  text: {
+    fontSize: 13,
+    fontWeight: "600",
+    color: "#fff",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+    letterSpacing: 0.2,
+    paddingHorizontal: Spacing.sm,
+  },
+});
+
+// ---------------------------------------------------------------------------
+// MiniMapOverlay — 120×120 rounded WebViewMap
+// ---------------------------------------------------------------------------
+
+function MiniMapOverlay({
+  lat,
+  lng,
+  bottom,
+  onExpand,
+}: {
+  lat: number;
+  lng: number;
+  bottom: number;
+  onExpand: () => void;
+}) {
+  return (
+    <Pressable onPress={onExpand} style={[miniMapStyles.wrap, { bottom }]}>
+      <WebViewMap
+        driverLocation={{ lat, lng }}
+        showDriverMarker
+        interactive={false}
+        height={120}
+        isDark
+      />
+      <View style={miniMapStyles.expandIcon}>
+        <Ionicons name="expand-outline" size={11} color="#fff" />
+      </View>
+    </Pressable>
+  );
+}
+
+// Full-screen map modal on tap
+function MapExpandModal({
+  lat,
+  lng,
+  visible,
+  onClose,
+}: {
+  lat: number;
+  lng: number;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: "#000" }}>
+        <WebViewMap driverLocation={{ lat, lng }} showDriverMarker interactive height="100%" isDark />
+        <Pressable
+          onPress={onClose}
+          style={miniMapStyles.closeBtn}
+          hitSlop={12}
+        >
+          <Ionicons name="close" size={20} color="#fff" />
+        </Pressable>
+      </View>
+    </Modal>
+  );
+}
+
+const miniMapStyles = StyleSheet.create({
+  wrap: {
+    position: "absolute",
+    right: Spacing.md,
+    width: 120,
+    height: 120,
+    borderRadius: 16,
+    overflow: "hidden",
+    borderWidth: 1.5,
+    borderColor: "rgba(255,255,255,0.22)",
+  },
+  expandIcon: {
+    position: "absolute",
+    top: 4,
+    right: 4,
+    backgroundColor: "rgba(0,0,0,0.55)",
+    borderRadius: 10,
+    padding: 3,
+  },
+  closeBtn: {
+    position: "absolute",
+    top: 60,
+    right: Spacing.lg,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: "rgba(0,0,0,0.7)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+});
+
+// ---------------------------------------------------------------------------
+// AgoraCardBackground — native Agora viewer, active only for the focused card
+// ---------------------------------------------------------------------------
+
+function AgoraCardBackground({
+  postId,
+  isFocused,
+}: {
+  postId: string;
+  isFocused: boolean;
+}) {
+  const nativeOk = agoraNativeAvailable();
+  const { liteMode } = useLiteMode();
+  const [remoteUid, setRemoteUid] = useState<number | null>(null);
+  const [ended, setEnded] = useState(false);
+
+  const tokenQuery = useQuery<StreamTokenBundle>({
+    queryKey: ["/api/agora/token", postId],
+    queryFn: () =>
+      apiRequest("/api/agora/token", {
+        method: "POST",
+        body: JSON.stringify({ ridePostId: postId }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    enabled: isFocused && !!postId && nativeOk,
+    staleTime: 30 * 60 * 1000,
+    retry: 1,
+  });
+  const tokens = tokenQuery.data ?? null;
+  const rtc = useMemo(() => loadAgoraRtc(), []);
+
+  useEffect(() => {
+    if (!isFocused || !rtc || !tokens || ended) return;
+    let engine: any = null;
+    try {
+      const { createAgoraRtcEngine, ChannelProfileType, ClientRoleType } = rtc;
+      engine = createAgoraRtcEngine();
+      engine.initialize({
+        appId: tokens.appId,
+        channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
+      });
+      engine.registerEventHandler({
+        onUserJoined: (_conn: any, uid: number) => setRemoteUid(uid),
+        onUserOffline: () => setRemoteUid(null),
+        onConnectionStateChanged: (_conn: any, state: number) => {
+          if (state === 5) setEnded(true); // CONNECTION_STATE_FAILED
+        },
+      });
+      engine.enableVideo();
+      if (liteMode) engine.setRemoteDefaultVideoStreamType?.(1); // low-quality simulcast
+      engine.joinChannelWithUserAccount(tokens.rtcToken, tokens.channel, tokens.uid, {
+        clientRoleType: ClientRoleType.ClientRoleAudience,
+        audienceLatencyLevel: 1,
+        autoSubscribeVideo: true,
+        autoSubscribeAudio: false, // muted while browsing the feed
+        publishCameraTrack: false,
+        publishMicrophoneTrack: false,
+      });
+    } catch (err) {
+      console.log("[Discovery] Agora join failed:", err);
+    }
+    return () => {
+      try {
+        engine?.leaveChannel();
+        engine?.unregisterEventHandler?.({});
+        engine?.release();
+      } catch {}
+      setRemoteUid(null);
+    };
+  }, [isFocused, rtc, tokens?.rtcToken, ended]);
+
+  const AgoraView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
+
+  if (!nativeOk || !AgoraView || remoteUid === null) {
+    return (
+      <LinearGradient
+        colors={["#18002A", "#3D0050", "#0D0018"]}
+        style={StyleSheet.absoluteFill}
+      />
+    );
+  }
+  return <AgoraView style={StyleSheet.absoluteFill} canvas={{ uid: remoteUid, renderMode: 1 }} />;
+}
+
+// ---------------------------------------------------------------------------
+// AccoladesSheet — driver stats bottom sheet (Modal)
+// ---------------------------------------------------------------------------
+
+function AccoladesSheet({
+  driver,
+  visible,
+  onClose,
+}: {
+  driver: DiscoveryDriver;
+  visible: boolean;
+  onClose: () => void;
+}) {
+  const rating = driver.rating ? parseFloat(driver.rating) : null;
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <Pressable style={sheetStyles.backdrop} onPress={onClose} />
+      <View style={sheetStyles.sheet}>
+        <View style={sheetStyles.handle} />
+
+        {/* Header */}
+        <View style={sheetStyles.headerRow}>
+          <Avatar uri={driver.avatar} name={driver.name} size={52} />
+          <View style={{ flex: 1 }}>
+            <Text style={sheetStyles.name}>{driver.name}</Text>
+            {driver.vehicle ? (
+              <Text style={sheetStyles.vehicleSub}>
+                {driver.vehicle.color ? `${driver.vehicle.color} ` : ""}
+                {driver.vehicle.make} {driver.vehicle.model}
+              </Text>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Stats row */}
+        <View style={sheetStyles.statsRow}>
+          <View style={sheetStyles.statCell}>
+            <Text style={sheetStyles.statVal}>{rating ? rating.toFixed(1) : "—"}</Text>
+            <View style={sheetStyles.stars}>
+              {[1, 2, 3, 4, 5].map((s) => (
+                <Ionicons
+                  key={s}
+                  name={rating && s <= Math.round(rating) ? "star" : "star-outline"}
+                  size={11}
+                  color={rating && s <= Math.round(rating) ? "#FFD700" : "rgba(255,255,255,0.25)"}
+                />
+              ))}
+            </View>
+            <Text style={sheetStyles.statLbl}>Rating</Text>
+          </View>
+          <View style={[sheetStyles.statCell, sheetStyles.cellBorder]}>
+            <Text style={sheetStyles.statVal}>{driver.totalTrips ?? "—"}</Text>
+            <Text style={sheetStyles.statLbl}>Trips</Text>
+          </View>
+          <View style={sheetStyles.statCell}>
+            <Text style={sheetStyles.statVal}>{driver.etaMinutes} min</Text>
+            <Text style={sheetStyles.statLbl}>ETA</Text>
+          </View>
+        </View>
+
+        {/* Details */}
+        {driver.vehicle?.licensePlate ? (
+          <View style={sheetStyles.detailRow}>
+            <Ionicons name="id-card-outline" size={15} color="rgba(255,255,255,0.45)" />
+            <Text style={sheetStyles.detailText}>{driver.vehicle.licensePlate}</Text>
+          </View>
+        ) : null}
+        <View style={sheetStyles.detailRow}>
+          <Ionicons name="location-outline" size={15} color="rgba(255,255,255,0.45)" />
+          <Text style={sheetStyles.detailText}>{driver.distanceKm} km away</Text>
+        </View>
+        <View style={sheetStyles.fareRow}>
+          <Ionicons name="cash-outline" size={15} color={Colors.travonyGreen} />
+          <Text style={sheetStyles.fareText}>
+            Est. fare: {driver.currencySymbol}{driver.upfrontFare} {driver.currency}
+          </Text>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const sheetStyles = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.5)" },
+  sheet: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: "#1A1A2E",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: Spacing.xl,
+    paddingBottom: 44,
+    gap: Spacing.md,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    alignSelf: "center",
+    marginBottom: Spacing.sm,
+  },
+  headerRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md },
+  name: { fontSize: 20, fontWeight: "700", color: "#fff" },
+  vehicleSub: { fontSize: 13, color: "rgba(255,255,255,0.55)", marginTop: 2 },
+  statsRow: {
+    flexDirection: "row",
+    backgroundColor: "rgba(255,255,255,0.06)",
+    borderRadius: 16,
+    overflow: "hidden",
+  },
+  statCell: { flex: 1, alignItems: "center", padding: Spacing.md, gap: 4 },
+  cellBorder: {
+    borderLeftWidth: 1,
+    borderRightWidth: 1,
+    borderColor: "rgba(255,255,255,0.09)",
+  },
+  statVal: { fontSize: 22, fontWeight: "800", color: "#fff" },
+  stars: { flexDirection: "row", gap: 2 },
+  statLbl: { fontSize: 11, color: "rgba(255,255,255,0.45)", fontWeight: "500" },
+  detailRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
+  detailText: { fontSize: 14, color: "rgba(255,255,255,0.6)" },
+  fareRow: { flexDirection: "row", alignItems: "center", gap: Spacing.sm, marginTop: 2 },
+  fareText: { fontSize: 15, color: Colors.travonyGreen, fontWeight: "600" },
+});
+
+// ---------------------------------------------------------------------------
+// ReviewsOverlay — semi-transparent panel showing last 10 ride ratings
+// ---------------------------------------------------------------------------
+
+function ReviewsOverlay({
+  driver,
+  visible,
+  onClose,
+  isAuthenticated,
+}: {
+  driver: DiscoveryDriver;
+  visible: boolean;
+  onClose: () => void;
+  isAuthenticated: boolean;
+}) {
+  const ratingsQuery = useQuery<{ ratings: RatingRow[] }>({
+    queryKey: ["/api/drivers", driver.driverId, "ratings"],
+    queryFn: () => apiRequest(`/api/drivers/${driver.driverId}/ratings`),
+    enabled: visible && isAuthenticated && !!driver.driverId,
+  });
+  const ratings = ratingsQuery.data?.ratings ?? [];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable style={reviewStyles.backdrop} onPress={onClose} />
+      <View style={reviewStyles.panel}>
+        <View style={reviewStyles.header}>
+          <Text style={reviewStyles.title}>Ride Reviews</Text>
+          <Pressable onPress={onClose} hitSlop={12}>
+            <Ionicons name="close" size={20} color="rgba(255,255,255,0.55)" />
+          </Pressable>
+        </View>
+
+        {!isAuthenticated ? (
+          <View style={reviewStyles.center}>
+            <Ionicons name="lock-closed-outline" size={36} color="rgba(255,255,255,0.25)" />
+            <Text style={reviewStyles.hint}>Sign in to see ride reviews</Text>
+          </View>
+        ) : ratingsQuery.isLoading ? (
+          <View style={reviewStyles.center}>
+            <ActivityIndicator color="#fff" />
+          </View>
+        ) : ratings.length === 0 ? (
+          <View style={reviewStyles.center}>
+            <Text style={reviewStyles.hint}>No reviews yet</Text>
+          </View>
+        ) : (
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {ratings.slice(0, 10).map((r) => (
+              <View key={r.id} style={reviewStyles.item}>
+                <View style={reviewStyles.itemTop}>
+                  <View style={reviewStyles.stars}>
+                    {[1, 2, 3, 4, 5].map((s) => (
+                      <Ionicons
+                        key={s}
+                        name={s <= r.rating ? "star" : "star-outline"}
+                        size={11}
+                        color={s <= r.rating ? "#FFD700" : "rgba(255,255,255,0.2)"}
+                      />
+                    ))}
+                  </View>
+                  {r.riderName ? (
+                    <Text style={reviewStyles.rider}>{r.riderName}</Text>
+                  ) : null}
+                </View>
+                {r.comment ? (
+                  <Text style={reviewStyles.comment}>{r.comment}</Text>
+                ) : null}
+              </View>
+            ))}
+          </ScrollView>
+        )}
+      </View>
+    </Modal>
+  );
+}
+
+const reviewStyles = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: "rgba(0,0,0,0.6)" },
+  panel: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: SCREEN_H * 0.55,
+    backgroundColor: "rgba(10,10,25,0.97)",
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    padding: Spacing.lg,
+    paddingBottom: 40,
+  },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: Spacing.md,
+  },
+  title: { fontSize: 16, fontWeight: "700", color: "#fff" },
+  center: { flex: 1, alignItems: "center", justifyContent: "center", gap: Spacing.md },
+  hint: { fontSize: 14, color: "rgba(255,255,255,0.45)", textAlign: "center" },
+  item: {
+    paddingVertical: Spacing.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: "rgba(255,255,255,0.07)",
+    gap: 4,
+  },
+  itemTop: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  stars: { flexDirection: "row", gap: 2 },
+  rider: { fontSize: 11, color: "rgba(255,255,255,0.35)" },
+  comment: { fontSize: 13, color: "rgba(255,255,255,0.72)", lineHeight: 18 },
+});
+
+// ---------------------------------------------------------------------------
+// DiscoveryActionPanel — right-side vertical action stack
+// ---------------------------------------------------------------------------
+
+function DiscoveryActionPanel({
+  driver,
+  bottom,
+  onBook,
+  onAccolades,
+  onReviews,
+  onShare,
+  onDriverProfile,
+}: {
+  driver: DiscoveryDriver;
+  bottom: number;
+  onBook: () => void;
+  onAccolades: () => void;
+  onReviews: () => void;
+  onShare: () => void;
+  onDriverProfile: () => void;
+}) {
+  const rating = driver.rating ? parseFloat(driver.rating) : null;
+
+  return (
+    <View style={[panelStyles.container, { bottom }]}>
+      {/* Driver avatar — tap opens profile */}
+      <Pressable onPress={onDriverProfile} style={panelStyles.avatarWrap} hitSlop={8}>
+        <Avatar uri={driver.avatar} name={driver.name} size={52} />
+        <View style={panelStyles.onlineDot} />
+      </Pressable>
+
+      {/* Book — navigates to assistant/booking flow */}
+      <Pressable onPress={onBook} style={panelStyles.btn} hitSlop={8}>
+        <View style={panelStyles.bookCircle}>
+          <Ionicons name="add" size={22} color="#fff" />
+        </View>
+        <Text style={panelStyles.btnLbl}>Book</Text>
+      </Pressable>
+
+      {/* Accolades — star rating chip */}
+      <Pressable onPress={onAccolades} style={panelStyles.btn} hitSlop={8}>
+        <View style={panelStyles.ratingWrap}>
+          <Ionicons name="star" size={18} color="#FFD700" />
+          <Text style={panelStyles.ratingNum}>
+            {rating ? rating.toFixed(1) : "—"}
+          </Text>
+        </View>
+        <Text style={panelStyles.btnLbl}>Stars</Text>
+      </Pressable>
+
+      {/* Reviews */}
+      <Pressable onPress={onReviews} style={panelStyles.btn} hitSlop={8}>
+        <Ionicons
+          name="chatbubble-outline"
+          size={28}
+          color="#fff"
+          style={panelStyles.iconShadow}
+        />
+        <Text style={panelStyles.btnLbl}>Reviews</Text>
+      </Pressable>
+
+      {/* Share */}
+      <Pressable onPress={onShare} style={panelStyles.btn} hitSlop={8}>
+        <Ionicons
+          name="share-outline"
+          size={28}
+          color="#fff"
+          style={panelStyles.iconShadow}
+        />
+        <Text style={panelStyles.btnLbl}>Share</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const panelStyles = StyleSheet.create({
+  container: {
+    position: "absolute",
+    right: Spacing.md,
+    alignItems: "center",
+    gap: Spacing.xl,
+  },
+  avatarWrap: { position: "relative" },
+  onlineDot: {
+    position: "absolute",
+    bottom: 1,
+    right: 1,
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    backgroundColor: Colors.travonyGreen,
+    borderWidth: 2,
+    borderColor: "#000",
+  },
+  btn: { alignItems: "center", gap: 4, minHeight: 48, justifyContent: "center" },
+  bookCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.travonyGreen,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  ratingWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "rgba(0,0,0,0.4)",
+    borderRadius: 12,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 5,
+  },
+  ratingNum: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: "#fff",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  btnLbl: {
+    fontSize: 11,
+    fontWeight: "500",
+    color: "rgba(255,255,255,0.8)",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
+  iconShadow: {
+    textShadowColor: "rgba(0,0,0,0.6)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 4,
+  } as any,
+});
+
+// ---------------------------------------------------------------------------
+// EmptyCard — shown when there are no drivers for the active tab
+// ---------------------------------------------------------------------------
+
+function EmptyCard({
+  tab,
+  bottomInset,
+}: {
+  tab: FeedTab;
+  bottomInset: number;
+}) {
+  return (
+    <View style={{ width: SCREEN_W, height: SCREEN_H }}>
+      <LinearGradient colors={["#0D1A0D", "#003D1C", "#001A0B"]} style={StyleSheet.absoluteFill} />
+      <View
+        style={{
+          flex: 1,
+          alignItems: "center",
+          justifyContent: "center",
+          paddingHorizontal: Spacing["2xl"],
+          paddingBottom: bottomInset + 60,
+        }}
+      >
+        <Ionicons
+          name={tab === "nearby" ? "location-outline" : "people-outline"}
+          size={64}
+          color="rgba(255,255,255,0.2)"
+        />
+        <Text
+          style={{
+            fontSize: 22,
+            fontWeight: "700",
+            color: "rgba(255,255,255,0.65)",
+            textAlign: "center",
+            marginTop: Spacing.xl,
+          }}
+        >
+          {tab === "nearby" ? "No drivers nearby" : "No followed drivers online"}
+        </Text>
+        <Text
+          style={{
+            fontSize: 14,
+            color: "rgba(255,255,255,0.38)",
+            textAlign: "center",
+            marginTop: Spacing.md,
+            lineHeight: 22,
+          }}
+        >
+          {tab === "nearby"
+            ? "Online approved drivers in your area will appear here."
+            : "Drivers you follow will appear here when they go online."}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// DriverDiscoveryCard — one full-screen swipeable card
+// ---------------------------------------------------------------------------
+
+const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
+  driver,
+  isFocused,
+  cardBottomInset,
+  isAuthenticated,
+  onAccolades,
+  onReviews,
+  onBook,
+  onShare,
+  onDriverProfile,
+}: {
+  driver: DiscoveryDriver;
+  isFocused: boolean;
+  cardBottomInset: number;
+  isAuthenticated: boolean;
+  onAccolades: (d: DiscoveryDriver) => void;
+  onReviews: (d: DiscoveryDriver) => void;
+  onBook: (d: DiscoveryDriver) => void;
+  onShare: (d: DiscoveryDriver) => void;
+  onDriverProfile: (d: DiscoveryDriver) => void;
+}) {
+  const [mapExpanded, setMapExpanded] = useState(false);
+
+  const isAgora = driver.isLive && driver.streamProvider === "agora" && !!driver.postId;
+  const vehiclePhoto = driver.vehicle?.photo ?? null;
+
+  // Layout:  bottom of screen ← tab bar ← ticker ← mini-map ← action panel
+  const tickerBottom = cardBottomInset;                             // sits just above the tab bar
+  const miniMapBottom = tickerBottom + 36 + Spacing.sm;            // above the ticker
+  const actionPanelBottom = miniMapBottom + 120 + Spacing.lg;      // above the mini-map
+
+  return (
+    <View style={{ width: SCREEN_W, height: SCREEN_H }}>
+      {/* ── Background ── */}
+      {isAgora && driver.postId ? (
+        <AgoraCardBackground postId={driver.postId} isFocused={isFocused} />
+      ) : vehiclePhoto ? (
+        <>
+          <Image
+            source={{ uri: vehiclePhoto }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+          />
+          {/* Light scrim so text is always readable over bright/dark photos */}
+          <LinearGradient
+            colors={["rgba(0,0,0,0.25)", "rgba(0,0,0,0)", "rgba(0,0,0,0.35)"]}
+            style={StyleSheet.absoluteFill}
+          />
+        </>
+      ) : (
+        <LinearGradient
+          colors={["#0D0020", "#1E0038", "#0A0015"]}
+          style={StyleSheet.absoluteFill}
+        />
+      )}
+
+      {/* ── Top gradient scrim — keeps wordmark + tabs readable ── */}
+      <LinearGradient
+        colors={["rgba(0,0,0,0.6)", "rgba(0,0,0,0)"]}
+        style={{ position: "absolute", top: 0, left: 0, right: 0, height: 130 }}
+        pointerEvents="none"
+      />
+
+      {/* ── LIVE badge ── */}
+      {driver.isLive ? (
+        <Animated.View entering={FadeIn.delay(200)} style={cardStyles.liveBadge}>
+          <View style={cardStyles.liveDot} />
+          <Text style={cardStyles.liveText}>LIVE</Text>
+          {driver.streamProvider === "agora" && (
+            <Text style={cardStyles.liveSub}> · In-app</Text>
+          )}
+          {driver.streamProvider === "twitch" && (
+            <Text style={cardStyles.liveSub}> · Twitch</Text>
+          )}
+        </Animated.View>
+      ) : null}
+
+      {/* ── Bottom gradient + driver info ── */}
+      <LinearGradient
+        colors={["transparent", "rgba(0,0,0,0.92)"]}
+        style={[cardStyles.bottomGrad, { paddingBottom: tickerBottom + 36 + Spacing.md }]}
+        pointerEvents="none"
+      >
+        <Animated.View entering={FadeInDown.delay(100)} style={{ paddingRight: 80 }}>
+          <View style={cardStyles.nameRow}>
+            <ThemedText style={cardStyles.driverName}>{driver.name}</ThemedText>
+            {driver.rating ? (
+              <View style={cardStyles.ratingPill}>
+                <Ionicons name="star" size={10} color="#FFD700" />
+                <Text style={cardStyles.ratingPillTxt}>
+                  {parseFloat(driver.rating).toFixed(1)}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+          {driver.vehicle ? (
+            <Text style={cardStyles.vehicleLine}>
+              {driver.vehicle.make} {driver.vehicle.model}
+              {driver.vehicle.color ? `  ·  ${driver.vehicle.color}` : ""}
+            </Text>
+          ) : null}
+          <View style={cardStyles.etaRow}>
+            <Ionicons name="time-outline" size={12} color="rgba(255,255,255,0.55)" />
+            <Text style={cardStyles.etaTxt}>
+              {driver.etaMinutes} min away  ·  {driver.distanceKm} km
+            </Text>
+          </View>
+        </Animated.View>
+      </LinearGradient>
+
+      {/* ── Data ticker ── */}
+      <View style={[cardStyles.ticker, { bottom: tickerBottom }]} pointerEvents="none">
+        <DataTicker driver={driver} />
+      </View>
+
+      {/* ── Mini-map (only mounted for focused card to save WebView overhead) ── */}
+      {driver.approxLat !== null && driver.approxLng !== null && isFocused ? (
+        <MiniMapOverlay
+          lat={driver.approxLat}
+          lng={driver.approxLng}
+          bottom={miniMapBottom}
+          onExpand={() => setMapExpanded(true)}
+        />
+      ) : driver.approxLat !== null && driver.approxLng !== null ? (
+        // Placeholder outline keeps layout stable while card is off-screen
+        <View style={[miniMapStyles.wrap, { bottom: miniMapBottom, backgroundColor: "rgba(0,0,0,0.3)" }]} />
+      ) : null}
+
+      {/* ── Right-side action panel ── */}
+      <DiscoveryActionPanel
+        driver={driver}
+        bottom={actionPanelBottom}
+        onBook={() => onBook(driver)}
+        onAccolades={() => onAccolades(driver)}
+        onReviews={() => onReviews(driver)}
+        onShare={() => onShare(driver)}
+        onDriverProfile={() => onDriverProfile(driver)}
+      />
+
+      {/* ── Map expand modal ── */}
+      {driver.approxLat !== null && driver.approxLng !== null && mapExpanded ? (
+        <MapExpandModal
+          lat={driver.approxLat}
+          lng={driver.approxLng}
+          visible={mapExpanded}
+          onClose={() => setMapExpanded(false)}
+        />
+      ) : null}
+    </View>
+  );
+});
+
+const cardStyles = StyleSheet.create({
+  liveBadge: {
+    position: "absolute",
+    top: 92,
+    left: Spacing.lg,
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: Colors.liveRed,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    gap: 5,
+  },
+  liveDot: { width: 7, height: 7, borderRadius: 3.5, backgroundColor: "#fff" },
+  liveText: { fontSize: 12, fontWeight: "800", color: "#fff", letterSpacing: 1 },
+  liveSub: { fontSize: 11, color: "rgba(255,255,255,0.8)", fontWeight: "500" },
+  bottomGrad: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
+    paddingTop: 120,
+    paddingHorizontal: Spacing.lg,
+  },
+  nameRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: 3,
+  },
+  driverName: {
+    fontSize: 20,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: -0.3,
+  },
+  ratingPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+    backgroundColor: "rgba(255,255,255,0.14)",
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  ratingPillTxt: { fontSize: 11, fontWeight: "700", color: "#fff" },
+  vehicleLine: {
+    fontSize: 13,
+    color: "rgba(255,255,255,0.72)",
+    marginBottom: 4,
+  },
+  etaRow: { flexDirection: "row", alignItems: "center", gap: 4 },
+  etaTxt: { fontSize: 12, color: "rgba(255,255,255,0.55)" },
+  ticker: { position: "absolute", left: 0, right: 0 },
+});
+
+// ---------------------------------------------------------------------------
+// HookFeedScreen — main export
+// ---------------------------------------------------------------------------
+
+export default function HookFeedScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
+  const route = useRoute<any>();
+  const { isAuthenticated } = useAuth();
+  const { openLoginSheet } = useAuthGate();
+  const insets = useSafeAreaInsets();
+  const qc = useQueryClient();
+  const nativeOk = agoraNativeAvailable();
+
+  // Forward booking params (from external links / deep navigation) to AssistantHome
+  useEffect(() => {
+    const params = route.params as any;
+    if (params?.selectedLocation || params?.selectedPickup) {
+      navigation.navigate("AssistantHome", params as any);
+    }
+  }, [route.params, navigation]);
+
+  // Keep tab bar visible on this screen (it's the Home entry point)
+  useFocusEffect(
+    useCallback(() => {
+      navigation.getParent()?.setOptions({ tabBarStyle: { display: "flex" } });
+    }, [navigation]),
+  );
+
+  // ── Location ──────────────────────────────────────────────────────────────
+  const [coords, setCoords] = useState<{ lat: number; lng: number } | null>(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") {
+          setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+          return;
+        }
+        const pos = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+      } catch {
+        setCoords({ lat: DEFAULT_LAT, lng: DEFAULT_LNG });
+      }
+    })();
+  }, []);
+
+  // ── Tab ───────────────────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<FeedTab>("nearby");
+  const flatListRef = useRef<FlatList>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const handleTabChange = useCallback(
+    (tab: FeedTab) => {
+      if (tab === "following" && !isAuthenticated) {
+        openLoginSheet();
+        return;
+      }
+      setActiveTab(tab);
+      setCurrentIndex(0);
+      // Immediate scroll — no animation to avoid flash on data-swapped list
+      flatListRef.current?.scrollToIndex({ index: 0, animated: false });
+    },
+    [isAuthenticated, openLoginSheet],
+  );
+
+  // ── Queries ───────────────────────────────────────────────────────────────
+  const nearbyQuery = useQuery<{ drivers: DiscoveryDriver[] }>({
+    queryKey: ["/api/discovery/nearby", coords?.lat, coords?.lng],
+    queryFn: () =>
+      apiRequest(`/api/discovery/nearby?lat=${coords!.lat}&lng=${coords!.lng}&limit=20`),
+    enabled: !!coords,
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+
+  const followingQuery = useQuery<{ drivers: DiscoveryDriver[] }>({
+    queryKey: ["/api/discovery/following", coords?.lat, coords?.lng],
+    queryFn: () => {
+      const qs = coords ? `?lat=${coords.lat}&lng=${coords.lng}` : "";
+      return apiRequest(`/api/discovery/following${qs}`);
+    },
+    enabled: isAuthenticated && activeTab === "following",
+    refetchInterval: 30_000,
+    staleTime: 20_000,
+  });
+
+  const drivers: DiscoveryDriver[] =
+    activeTab === "nearby"
+      ? (nearbyQuery.data?.drivers ?? [])
+      : (followingQuery.data?.drivers ?? []);
+
+  // ── Pre-fetch Agora token for next live card (n+1 optimisation) ───────────
+  useEffect(() => {
+    const next = drivers[currentIndex + 1];
+    if (next?.isLive && next?.postId && next?.streamProvider === "agora" && nativeOk) {
+      qc.prefetchQuery({
+        queryKey: ["/api/agora/token", next.postId],
+        queryFn: () =>
+          apiRequest("/api/agora/token", {
+            method: "POST",
+            body: JSON.stringify({ ridePostId: next.postId }),
+            headers: { "Content-Type": "application/json" },
+          }),
+        staleTime: 30 * 60 * 1000,
+      });
+    }
+  }, [currentIndex, drivers, qc, nativeOk]);
+
+  // ── Overlay state ─────────────────────────────────────────────────────────
+  const [accoladesDriver, setAccoladesDriver] = useState<DiscoveryDriver | null>(null);
+  const [reviewsDriver, setReviewsDriver] = useState<DiscoveryDriver | null>(null);
+
+  const handleBook = useCallback(
+    (driver: DiscoveryDriver) => {
+      if (!isAuthenticated) { openLoginSheet(); return; }
+      // Navigate to the AI assistant; booking flow handles destination selection
+      navigation.navigate("AssistantHome");
+    },
+    [isAuthenticated, openLoginSheet, navigation],
+  );
+
+  const handleShare = useCallback(async (driver: DiscoveryDriver) => {
+    const live = driver.isLive ? " They're streaming live!" : "";
+    await Share.share({
+      message: `Check out ${driver.name} on Travony — ${driver.etaMinutes} min away.${live}`,
+      title: `Driver on Travony: ${driver.name}`,
+    });
+  }, []);
+
+  const handleDriverProfile = useCallback(
+    (_driver: DiscoveryDriver) => {
+      const parent = navigation.getParent<any>();
+      parent?.navigate("SocialTab");
+    },
+    [navigation],
+  );
+
+  // ── Layout helpers ────────────────────────────────────────────────────────
+  const cardBottomInset = insets.bottom + TAB_BAR_H;
+
+  const isLoading =
+    (activeTab === "nearby" && nearbyQuery.isLoading) ||
+    (activeTab === "following" && followingQuery.isLoading);
+
+  // ── FlatList render helpers ───────────────────────────────────────────────
+  const renderItem = useCallback(
+    ({ item, index }: { item: DiscoveryDriver; index: number }) => (
+      <DriverDiscoveryCard
+        driver={item}
+        isFocused={index === currentIndex}
+        cardBottomInset={cardBottomInset}
+        isAuthenticated={isAuthenticated}
+        onAccolades={setAccoladesDriver}
+        onReviews={setReviewsDriver}
+        onBook={handleBook}
+        onShare={handleShare}
+        onDriverProfile={handleDriverProfile}
+      />
+    ),
+    [currentIndex, cardBottomInset, isAuthenticated, handleBook, handleShare, handleDriverProfile],
+  );
+
+  const getItemLayout = useCallback(
+    (_: any, index: number) => ({ length: SCREEN_H, offset: SCREEN_H * index, index }),
+    [],
+  );
+
+  return (
+    <View style={{ flex: 1, backgroundColor: "#000" }}>
+      <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
+
+      {/* Feed or empty state */}
+      {drivers.length === 0 && !isLoading ? (
+        <EmptyCard tab={activeTab} bottomInset={cardBottomInset} />
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={drivers}
+          keyExtractor={(item) => `${activeTab}-${item.userId}`}
+          renderItem={renderItem}
+          pagingEnabled
+          showsVerticalScrollIndicator={false}
+          scrollEventThrottle={16}
+          decelerationRate="fast"
+          getItemLayout={getItemLayout}
+          onMomentumScrollEnd={(e) => {
+            const idx = Math.round(e.nativeEvent.contentOffset.y / SCREEN_H);
+            setCurrentIndex(idx);
+          }}
+          windowSize={5}
+          maxToRenderPerBatch={2}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={2}
+          removeClippedSubviews={Platform.OS === "android"}
+        />
+      )}
+
+      {/* Top chrome: wordmark + tabs (absolute overlay) */}
+      <NearbyFollowingTabs
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        insetTop={insets.top}
+        isAuthenticated={isAuthenticated}
+      />
+
+      {/* Loading spinner while initial fetch is in-flight */}
+      {isLoading ? (
+        <View
+          style={{
+            position: "absolute",
+            bottom: cardBottomInset + 60,
+            alignSelf: "center",
+          }}
+        >
+          <ActivityIndicator color="#fff" />
+        </View>
+      ) : null}
+
+      {/* Accolades bottom sheet */}
+      {accoladesDriver ? (
+        <AccoladesSheet
+          driver={accoladesDriver}
+          visible
+          onClose={() => setAccoladesDriver(null)}
+        />
+      ) : null}
+
+      {/* Reviews overlay */}
+      {reviewsDriver ? (
+        <ReviewsOverlay
+          driver={reviewsDriver}
+          visible
+          onClose={() => setReviewsDriver(null)}
+          isAuthenticated={isAuthenticated}
+        />
+      ) : null}
+    </View>
+  );
+}

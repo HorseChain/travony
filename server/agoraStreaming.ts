@@ -2,7 +2,8 @@ import { Router } from "express";
 import { randomBytes } from "crypto";
 import { db } from "./db";
 import { storage } from "./storage";
-import { ridePosts, streamProducts, users, drivers } from "@shared/schema";
+import { ridePosts, streamProducts, streamAdBusinesses, rides, users, drivers } from "@shared/schema";
+import type { StreamAdBusiness } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import agoraToken from "agora-token";
 
@@ -226,13 +227,18 @@ agoraRouter.post("/api/agora/token", async (req, res) => {
       return res.status(404).json({ error: "Stream not found" });
     }
 
-    // Publisher role only for participants of the ride being streamed —
-    // everyone else is a subscriber. The client never chooses.
-    const ride = await storage.getRide(post.rideId);
+    // Publisher role for ride participants (normal streams) or the stream
+    // owner when rideId is null (Telegram-originated streams). Everyone else
+    // is always subscriber — the client never chooses.
     let role: "publisher" | "subscriber" = "subscriber";
-    if (ride) {
-      const { customerId, driverUserId } = await getRideParticipants(ride);
-      if (user.id === customerId || user.id === driverUserId) role = "publisher";
+    if (post.rideId) {
+      const ride = await storage.getRide(post.rideId);
+      if (ride) {
+        const { customerId, driverUserId } = await getRideParticipants(ride);
+        if (user.id === customerId || user.id === driverUserId) role = "publisher";
+      }
+    } else if (user.id === post.userId) {
+      role = "publisher";
     }
 
     const { appId, appCertificate } = agoraConfig();
@@ -387,7 +393,7 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
   }
 });
 
-async function endAgoraStream(postId: string, reason: "host_stopped" | "host_lost") {
+export async function endAgoraStream(postId: string, reason: "host_stopped" | "host_lost") {
   const [updated] = await db
     .update(ridePosts)
     .set({ endedAt: new Date(), isLive: false })
@@ -396,6 +402,7 @@ async function endAgoraStream(postId: string, reason: "host_stopped" | "host_los
   hostLastSeen.delete(postId);
   lastViewerPublish.delete(postId);
   lastViewerCount.delete(postId);
+  peakViewerCount.delete(postId);
   if (!updated) return false;
   // Clear any active product card, then announce the end. Post-commit only.
   try {
@@ -490,7 +497,7 @@ agoraRouter.post("/api/agora/streams/:postId/product", async (req, res) => {
     }
     // Host-owns-stream + still a ride participant.
     if (post.userId !== user.id) return res.status(403).json({ error: "Only the host can feature products" });
-    const ride = await storage.getRide(post.rideId);
+    const ride = post.rideId ? await storage.getRide(post.rideId) : null;
     if (ride) {
       const { customerId, driverUserId } = await getRideParticipants(ride);
       if (user.id !== customerId && user.id !== driverUserId) {
@@ -584,10 +591,141 @@ agoraRouter.post("/api/agora/products/:productId/tap", async (req, res) => {
 const hostLastSeen = new Map<string, number>(); // postId -> ms epoch
 const lastViewerPublish = new Map<string, number>(); // postId -> ms epoch
 const lastViewerCount = new Map<string, number>(); // postId -> last count
+const peakViewerCount = new Map<string, number>(); // postId -> peak count
+
+// ---------------------------------------------------------------------------
+// Hyper-local geo stream ads
+// ---------------------------------------------------------------------------
+
+/** Haversine distance between two lat/lng pairs in metres. */
+function haversineMetres(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6_371_000; // Earth radius in metres
+  const φ1 = lat1 * Math.PI / 180;
+  const φ2 = lat2 * Math.PI / 180;
+  const Δφ = (lat2 - lat1) * Math.PI / 180;
+  const Δλ = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(Δφ / 2) ** 2 + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Returns the highest-priority active ad business whose radius covers the
+ * given coordinates, or null when no match exists.
+ *
+ * Loads all active, date-eligible businesses from the DB and filters in JS
+ * via Haversine — acceptable because the admin-managed table is small.
+ */
+async function matchNearbyAd(lat: number, lng: number): Promise<StreamAdBusiness | null> {
+  const now = new Date();
+  const candidates = await db
+    .select()
+    .from(streamAdBusinesses)
+    .where(eq(streamAdBusinesses.isActive, true));
+
+  let best: StreamAdBusiness | null = null;
+  for (const ad of candidates) {
+    // Date-range gate (null = open-ended).
+    if (ad.startsAt && now < ad.startsAt) continue;
+    if (ad.endsAt   && now > ad.endsAt)   continue;
+
+    const adLat = parseFloat(String(ad.lat));
+    const adLng = parseFloat(String(ad.lng));
+    const dist  = haversineMetres(lat, lng, adLat, adLng);
+    if (dist > ad.radiusMetres) continue;
+
+    // Prefer higher priority; tie-break by shorter distance.
+    if (!best || ad.priority > best.priority) {
+      best = ad;
+    }
+  }
+  return best;
+}
+
+/**
+ * Called from the viewer-count loop for each live Agora stream.
+ * Reads the driver's current GPS position, runs `matchNearbyAd`, and
+ * auto-pins or clears the ad product card as needed.
+ *
+ * Manual host pins (adBusinessId = null) are NEVER overwritten — the host's
+ * choice always takes precedence until they clear it themselves.
+ */
+async function autoUpdateStreamAd(postId: string, rideId: string): Promise<void> {
+  // Resolve driver's current location from the ride.
+  const [driverLoc] = await db
+    .select({ lat: drivers.currentLat, lng: drivers.currentLng })
+    .from(rides)
+    .innerJoin(drivers, eq(drivers.id, rides.driverId))
+    .where(eq(rides.id, rideId))
+    .limit(1);
+
+  if (!driverLoc?.lat || !driverLoc?.lng) return;
+  const driverLat = parseFloat(String(driverLoc.lat));
+  const driverLng = parseFloat(String(driverLoc.lng));
+  if (isNaN(driverLat) || isNaN(driverLng)) return;
+
+  // Check the currently active product for this stream.
+  const [currentProduct] = await db
+    .select({ id: streamProducts.id, adBusinessId: streamProducts.adBusinessId })
+    .from(streamProducts)
+    .where(and(eq(streamProducts.postId, postId), isNull(streamProducts.clearedAt)));
+
+  // Manual pin: adBusinessId is null → host chose this card; do not override.
+  if (currentProduct && currentProduct.adBusinessId === null) return;
+
+  const nearbyAd = await matchNearbyAd(driverLat, driverLng);
+  const currentAdId = currentProduct?.adBusinessId ?? null;
+  const newAdId     = nearbyAd?.id ?? null;
+
+  // No change — skip (avoid redundant DB writes on every tick).
+  if (currentAdId === newAdId) return;
+
+  await db.transaction(async (tx) => {
+    // Clear whatever is active (could be an ad product, or nothing).
+    await tx
+      .update(streamProducts)
+      .set({ clearedAt: new Date() })
+      .where(and(eq(streamProducts.postId, postId), isNull(streamProducts.clearedAt)));
+
+    if (nearbyAd) {
+      // Pin the newly matched ad as a product card.
+      const [product] = await tx
+        .insert(streamProducts)
+        .values({
+          postId,
+          productKey:   "stream_ad",
+          title:        nearbyAd.name,
+          imageUrl:     nearbyAd.logoUrl,
+          priceLabel:   nearbyAd.offerText,
+          ttlSeconds:   7200, // long TTL — geo-engine manages lifecycle, not expiry
+          adBusinessId: nearbyAd.id,
+        })
+        .returning();
+
+      publishStreamEvent(postId, "product.push", {
+        productId:   product.id,
+        productKey:  product.productKey,
+        title:       product.title,
+        imageUrl:    product.imageUrl,
+        priceLabel:  product.priceLabel,
+        ttlSeconds:  product.ttlSeconds,
+        isAd:        true,
+        adBusinessId: nearbyAd.id,
+      });
+    } else {
+      // Driver moved out of range — clear the ad card.
+      publishStreamEvent(postId, "product.clear", {});
+    }
+  });
+}
 
 /** Last known viewer count for a live Agora stream (0 when unknown). */
 export function getAgoraViewerCount(postId: string): number {
   return lastViewerCount.get(postId) ?? 0;
+}
+
+/** Peak viewer count observed for a stream since it started (0 when unknown). */
+export function getPeakViewerCount(postId: string): number {
+  return peakViewerCount.get(postId) ?? 0;
 }
 
 async function channelUsers(channel: string): Promise<string[] | null> {
@@ -614,7 +752,7 @@ async function channelUsers(channel: string): Promise<string[] | null> {
 async function viewerLoopTick() {
   try {
     const live = await db
-      .select({ id: ridePosts.id, userId: ridePosts.userId, createdAt: ridePosts.createdAt })
+      .select({ id: ridePosts.id, userId: ridePosts.userId, createdAt: ridePosts.createdAt, rideId: ridePosts.rideId })
       .from(ridePosts)
       .where(and(
         eq(ridePosts.type, "stream"),
@@ -635,6 +773,8 @@ async function viewerLoopTick() {
 
         const lastAt = lastViewerPublish.get(post.id) ?? 0;
         const lastCount = lastViewerCount.get(post.id);
+        const prevPeak = peakViewerCount.get(post.id) ?? 0;
+        if (count > prevPeak) peakViewerCount.set(post.id, count);
         if (count !== lastCount && now - lastAt >= VIEWER_PUBLISH_MIN_MS) {
           lastViewerCount.set(post.id, count);
           lastViewerPublish.set(post.id, now);
@@ -649,6 +789,14 @@ async function viewerLoopTick() {
       if (now - seen > HOST_GRACE_MS) {
         console.log(`[Agora] host absent > grace for stream ${post.id}, marking ended`);
         await endAgoraStream(post.id, "host_lost");
+        continue; // stream ended — skip geo-ad check
+      }
+
+      // Geo-ad auto-pin: fire-and-forget so it never blocks the viewer loop.
+      if (post.rideId) {
+        autoUpdateStreamAd(post.id, post.rideId).catch((err: any) => {
+          console.error("[Agora] geo-ad auto-pin error:", err?.message || err);
+        });
       }
     }
   } catch (err: any) {

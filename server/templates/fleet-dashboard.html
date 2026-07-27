@@ -198,6 +198,99 @@
       .tab-btn { padding: 8px 12px; font-size: 13px; }
       .search-input { width: 100%; margin-top: 8px; }
     }
+
+    /* ── Live Streams Tab ──────────────────────────────────────────────── */
+    .stream-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+    }
+    .stream-card {
+      background: var(--bg-card); border-radius: 14px;
+      padding: 18px; box-shadow: var(--shadow);
+      display: flex; flex-direction: column; gap: 14px;
+    }
+    .stream-card-header { display: flex; align-items: center; gap: 12px; }
+    .driver-avatar {
+      width: 48px; height: 48px; border-radius: 50%;
+      object-fit: cover; flex-shrink: 0;
+      border: 2.5px solid var(--primary);
+    }
+    .driver-avatar-placeholder {
+      width: 48px; height: 48px; border-radius: 50%;
+      background: var(--border); color: var(--text-muted);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 20px; flex-shrink: 0; font-weight: 700;
+    }
+    .stream-card-info { flex: 1; min-width: 0; }
+    .stream-driver-name {
+      font-size: 15px; font-weight: 700;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .stream-meta {
+      font-size: 12px; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 6px; margin-top: 3px;
+    }
+    .live-pulse {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: #ef4444; flex-shrink: 0;
+      animation: livepulse 1.4s ease-in-out infinite;
+    }
+    @keyframes livepulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50%       { opacity: .4; transform: scale(1.5); }
+    }
+    .stream-card-stats { display: flex; gap: 16px; }
+    .stream-stat {
+      font-size: 13px; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 5px;
+    }
+    .watch-btn {
+      background: var(--primary); color: white;
+      border: none; border-radius: 10px;
+      padding: 10px 16px; font-size: 14px; font-weight: 600;
+      cursor: pointer; font-family: inherit; transition: background 0.2s;
+    }
+    .watch-btn:hover { background: var(--primary-dark); }
+
+    /* ── Stream Viewer Modal ─────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0, 0, 0, .88); z-index: 1000;
+      align-items: center; justify-content: center;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      background: #0f172a; border-radius: 16px;
+      width: min(860px, 95vw);
+      display: flex; flex-direction: column; overflow: hidden;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, .7);
+    }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, .1);
+    }
+    .modal-header span { color: white; font-weight: 700; font-size: 15px; }
+    .modal-close {
+      background: rgba(255, 255, 255, .1); border: none; color: white;
+      font-size: 16px; cursor: pointer;
+      width: 32px; height: 32px; border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .modal-close:hover { background: rgba(255, 255, 255, .22); }
+    .stream-video-wrap { position: relative; background: #000; min-height: 420px; }
+    #stream-video { width: 100%; min-height: 420px; }
+    #stream-video > div { width: 100% !important; height: 100% !important; }
+    .modal-status-overlay {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 12px;
+      color: rgba(255, 255, 255, .65); font-size: 14px;
+      background: #000;
+    }
+    .modal-status-overlay.hidden { display: none; }
+    .modal-status-overlay .spinner { border-color: rgba(255,255,255,.2); border-top-color: var(--primary); }
   </style>
 </head>
 <body>
@@ -219,6 +312,7 @@
     <button class="tab-btn" onclick="switchTab('hubs', event)">Hub Status</button>
     <button class="tab-btn" onclick="switchTab('demand', event)">Demand Map</button>
     <button class="tab-btn" onclick="switchTab('fleet', event)">Fleet Vehicles</button>
+    <button class="tab-btn" onclick="switchTab('streams', event)">🔴 Live Streams</button>
   </div>
 
   <!-- DISPATCH TAB -->
@@ -291,7 +385,46 @@
     </div>
   </div>
 
+  <!-- LIVE STREAMS TAB -->
+  <div class="tab-content" id="tab-streams">
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="label">Live Now</div>
+        <div class="value" id="stat-streams-live">—</div>
+      </div>
+      <div class="stat-card green">
+        <div class="label">Total Viewers</div>
+        <div class="value" id="stat-streams-viewers">—</div>
+      </div>
+    </div>
+    <div class="section-header">
+      <span class="section-title">Driver Streams</span>
+      <span class="refresh-badge" id="streams-count-label"></span>
+    </div>
+    <div class="stream-grid" id="stream-cards">
+      <div class="loading-overlay"><div class="spinner"></div> Loading streams...</div>
+    </div>
+  </div>
+
+  <!-- STREAM VIEWER MODAL — click outside modal-box to dismiss -->
+  <div class="modal-overlay" id="modal-overlay" onclick="handleModalOverlayClick(event)">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span id="modal-driver-name">Live Stream</span>
+        <button class="modal-close" onclick="closeStreamModal()" title="Close">✕</button>
+      </div>
+      <div class="stream-video-wrap">
+        <div id="stream-video"></div>
+        <div class="modal-status-overlay" id="modal-status-overlay">
+          <div class="spinner"></div>
+          <span id="modal-status-text">Connecting to stream…</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://download.agora.io/sdk/release/AgoraRTC_N.js"></script>
 <script>
   // Auth token from localStorage (set after login via /dashboard/fleet/login)
   let AUTH_TOKEN = localStorage.getItem('fleet_token');
@@ -340,7 +473,7 @@
   async function loadAll() {
     const now = new Date().toLocaleTimeString();
     document.getElementById('last-refresh-label').textContent = 'Updated ' + now;
-    await Promise.allSettled([loadHubs(), loadFleet(), loadDemand(), loadDispatch()]);
+    await Promise.allSettled([loadHubs(), loadFleet(), loadDemand(), loadDispatch(), loadStreams()]);
   }
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
@@ -351,6 +484,7 @@
     if (evt) evt.currentTarget.classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
     if (name === 'demand' && mapInstance) setTimeout(() => mapInstance.invalidateSize(), 100);
+    if (name === 'streams') loadStreams();
   }
 
   // ── Hubs ──────────────────────────────────────────────────────────────────
@@ -547,6 +681,179 @@
     if (!str) return '';
     return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
   }
+
+  // ── Live Streams ─────────────────────────────────────────────────────────
+
+  let allStreams = [];
+  let agoraFleetClient = null;
+  let agoraFleetJoined = false;
+
+  // Delegated click: attach once to the static grid container so re-renders
+  // don't require rebinding. Values come from data-* attributes (HTML-decoded
+  // by the browser), never from eval'd inline handlers — no XSS path.
+  document.getElementById('stream-cards').addEventListener('click', function(e) {
+    const btn = e.target.closest('.watch-btn');
+    if (!btn) return;
+    openStreamModal(btn.dataset.postId || '', btn.dataset.driverName || 'Driver');
+  });
+
+  async function loadStreams() {
+    try {
+      const data = await apiFetch('/api/fleet/dashboard/live-streams');
+      allStreams = data.streams || [];
+      const totalViewers = allStreams.reduce((s, st) => s + (st.viewerCount || 0), 0);
+      document.getElementById('stat-streams-live').textContent = allStreams.length;
+      document.getElementById('stat-streams-viewers').textContent = totalViewers;
+      document.getElementById('streams-count-label').textContent =
+        allStreams.length + ' stream' + (allStreams.length !== 1 ? 's' : '');
+      renderStreamCards(allStreams);
+    } catch (e) { console.warn('Streams load failed', e); }
+  }
+
+  function streamDuration(startedAt) {
+    const ms = Date.now() - new Date(startedAt).getTime();
+    const mins = Math.floor(ms / 60000);
+    if (mins < 1) return 'Just started';
+    if (mins < 60) return mins + 'm';
+    return Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm';
+  }
+
+  function renderStreamCards(streams) {
+    const el = document.getElementById('stream-cards');
+    if (!streams.length) {
+      el.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+        <p>No drivers in your fleet are streaming right now.</p>
+        <p style="margin-top:6px;font-size:13px">Cards appear automatically when a driver goes live.</p>
+      </div>`;
+      return;
+    }
+    el.innerHTML = streams.map(s => {
+      const initials = esc((s.driverName || 'D').charAt(0).toUpperCase());
+      const avatar = s.driverPhoto
+        ? `<img class="driver-avatar" src="${esc(s.driverPhoto)}" alt="" onerror="this.outerHTML='<div class=\\'driver-avatar-placeholder\\'>${initials}</div>'">`
+        : `<div class="driver-avatar-placeholder">${initials}</div>`;
+      const statusBadge = s.rideStatus
+        ? `<div class="stream-stat">🚗 <span class="badge badge-blue" style="font-size:11px">${esc(s.rideStatus)}</span></div>`
+        : '';
+      return `
+      <div class="stream-card">
+        <div class="stream-card-header">
+          ${avatar}
+          <div class="stream-card-info">
+            <div class="stream-driver-name">${esc(s.driverName || 'Driver')}</div>
+            <div class="stream-meta">
+              <span class="live-pulse"></span>
+              <span>LIVE · ${streamDuration(s.startedAt)}</span>
+            </div>
+          </div>
+        </div>
+        <div class="stream-card-stats">
+          <div class="stream-stat">👁 ${s.viewerCount || 0} viewer${s.viewerCount !== 1 ? 's' : ''}</div>
+          ${statusBadge}
+        </div>
+        <button class="watch-btn"
+          data-post-id="${esc(s.postId)}"
+          data-driver-name="${esc(s.driverName || 'Driver')}">
+          ▶ Watch Live
+        </button>
+      </div>`;
+    }).join('');
+  }
+
+  // ── Agora viewer modal ────────────────────────────────────────────────────
+
+  function setModalStatus(text, showSpinner) {
+    document.getElementById('modal-status-text').textContent = text;
+    const overlay = document.getElementById('modal-status-overlay');
+    overlay.querySelector('.spinner').style.display = showSpinner ? '' : 'none';
+    overlay.classList.remove('hidden');
+  }
+
+  function hideModalStatus() {
+    document.getElementById('modal-status-overlay').classList.add('hidden');
+  }
+
+  async function openStreamModal(postId, driverName) {
+    document.getElementById('modal-driver-name').textContent = driverName;
+    document.getElementById('stream-video').innerHTML = '';
+    setModalStatus('Connecting to stream…', true);
+    document.getElementById('modal-overlay').classList.add('open');
+
+    // Fetch a short-lived audience-only viewer token.
+    let tokenData;
+    try {
+      const r = await fetch('/api/agora/web-viewer-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ postId }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        setModalStatus(err.error || 'Stream is no longer available.', false);
+        return;
+      }
+      tokenData = await r.json();
+    } catch (e) {
+      setModalStatus('Could not connect. Check your network and try again.', false);
+      return;
+    }
+
+    // Leave any previous session first.
+    if (agoraFleetClient && agoraFleetJoined) {
+      await agoraFleetClient.leave().catch(() => {});
+      agoraFleetJoined = false;
+    }
+
+    if (!agoraFleetClient) {
+      agoraFleetClient = AgoraRTC.createClient({ mode: 'live', codec: 'vp8' });
+      AgoraRTC.setLogLevel(4);
+    }
+    agoraFleetClient.removeAllListeners();
+
+    agoraFleetClient.on('user-published', async function(user, mediaType) {
+      await agoraFleetClient.subscribe(user, mediaType);
+      if (mediaType === 'video') {
+        document.getElementById('stream-video').innerHTML = '';
+        user.videoTrack.play('stream-video');
+        hideModalStatus();
+      }
+      if (mediaType === 'audio' && user.audioTrack) {
+        user.audioTrack.play();
+      }
+    });
+
+    agoraFleetClient.on('user-unpublished', function(_user, mediaType) {
+      if (mediaType === 'video') setModalStatus('Stream paused or ended.', false);
+    });
+
+    agoraFleetClient.on('user-left', function() {
+      document.getElementById('stream-video').innerHTML = '';
+      setModalStatus('The driver has ended the stream.', false);
+    });
+
+    try {
+      agoraFleetClient.setClientRole('audience');
+      await agoraFleetClient.join(tokenData.appId, tokenData.channel, tokenData.rtcToken, tokenData.uid);
+      agoraFleetJoined = true;
+    } catch (e) {
+      setModalStatus('Could not join the stream. It may have ended.', false);
+    }
+  }
+
+  async function closeStreamModal() {
+    document.getElementById('modal-overlay').classList.remove('open');
+    document.getElementById('stream-video').innerHTML = '';
+    if (agoraFleetClient && agoraFleetJoined) {
+      await agoraFleetClient.leave().catch(() => {});
+      agoraFleetJoined = false;
+    }
+  }
+
+  function handleModalOverlayClick(e) {
+    // Dismiss when clicking the dark backdrop, not the modal box itself.
+    if (e.target === document.getElementById('modal-overlay')) closeStreamModal();
+  }
+
 </script>
 </body>
 </html>

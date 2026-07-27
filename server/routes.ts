@@ -50,7 +50,6 @@ import {
   getSupportedLanguages 
 } from "./translationService";
 import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
-import { REVIEW_PHONE, REVIEW_OTP, REVIEW_EMAIL, isReviewLogin, isReviewUserId, seedReviewDriver } from "./reviewAccount";
 import {
   initializeMexicoCityLaunch,
   getCityBySlug,
@@ -139,8 +138,12 @@ import { socialRouter } from "./socialRoutes";
 import { matchRouter, startMatchAgent } from "./matchAgent";
 import { rewardsRouter, qualifyReferralsForRide } from "./rewardsRoutes";
 import { agoraRouter, startAgoraViewerLoop } from "./agoraStreaming";
+import { tgStreamRouter } from "./telegramStreaming";
 import { googleAuthRouter } from "./googleAuth";
 import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRoutes";
+import { streamShareRouter } from "./streamShareRoutes";
+import { streamAdRouter } from "./streamAdRoutes";
+import { agentRouter } from "./agentRoutes";
 import { db } from "./db";
 import { eq, and, gte, desc, count, like } from "drizzle-orm";
 
@@ -427,12 +430,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid phone number is required" });
       }
 
-      // App-store review account: never send an SMS, just accept the fixed code
-      // on the verify step. Reviewers cannot receive texts.
-      if (isReviewLogin(phone)) {
-        return res.json({ success: true, message: "Verification code sent via SMS", channel: 'sms' });
-      }
-
       // Try Twilio Verify first (works globally, best for production)
       if (isVerifyConfigured()) {
         console.log(`Using Twilio Verify for ${phone}`);
@@ -508,32 +505,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Phone and OTP are required" });
       }
 
-      // App-store review account: fixed code logs straight into the demo driver,
-      // independent of the in-memory OTP store (which resets on restart).
-      if (isReviewLogin(phone)) {
-        if (otp !== REVIEW_OTP) {
-          return res.status(400).json({ message: "Invalid verification code" });
-        }
-        const reviewUser = await seedReviewDriver();
-        // Refuse if the phone is not (or no longer) the demo account, so this can
-        // never log into a real user that happens to own the number.
-        if (!reviewUser || reviewUser.email !== REVIEW_EMAIL) {
-          return res.status(500).json({ message: "Review account unavailable" });
-        }
-        const token = await createSession(reviewUser.id, reviewUser.role);
-        return res.json({
-          success: true,
-          isNewUser: false,
-          user: {
-            id: reviewUser.id,
-            email: reviewUser.email || "",
-            name: reviewUser.name || "User",
-            phone: reviewUser.phone,
-            role: reviewUser.role,
-          },
-          token,
-        });
-      }
+
 
       // Verify OTP from store
       const storedOtp = otpStore.get(phone);
@@ -1414,11 +1386,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied" });
       }
 
-      // The app-store review demo account is fully browsable but must never take
-      // a real rider's trip. Block it from claiming/accepting a live ride.
-      if (isReviewUserId(req.userId) && existingRide.status === "pending" && req.body.status === "accepted") {
-        return res.status(403).json({ message: "This demo review account cannot accept live rides." });
-      }
+
       
       // Restrict what fields customers can update vs drivers
       const allowedUpdates: Record<string, any> = {};
@@ -8227,13 +8195,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   startMatchAgent();
   app.use(rewardsRouter);
   app.use(agoraRouter);
+  app.use(tgStreamRouter);
   startAgoraViewerLoop();
   startPrayerRidesEngine();
   app.use(nameYourFareRouter);
   app.use(fleetDashboardRouter);
   app.use(evRouter);
   app.use(discoveryRouter);
+  app.use(streamShareRouter);
+  app.use(streamAdRouter);
   initDiscovery();
+  app.use(agentRouter);
 
   const httpServer = createServer(app);
 

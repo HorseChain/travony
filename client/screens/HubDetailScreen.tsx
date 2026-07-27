@@ -726,7 +726,7 @@ export default function HubDetailScreen() {
             {hubChargers ? (
               <ThemedText style={{ ...Typography.captionBold, color: theme.textMuted }}>
                 {hubChargers.source === "simulated"
-                  ? "Demo list"
+                  ? "Estimated"
                   : hubChargers.source === "unavailable"
                   ? "Unavailable"
                   : "Live"}

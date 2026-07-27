@@ -26,7 +26,7 @@ import LiteTripView from "@/components/LiteTripView";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
-import { StreamRideButton, GoLiveInAppButton } from "@/components/RideSocial";
+import { GoLiveInAppButton, ShareLiveButton } from "@/components/RideSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
@@ -480,7 +480,9 @@ export default function ActiveRideScreen() {
             </View>
           ) : null}
           {rideId ? <GoLiveInAppButton rideId={rideId} rideStatus={ride?.status} /> : null}
-          {rideId ? <StreamRideButton rideId={rideId} rideStatus={ride?.status} /> : null}
+          {/* Share Live — visible when the driver is actively streaming.
+              Generates a short-lived browser link for a trusted contact. */}
+          {rideId ? <ShareLiveButton rideId={rideId} /> : null}
         </Card>
         )}
 

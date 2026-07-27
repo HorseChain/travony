@@ -26,6 +26,7 @@ import {
   GiftAnimationLayer,
   useGiftAnimations,
 } from "@/components/stream/StreamOverlays";
+import { useVehicleSpeed } from "@/hooks/useVehicleSpeed";
 import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
 
 interface CatalogProduct {
@@ -60,6 +61,14 @@ export default function GoLiveScreen() {
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
   const [post, setPost] = useState<any>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
+
+  // Speed-based distraction-prevention lockout (task #83)
+  const { movingState } = useVehicleSpeed();
+  // Controls are locked when moving OR when speed state is unknown (fail-safe).
+  // "unknown" covers: permission denied, GPS unavailable, cold-start timeout.
+  const isControlLocked = (movingState === "moving" || movingState === "unknown") && phase === "live";
+  const [showLockoutToast, setShowLockoutToast] = useState(false);
+  const lockoutToastShownRef = useRef(false);
 
   useKeepAwake();
 
@@ -189,20 +198,45 @@ export default function GoLiveScreen() {
         onJoinChannelSuccess: () => setPublishing(true),
         onError: (err: number, msg: string) =>
           console.log("[GoLive] RTC error", err, msg),
-        onConnectionStateChanged: (_conn: any, state: number, reason: number) =>
-          console.log("[GoLive] connection state", state, "reason", reason),
+        onConnectionStateChanged: (_conn: any, state: number, reason: number) => {
+          console.log("[GoLive] connection state", state, "reason", reason);
+          // state 3 = RECONNECTING, state 4 = FAILED/DISCONNECTED
+          // Let the publishing indicator reflect the real connection status
+          // so the host can see when the stream drops and is recovering.
+          if (state === 3) {
+            setPublishing(false); // triggers "reconnecting" visual in header
+          } else if (state === 1 || state === 2) {
+            setPublishing(true);  // CONNECTING / CONNECTED → go-live indicator on
+          }
+        },
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
       // Do NOT call startPreview() — expo-camera already owns the camera.
       // Agora will attempt camera sharing (works on Android 9+); if the
       // device doesn't support it, audio-only streaming continues safely.
+
+      // Dual-stream: viewers on slow connections automatically receive the
+      // low-quality simulcast layer (set in AgoraStreamViewerScreen).
       localEngine.enableDualStreamMode?.(true);
+
+      // Encoder profile — 720p dashcam optimised for battery + data:
+      //   1000 kbps target / 600 kbps floor, 24 fps, 2-second keyframe interval,
+      //   MAINTAIN_FRAMERATE degradation (keep 24 fps, drop quality on congestion),
+      //   ADAPTIVE orientation (rotates with device, avoids pillarbox).
       localEngine.setVideoEncoderConfiguration?.({
         dimensions: { width: 1280, height: 720 },
         frameRate: 24,
-        bitrate: 0,
+        bitrate: 1000,       // kbps — explicit; 0 lets Agora pick a sub-optimal default
+        minBitrate: 600,     // floor: degrade quality before dropping the feed
+        orientationMode: 0,  // 0 = ADAPTIVE — follows device rotation
+        degradationPreference: 2, // 2 = MAINTAIN_FRAMERATE (smooth > sharp for dashcam)
       });
+
+      // Audio: MUSIC_STANDARD profile (48 kHz stereo, 64 kbps AAC) on the
+      // CHATROOM scenario — voice-optimised noise suppression, echo-cancelled.
+      // Keeps audio crisp for local guide commentary without wasting data.
+      localEngine.setAudioProfile?.(1, 5); // MUSIC_STANDARD, AUDIO_SCENARIO_CHATROOM
       localEngine.joinChannelWithUserAccount(
         tokens.rtcToken,
         tokens.channel,
@@ -225,6 +259,16 @@ export default function GoLiveScreen() {
       try { localEngine?.release?.(); } catch {}
     }
   }, [rtc, tokens, phase, agoraAppId]);
+
+  // Show a one-time toast the first time the lockout activates this session.
+  useEffect(() => {
+    // Only show toast when we have confirmed movement, not on unknown state.
+    if (movingState !== "moving" || phase !== "live" || lockoutToastShownRef.current) return;
+    lockoutToastShownRef.current = true;
+    setShowLockoutToast(true);
+    const t = setTimeout(() => setShowLockoutToast(false), 3500);
+    return () => clearTimeout(t);
+  }, [movingState, phase]);
 
   const catalogQuery = useQuery<{ products: CatalogProduct[] }>({
     queryKey: ["/api/agora/products/catalog"],
@@ -353,29 +397,46 @@ export default function GoLiveScreen() {
           {phase === "live" ? <LiveBadge /> : null}
           {phase === "live" ? <ViewerCountChip count={viewerCount} /> : null}
         </View>
-        <View style={styles.topRight}>
-          <Pressable
-            style={styles.roundButton}
-            onPress={() => {
-              setFrontCamera((f) => !f);
-              try { engine?.switchCamera?.(); } catch {}
-            }}
-          >
-            <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
-          </Pressable>
-          <Pressable style={styles.roundButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="close" size={20} color="#fff" />
-          </Pressable>
-        </View>
+        {/* Hide camera-flip and close when locked — driver must use End Stream
+            in the locked bar instead of navigating away mid-movement. */}
+        {!isControlLocked ? (
+          <View style={styles.topRight}>
+            <Pressable
+              style={styles.roundButton}
+              onPress={() => {
+                setFrontCamera((f) => !f);
+                try { engine?.switchCamera?.(); } catch {}
+              }}
+            >
+              <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
+            </Pressable>
+            <Pressable style={styles.roundButton} onPress={() => navigation.goBack()}>
+              <Ionicons name="close" size={20} color="#fff" />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
 
-      {/* Gift overlay */}
+      {/* Gift overlay — suppressed while moving so animation doesn't cover the
+          driver's view during active driving. Events received during lockout are
+          dropped (the queue still advances); this is intentional — a backlog of
+          gift animations playing when the driver stops would be distracting. */}
       <View
         style={[styles.giftLayer, { top: insets.top + 90 }]}
         pointerEvents="none"
       >
-        <GiftAnimationLayer gift={currentGift} />
+        <GiftAnimationLayer gift={isControlLocked ? null : currentGift} />
       </View>
+
+      {/* Lockout toast — shown once per session on first lockout entry */}
+      {showLockoutToast ? (
+        <View style={[styles.lockoutToast, { top: insets.top + 90 + 60 }]}>
+          <Ionicons name="car-outline" size={15} color="#fff" />
+          <ThemedText style={styles.lockoutToastText}>
+            Controls locked while moving — stay safe
+          </ThemedText>
+        </View>
+      ) : null}
 
       {/* Pre-live panel */}
       {phase === "preview" ? (
@@ -414,10 +475,11 @@ export default function GoLiveScreen() {
         </View>
       ) : null}
 
-      {/* Live controls */}
+      {/* Live controls — locked when isMoving, full controls when stopped */}
       {phase === "live" ? (
         <>
-          {shopOpen ? (
+          {/* Product shop panel — hidden when controls are locked */}
+          {shopOpen && !isControlLocked ? (
             <View
               style={[
                 styles.shopSheet,
@@ -461,32 +523,57 @@ export default function GoLiveScreen() {
             </View>
           ) : null}
 
-          <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET }]}>
-            <Pressable
-              style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
-              onPress={() => setShopOpen((s) => !s)}
-            >
-              <Ionicons name="bag-handle-outline" size={20} color="#fff" />
-            </Pressable>
-            <Pressable
-              style={({ pressed }) => [styles.stopButton, { opacity: pressed || stopMutation.isPending ? 0.85 : 1 }]}
-              onPress={() => stopMutation.mutate()}
-              disabled={stopMutation.isPending}
-            >
-              {stopMutation.isPending ? (
-                <ActivityIndicator color="#fff" size="small" />
-              ) : (
-                <ThemedText style={styles.primaryButtonText}>End stream</ThemedText>
-              )}
-            </Pressable>
-            <View style={styles.roundButton} pointerEvents="none">
-              <Ionicons
-                name={publishing ? "wifi-outline" : "hourglass-outline"}
-                size={20}
-                color="#fff"
-              />
+          {isControlLocked ? (
+            /* ── Locked state: minimal LIVE badge + End button only ── */
+            <View style={[styles.lockedBar, { bottom: BOTTOM_OFFSET }]}>
+              <LiveBadge />
+              <ThemedText style={styles.lockedText} numberOfLines={1}>
+                {movingState === "unknown" ? "Location unavailable" : "Controls locked"}
+              </ThemedText>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.lockedEndButton,
+                  { opacity: pressed || stopMutation.isPending ? 0.85 : 1 },
+                ]}
+                onPress={() => stopMutation.mutate()}
+                disabled={stopMutation.isPending}
+              >
+                {stopMutation.isPending ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <ThemedText style={styles.primaryButtonText}>End Stream</ThemedText>
+                )}
+              </Pressable>
             </View>
-          </View>
+          ) : (
+            /* ── Normal state: shop toggle + end + wifi indicator ── */
+            <View style={[styles.bottomBar, { bottom: BOTTOM_OFFSET }]}>
+              <Pressable
+                style={[styles.roundButton, shopOpen ? { backgroundColor: "rgba(255,255,255,0.3)" } : null]}
+                onPress={() => setShopOpen((s) => !s)}
+              >
+                <Ionicons name="bag-handle-outline" size={20} color="#fff" />
+              </Pressable>
+              <Pressable
+                style={({ pressed }) => [styles.stopButton, { opacity: pressed || stopMutation.isPending ? 0.85 : 1 }]}
+                onPress={() => stopMutation.mutate()}
+                disabled={stopMutation.isPending}
+              >
+                {stopMutation.isPending ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <ThemedText style={styles.primaryButtonText}>End stream</ThemedText>
+                )}
+              </Pressable>
+              <View style={styles.roundButton} pointerEvents="none">
+                <Ionicons
+                  name={publishing ? "wifi-outline" : "hourglass-outline"}
+                  size={20}
+                  color="#fff"
+                />
+              </View>
+            </View>
+          )}
         </>
       ) : null}
     </View>
@@ -574,4 +661,42 @@ const styles = StyleSheet.create({
   shopRow: { flexDirection: "row", alignItems: "center", gap: Spacing.md, paddingVertical: Spacing.sm },
   shopThumb: { width: 40, height: 40, borderRadius: BorderRadius.sm, alignItems: "center", justifyContent: "center" },
   clearRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: Spacing.sm, marginTop: Spacing.sm, alignItems: "center" },
+  // Speed-lockout styles
+  lockedBar: {
+    position: "absolute", left: Spacing.lg, right: Spacing.lg,
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    gap: Spacing.md, zIndex: 10, elevation: 10,
+    backgroundColor: "rgba(0,0,0,0.68)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    height: 52,
+  },
+  lockedText: {
+    ...Typography.small,
+    color: "rgba(255,255,255,0.75)",
+    flex: 1,
+    textAlign: "center",
+  },
+  lockedEndButton: {
+    height: 38, borderRadius: BorderRadius.full,
+    backgroundColor: Colors.liveRed,
+    alignItems: "center", justifyContent: "center",
+    paddingHorizontal: Spacing.lg,
+  },
+  lockoutToast: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    backgroundColor: "rgba(0,0,0,0.78)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.sm,
+    zIndex: 20, elevation: 20,
+  },
+  lockoutToastText: {
+    ...Typography.small,
+    color: "#fff",
+  },
 });

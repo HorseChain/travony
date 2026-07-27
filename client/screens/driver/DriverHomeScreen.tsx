@@ -383,6 +383,7 @@ export default function DriverHomeScreen() {
   const [incomingRequest, setIncomingRequest] = useState<RideRequest | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [showActivationMoment, setShowActivationMoment] = useState(false);
+  const [showGoLiveNudge, setShowGoLiveNudge] = useState(false);
   const [dismissedGoHereKey, setDismissedGoHereKey] = useState<string | null>(null);
   const [lowBatteryWarning, setLowBatteryWarning] = useState<{
     message: string;
@@ -578,7 +579,10 @@ export default function DriverHomeScreen() {
       // Skip named-fare rides the driver already countered — they're waiting
       // on the rider now; a win is detected via the my-bids poll below.
       const next = pendingRides.find((r) => !counteredRideIds.current.has(r.id));
-      if (next) setIncomingRequest(next);
+      if (next) {
+        setIncomingRequest(next);
+        setShowGoLiveNudge(false);
+      }
     }
   }, [pendingRides, isOnline]);
 
@@ -779,10 +783,14 @@ export default function DriverHomeScreen() {
     if (value) {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
       setShowActivationMoment(true);
-      setTimeout(() => setShowActivationMoment(false), 1000);
+      setTimeout(() => {
+        setShowActivationMoment(false);
+        setShowGoLiveNudge(true);
+      }, 1000);
     } else {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
       setIncomingRequest(null);
+      setShowGoLiveNudge(false);
     }
   };
 
@@ -839,7 +847,10 @@ export default function DriverHomeScreen() {
     setEvReady(true);
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setShowActivationMoment(true);
-    setTimeout(() => setShowActivationMoment(false), 1400);
+    setTimeout(() => {
+      setShowActivationMoment(false);
+      setShowGoLiveNudge(true);
+    }, 1400);
 
     toggleOnlineMutation.mutate(
       { online: true, evReady: true },
@@ -848,6 +859,7 @@ export default function DriverHomeScreen() {
           setIsOnline(false);
           setEvReady(false);
           setShowActivationMoment(false);
+          setShowGoLiveNudge(false);
           showBlockerMessage(
             "Couldn't go live",
             "Something went wrong taking you live. Please check your connection and try again."
@@ -862,6 +874,7 @@ export default function DriverHomeScreen() {
     setIsOnline(false);
     setEvReady(false);
     setIncomingRequest(null);
+    setShowGoLiveNudge(false);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     toggleOnlineMutation.mutate({ online: false, evReady: false });
   };
@@ -1139,6 +1152,39 @@ export default function DriverHomeScreen() {
 
       {isOnline && !incomingRequest ? (
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
+          {showGoLiveNudge ? (
+            <Pressable
+              style={[styles.goLiveNudge, { backgroundColor: theme.backgroundRoot, borderColor: "#9146FF30" }]}
+              onPress={() => {
+                setShowGoLiveNudge(false);
+                Linking.openURL("twitch://broadcast").catch(() =>
+                  Linking.openURL("https://www.twitch.tv")
+                );
+              }}
+            >
+              <View style={styles.goLiveNudgeLeft}>
+                <View style={[styles.goLiveNudgeDot, { backgroundColor: "#9146FF" }]} />
+                <View>
+                  <ThemedText style={styles.goLiveNudgeTitle}>Stream your ride live</ThemedText>
+                  <ThemedText style={[styles.goLiveNudgeSub, { color: theme.textMuted }]}>
+                    Go live on Twitch while you drive
+                  </ThemedText>
+                </View>
+              </View>
+              <View style={styles.goLiveNudgeRight}>
+                <View style={[styles.goLiveNudgeBtn, { backgroundColor: "#9146FF" }]}>
+                  <ThemedText style={styles.goLiveNudgeBtnText}>Go Live</ThemedText>
+                </View>
+                <Pressable
+                  onPress={() => setShowGoLiveNudge(false)}
+                  hitSlop={10}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="close" size={16} color={theme.textMuted} />
+                </Pressable>
+              </View>
+            </Pressable>
+          ) : null}
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <View style={styles.searchingDot} />
             <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
@@ -1826,6 +1872,57 @@ const styles = StyleSheet.create({
   },
   searchingText: {
     ...Typography.body,
+  },
+  goLiveNudge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: Spacing.lg,
+    borderRadius: BorderRadius.xl,
+    borderWidth: 1,
+    gap: Spacing.sm,
+    ...Platform.select({
+      ios: {
+        shadowColor: Colors.black,
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.08,
+        shadowRadius: 6,
+      },
+      android: { elevation: 3 },
+    }),
+  },
+  goLiveNudgeLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.md,
+    flex: 1,
+  },
+  goLiveNudgeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  goLiveNudgeTitle: {
+    ...Typography.body,
+    fontWeight: "600",
+  },
+  goLiveNudgeSub: {
+    ...Typography.small,
+  },
+  goLiveNudgeRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+  },
+  goLiveNudgeBtn: {
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    borderRadius: BorderRadius.full,
+  },
+  goLiveNudgeBtnText: {
+    ...Typography.small,
+    color: "#FFFFFF",
+    fontWeight: "700",
   },
   requestCard: {
     position: "absolute",

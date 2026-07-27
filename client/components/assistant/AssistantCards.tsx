@@ -47,9 +47,16 @@ export type AssistantCardData =
   | { type: "live_ride"; rideId: string; status?: string }
   | { type: "wallet"; balance: string; currency: string; transactions: Array<{ id: string; type: string; amount: string; currency: string; description: string; status: string; createdAt: string }> }
   | { type: "rides"; rides: Array<{ id: string; pickupAddress: string; dropoffAddress: string; fare: string; currency: string; status: string; createdAt: string; hasBlockchainProof: boolean }> }
-  | { type: "coffee"; items: Array<{ id: string; name: string; basePrice: number; currency: string; description: string; category: string }> }
+  | { type: "coffee"; items: Array<{ id: string; name: string; basePrice: number; currency: string; description: string; category: string }>; orderId?: string; status?: string }
   | { type: "prayer"; subscriptions: Array<{ id: string; mosqueName: string; prayers: string; status: string }> }
-  | { type: "arrival"; arrivals: Array<{ id: string; label: string; destAddress: string; mode: string; arriveTimeLocal: string | null; arriveAtUtc: string | null; status: string }> };
+  | { type: "arrival"; arrivals: Array<{ id: string; label: string; destAddress: string; mode: string; arriveTimeLocal: string | null; arriveAtUtc: string | null; status: string }> }
+  | { type: "rewards"; coins: number; diamonds: number; streakDay: number; checkedInToday: boolean; nextCheckInCoins: number; cashableAed: string }
+  | { type: "missions"; missions: Array<{ key: string; name: string; coins: number; completed: boolean }> }
+  | { type: "earnings"; days: number; totalAed: string; rideCount: number; rides: Array<{ to: string; earnings: string; date: string }> }
+  | { type: "ladder"; targetName: string; totalContributed: number; currency: string; progressPercent: number; qualified: boolean; agentMessage: string }
+  | { type: "pending_rides"; rides: Array<{ id: string; pickup: string; dropoff: string; fare: string; distance: string | null }> }
+  | { type: "coffee_orders"; orders: Array<{ id: string; item: string; size: string | null; type: string | null; totalAmount: string | null; deliveryAddress: string | null }> }
+  | { type: "trending"; routes: Array<{ label: string; city: string | null; rising: boolean }>; terms: Array<{ label: string }> };
 
 export interface AssistantCardHandlers {
   onPickPlace: (place: AssistantPoint & { label?: string }) => void;
@@ -566,6 +573,262 @@ function ArrivalCard({ card }: { card: Extract<AssistantCardData, { type: "arriv
 }
 
 // ---------------------------------------------------------------------------
+// Rewards card — coins + diamonds balances, streak, deep-link to Rewards.
+// ---------------------------------------------------------------------------
+function RewardsCard({ card }: { card: Extract<AssistantCardData, { type: "rewards" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      <View style={styles.bookingHeader}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+          <Ionicons name="star-outline" size={18} color={theme.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.bookingFare}>{card.coins} coins · {card.diamonds} diamonds</ThemedText>
+          <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]}>
+            {card.checkedInToday ? `Checked in today · Day ${card.streakDay}` : `Check in to earn ${card.nextCheckInCoins} coins`}
+          </ThemedText>
+        </View>
+      </View>
+      {card.diamonds >= 200 ? (
+        <View style={[styles.breakdown, { borderTopColor: theme.border }]}>
+          <ThemedText style={[styles.breakdownLine, { color: theme.textSecondary }]}>
+            {card.diamonds} diamonds = AED {card.cashableAed} cashable to wallet
+          </ThemedText>
+        </View>
+      ) : null}
+      <RowButton label="Open Rewards" icon="star-outline" onPress={() => navigation.navigate("Rewards")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Missions card — daily missions with completion status.
+// ---------------------------------------------------------------------------
+function MissionsCard({ card }: { card: Extract<AssistantCardData, { type: "missions" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.missions.map((m, i) => (
+        <View
+          key={m.key}
+          style={[
+            styles.placeRow,
+            { borderBottomColor: theme.border },
+            i === card.missions.length - 1 ? { borderBottomWidth: 0 } : null,
+          ]}
+        >
+          <Ionicons
+            name={m.completed ? "checkmark-circle" : "ellipse-outline"}
+            size={18}
+            color={m.completed ? theme.primary : theme.textMuted}
+          />
+          <View style={{ flex: 1 }}>
+            <ThemedText style={[styles.placeLabel, { color: m.completed ? theme.textMuted : theme.text }]}>
+              {m.name}
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.txAmount, { color: m.completed ? theme.textMuted : theme.primary }]}>
+            +{m.coins}
+          </ThemedText>
+        </View>
+      ))}
+      <RowButton label="Rewards hub" icon="star-outline" onPress={() => navigation.navigate("Rewards")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Earnings card — driver earnings summary with recent rides list.
+// ---------------------------------------------------------------------------
+function EarningsCard({ card }: { card: Extract<AssistantCardData, { type: "earnings" }> }) {
+  const { theme } = useTheme();
+  const [expanded, setExpanded] = useState(false);
+  const shown = expanded ? card.rides : card.rides.slice(0, 2);
+  return (
+    <CardShell>
+      <View style={styles.bookingHeader}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+          <Ionicons name="trending-up-outline" size={18} color={theme.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.bookingFare}>AED {card.totalAed}</ThemedText>
+          <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]}>
+            {card.rideCount} rides · last {card.days} days
+          </ThemedText>
+        </View>
+      </View>
+      {shown.map((r, i) => (
+        <View key={`${r.date}-${i}`} style={[styles.txRow, { borderTopColor: theme.border }]}>
+          <ThemedText style={[styles.txDesc, { color: theme.textSecondary }]} numberOfLines={1}>
+            {r.to || "Trip"}
+          </ThemedText>
+          <ThemedText style={styles.txAmount}>AED {parseFloat(r.earnings || "0").toFixed(2)}</ThemedText>
+        </View>
+      ))}
+      {card.rides.length > 2 && !expanded ? (
+        <Pressable onPress={() => setExpanded(true)} style={styles.detailsToggle}>
+          <ThemedText style={[styles.detailsToggleText, { color: theme.primary }]}>Show all</ThemedText>
+        </Pressable>
+      ) : null}
+      {card.rides.length === 0 ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>No rides yet in this period.</ThemedText>
+      ) : null}
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Car Ladder card — progress toward next vehicle.
+// ---------------------------------------------------------------------------
+function LadderCard({ card }: { card: Extract<AssistantCardData, { type: "ladder" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  const pct = Math.min(Math.max(card.progressPercent, 0), 100);
+  return (
+    <CardShell>
+      <View style={styles.bookingHeader}>
+        <View style={[styles.iconBubble, { backgroundColor: theme.primary + "22" }]}>
+          <Ionicons name="car-sport-outline" size={18} color={theme.primary} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <ThemedText style={styles.cardTitle}>{card.targetName}</ThemedText>
+          <ThemedText style={[styles.bookingMeta, { color: theme.textSecondary }]}>
+            {card.currency} {card.totalContributed.toFixed(2)} contributed · {pct.toFixed(0)}%
+          </ThemedText>
+        </View>
+        {card.qualified ? (
+          <Ionicons name="checkmark-circle" size={20} color={theme.primary} />
+        ) : null}
+      </View>
+      <View style={[styles.progressTrack, { backgroundColor: theme.border }]}>
+        <View style={[styles.progressFill, { backgroundColor: theme.primary, width: `${pct}%` as any }]} />
+      </View>
+      {card.agentMessage ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textSecondary }]}>{card.agentMessage}</ThemedText>
+      ) : null}
+      <RowButton label="Vehicle Wallet" icon="car-sport-outline" onPress={() => navigation.navigate("VehicleWallet")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Pending rides card — driver view of open ride requests.
+// ---------------------------------------------------------------------------
+function PendingRidesCard({ card }: { card: Extract<AssistantCardData, { type: "pending_rides" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.rides.length === 0 ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>No open ride requests right now.</ThemedText>
+      ) : (
+        card.rides.map((r, i) => (
+          <View
+            key={r.id}
+            style={[styles.placeRow, { borderBottomColor: theme.border }, i === card.rides.length - 1 ? { borderBottomWidth: 0 } : null]}
+          >
+            <Ionicons name="radio-button-on" size={14} color={theme.primary} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={styles.placeLabel} numberOfLines={1}>{r.dropoff}</ThemedText>
+              <ThemedText style={[styles.placeReason, { color: theme.textMuted }]} numberOfLines={1}>
+                From: {r.pickup}
+              </ThemedText>
+            </View>
+            <ThemedText style={[styles.txAmount, { color: theme.primary }]}>AED {parseFloat(r.fare || "0").toFixed(2)}</ThemedText>
+          </View>
+        ))
+      )}
+      <RowButton label="Go online to accept" icon="navigate-outline" onPress={() => navigation.getParent()?.navigate("DriverHome")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Coffee orders card — driver-facing pending orders.
+// ---------------------------------------------------------------------------
+function CoffeeOrdersCard({ card }: { card: Extract<AssistantCardData, { type: "coffee_orders" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  return (
+    <CardShell>
+      {card.orders.length === 0 ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>No pending coffee orders.</ThemedText>
+      ) : (
+        card.orders.map((o, i) => (
+          <View
+            key={o.id}
+            style={[styles.placeRow, { borderBottomColor: theme.border }, i === card.orders.length - 1 ? { borderBottomWidth: 0 } : null]}
+          >
+            <Ionicons name="cafe-outline" size={18} color={theme.primary} />
+            <View style={{ flex: 1 }}>
+              <ThemedText style={styles.placeLabel}>{o.item}{o.size ? ` · ${o.size}` : ""}</ThemedText>
+              {o.deliveryAddress ? (
+                <ThemedText style={[styles.placeReason, { color: theme.textMuted }]} numberOfLines={1}>{o.deliveryAddress}</ThemedText>
+              ) : null}
+            </View>
+            {o.totalAmount ? (
+              <ThemedText style={styles.txAmount}>AED {parseFloat(o.totalAmount).toFixed(2)}</ThemedText>
+            ) : null}
+          </View>
+        ))
+      )}
+      <RowButton label="Open Coffee Orders" icon="cafe-outline" onPress={() => navigation.navigate("CoffeeOrders")} tone="primary" />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Trending card — hot routes + search terms.
+// ---------------------------------------------------------------------------
+function TrendingCard({ card }: { card: Extract<AssistantCardData, { type: "trending" }> }) {
+  const { theme } = useTheme();
+  const navigation = useNavigation<any>();
+  const hasRoutes = card.routes.length > 0;
+  const hasTerms = card.terms.length > 0;
+  return (
+    <CardShell>
+      {hasRoutes ? (
+        <>
+          <ThemedText style={[styles.breakdownLine, { color: theme.textMuted }]}>Hot routes</ThemedText>
+          {card.routes.map((r, i) => (
+            <View key={`r-${i}`} style={[styles.placeRow, { borderBottomColor: theme.border }]}>
+              <Ionicons name={r.rising ? "trending-up" : "remove-outline"} size={16} color={r.rising ? theme.primary : theme.textMuted} />
+              <View style={{ flex: 1 }}>
+                <ThemedText style={styles.placeLabel} numberOfLines={1}>{r.label}</ThemedText>
+                {r.city ? <ThemedText style={[styles.placeReason, { color: theme.textMuted }]}>{r.city}</ThemedText> : null}
+              </View>
+            </View>
+          ))}
+        </>
+      ) : null}
+      {hasTerms ? (
+        <>
+          <ThemedText style={[styles.breakdownLine, { color: theme.textMuted, marginTop: hasRoutes ? Spacing.sm : 0 }]}>Trending searches</ThemedText>
+          <View style={styles.paymentRow}>
+            {card.terms.map((t, i) => (
+              <Pressable
+                key={`t-${i}`}
+                onPress={() => navigation.navigate("Discover", { initialQuery: t.label })}
+                style={[styles.paymentChip, { backgroundColor: theme.backgroundDefault, borderColor: theme.border }]}
+              >
+                <ThemedText style={[styles.paymentChipText, { color: theme.text }]}>{t.label}</ThemedText>
+              </Pressable>
+            ))}
+          </View>
+        </>
+      ) : null}
+      {!hasRoutes && !hasTerms ? (
+        <ThemedText style={[styles.emptyLine, { color: theme.textMuted }]}>No trending data yet — check back after more rides.</ThemedText>
+      ) : null}
+      <RowButton label="Explore trending" icon="search-outline" onPress={() => navigation.navigate("Discover")} />
+    </CardShell>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher.
 // ---------------------------------------------------------------------------
 export function AssistantCard({
@@ -594,6 +857,20 @@ export function AssistantCard({
       return <PrayerCard card={card} />;
     case "arrival":
       return <ArrivalCard card={card} />;
+    case "rewards":
+      return <RewardsCard card={card} />;
+    case "missions":
+      return <MissionsCard card={card} />;
+    case "earnings":
+      return <EarningsCard card={card} />;
+    case "ladder":
+      return <LadderCard card={card} />;
+    case "pending_rides":
+      return <PendingRidesCard card={card} />;
+    case "coffee_orders":
+      return <CoffeeOrdersCard card={card} />;
+    case "trending":
+      return <TrendingCard card={card} />;
     default:
       return null;
   }
@@ -750,5 +1027,15 @@ const styles = StyleSheet.create({
   },
   emptyLine: {
     ...Typography.caption,
+  },
+  progressTrack: {
+    height: 6,
+    borderRadius: 3,
+    overflow: "hidden",
+    marginTop: Spacing.sm,
+  },
+  progressFill: {
+    height: 6,
+    borderRadius: 3,
   },
 });

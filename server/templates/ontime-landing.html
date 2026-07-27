@@ -672,7 +672,7 @@
   <div class="net-head">
     <span class="live-pill red fx"><span class="live-dot"></span>Live broadcasts</span>
     <h2 class="fx d1">Rides, broadcast live.</h2>
-    <p class="fx d1">Riders and drivers streaming their Travony journeys right now — on Twitch or straight from the app — grouped by country and city.</p>
+    <p class="fx d1">Riders and drivers streaming their Travony journeys live from the app — grouped by country and city.</p>
   </div>
 
   <div class="bc-chips fx d1" id="bcChips"></div>
@@ -1303,7 +1303,7 @@
 </script>
 
 <script>
-/* ---------- Live broadcasts (public Twitch streams) ---------- */
+/* ---------- Live broadcasts (in-app Agora streams) ---------- */
 (function () {
   function $(id) { return document.getElementById(id); }
 
@@ -1321,9 +1321,9 @@
   var bcFilter = "ALL";
   var bcOpen = null; /* stream key currently playing (see skey) */
 
-  /* One stable key per stream, across both providers. */
+  /* One stable key per stream. */
   function skey(s) {
-    return s.provider === "agora" ? "a:" + s.postId : "t:" + s.twitchChannel;
+    return "a:" + s.postId;
   }
 
   /* ---------- In-app (Agora) playback ---------- */
@@ -1454,25 +1454,16 @@
     bcOpen = skey(stream);
     var frame = $("bcFrame");
     frame.innerHTML = "";
-    if (stream.provider === "agora") {
-      openAgoraPlayer(stream, frame);
-    } else {
-      var iframe = document.createElement("iframe");
-      iframe.src = "https://player.twitch.tv/?channel=" + encodeURIComponent(stream.twitchChannel) +
-        "&parent=" + encodeURIComponent(location.hostname) + "&muted=true";
-      iframe.allowFullscreen = true;
-      iframe.setAttribute("allow", "autoplay; fullscreen");
-      frame.appendChild(iframe);
-    }
+    openAgoraPlayer(stream, frame);
     var w = $("bcWatching");
     w.innerHTML = "";
     var b = document.createElement("b");
-    b.textContent = stream.name || stream.twitchChannel || "Travony ride";
+    b.textContent = stream.name || "Travony ride";
     w.appendChild(document.createTextNode("Watching "));
     w.appendChild(b);
     var place = [stream.city, countryName(stream.country)].filter(function (x) { return x && x !== "Other"; }).join(", ");
     if (place) w.appendChild(document.createTextNode(" — live from " + place));
-    w.appendChild(document.createTextNode(stream.provider === "agora" ? " · streamed from the Travony app" : " · on Twitch"));
+    w.appendChild(document.createTextNode(" · streamed from the Travony app"));
     $("bcPlayer").classList.add("show");
     $("bcPlayer").scrollIntoView({ behavior: "smooth", block: "nearest" });
   }
@@ -1530,15 +1521,11 @@
           var dot = document.createElement("span");
           dot.className = "bc-dot";
           bn.appendChild(dot);
-          bn.appendChild(document.createTextNode(stream.name || stream.twitchChannel || "Travony ride"));
+          bn.appendChild(document.createTextNode(stream.name || "Travony ride"));
           var bs = document.createElement("div");
           bs.className = "bs";
-          if (stream.provider === "agora") {
-            var viewers = stream.viewerCount > 0 ? " · " + stream.viewerCount + " watching" : "";
-            bs.textContent = "Live from the app" + viewers + " · tap to watch";
-          } else {
-            bs.textContent = "Live on Twitch · tap to watch";
-          }
+          var viewers = stream.viewerCount > 0 ? " · " + stream.viewerCount + " watching" : "";
+          bs.textContent = "Live from the app" + viewers + " · tap to watch";
           card.appendChild(bn);
           card.appendChild(bs);
           card.addEventListener("click", function () {

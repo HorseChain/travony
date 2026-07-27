@@ -63,6 +63,10 @@ export default function AgoraStreamViewerScreen() {
   const [product, setProduct] = useState<ActiveProduct | null>(null);
   const [viewerCount, setViewerCount] = useState(0);
   const [ended, setEnded] = useState(false);
+  const [joinError, setJoinError] = useState<string | null>(null);
+  // Shown when Agora detects a network handoff (cell tower switch, 5G→4G, etc.)
+  // Cleared automatically once reconnection succeeds — no user action needed.
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   const nativeOk = agoraNativeAvailable();
 
@@ -95,6 +99,23 @@ export default function AgoraStreamViewerScreen() {
     setProduct(snapshot.activeProduct);
     if (!snapshot.isLive) setEnded(true);
   }, [snapshot?.viewerCount, snapshot?.activeProduct?.productId, snapshot?.isLive]);
+
+  // Surface token-fetch errors immediately rather than spinning forever.
+  useEffect(() => {
+    if (tokenQuery.isError) {
+      setJoinError("Couldn't load stream credentials. Close and try again.");
+    }
+  }, [tokenQuery.isError]);
+
+  // Safety timeout: if tokens arrived but the engine never joined after 25 s,
+  // show a recoverable error message instead of an endless spinner.
+  useEffect(() => {
+    if (!tokens || engineReady || ended || joinError) return;
+    const t = setTimeout(() => {
+      setJoinError("Couldn't connect to the stream. Check your connection and try again.");
+    }, 25000);
+    return () => clearTimeout(t);
+  }, [tokens, engineReady, ended, joinError]);
 
   const { subscribe } = useStreamChannel(postId, tokens);
   const { current: currentGift, onGiftEvent } = useGiftAnimations();
@@ -146,10 +167,21 @@ export default function AgoraStreamViewerScreen() {
         channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
       });
       engine.registerEventHandler({
-        onJoinChannelSuccess: () => setEngineReady(true),
+        onJoinChannelSuccess: () => { setEngineReady(true); setIsReconnecting(false); },
         onUserJoined: (_conn: any, uid: number) => setRemoteUid(uid),
         onUserOffline: (_conn: any, uid: number) =>
           setRemoteUid((prev) => (prev === uid ? null : prev)),
+        // Handle cell-tower hand-offs (5G→4G) and brief Wi-Fi drops without
+        // crashing the screen. State 3 = RECONNECTING — show a small badge and
+        // keep the frozen frame visible (better than a spinner overlay).
+        // State 1/2 = CONNECTING/CONNECTED — badge clears automatically.
+        onConnectionStateChanged: (_conn: any, state: number, _reason: number) => {
+          if (state === 3) {
+            setIsReconnecting(true);
+          } else if (state === 1 || state === 2) {
+            setIsReconnecting(false);
+          }
+        },
       });
       engine.enableVideo();
       // Lite Mode: ask for the low-quality simulcast stream.
@@ -158,6 +190,10 @@ export default function AgoraStreamViewerScreen() {
       }
       engine.joinChannelWithUserAccount(tokens.rtcToken, tokens.channel, tokens.uid, {
         clientRoleType: ClientRoleType.ClientRoleAudience,
+        // audienceLatencyLevel 1 = Low Latency — required for audience in
+        // Live Broadcasting mode; omitting it causes silent join failures on
+        // some SDK versions.
+        audienceLatencyLevel: 1,
         autoSubscribeVideo: true,
         autoSubscribeAudio: true,
         publishCameraTrack: false,
@@ -165,6 +201,7 @@ export default function AgoraStreamViewerScreen() {
       });
     } catch (err) {
       console.log("[Stream] RTC join failed:", (err as any)?.message || err);
+      setJoinError("Failed to join stream. Close and try again.");
     }
     return () => {
       try {
@@ -205,6 +242,12 @@ export default function AgoraStreamViewerScreen() {
                 Gifts and updates below still work.
               </ThemedText>
             </>
+          ) : joinError ? (
+            <>
+              <Ionicons name="alert-circle-outline" size={44} color="rgba(255,255,255,0.5)" />
+              <ThemedText style={styles.fallbackTitle}>Couldn't connect</ThemedText>
+              <ThemedText style={styles.fallbackBody}>{joinError}</ThemedText>
+            </>
           ) : (
             <>
               <ActivityIndicator color="#fff" />
@@ -213,6 +256,16 @@ export default function AgoraStreamViewerScreen() {
               </ThemedText>
             </>
           )}
+        </View>
+      )}
+
+      {/* Reconnecting badge — shown on network hand-off (5G→4G, Wi-Fi drop).
+          Floats over the frozen frame so the viewer knows the feed will resume
+          without needing to leave the screen. Clears automatically on reconnect. */}
+      {isReconnecting && (
+        <View style={[styles.reconnectBadge, { top: insets.top + Spacing.md + 48 }]}>
+          <ActivityIndicator size="small" color="#fff" />
+          <ThemedText style={styles.reconnectText}>Reconnecting…</ThemedText>
         </View>
       )}
 
@@ -365,6 +418,22 @@ const styles = StyleSheet.create({
     left: Spacing.lg,
     right: Spacing.lg,
     gap: Spacing.md,
+  },
+  reconnectBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    backgroundColor: "rgba(0,0,0,0.65)",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    zIndex: 20,
+  },
+  reconnectText: {
+    ...Typography.small,
+    color: "#fff",
   },
   giftButton: {
     flexDirection: "row",

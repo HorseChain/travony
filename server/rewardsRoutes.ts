@@ -14,9 +14,11 @@ import {
   rewardTransactions,
   giftsSent,
   walletTransactions,
+  hrsPaymentIntents,
 } from "@shared/schema";
 import { eq, and, desc, gte, sql, count, inArray } from "drizzle-orm";
 import { broadcastGiftIfLiveStream } from "./agoraStreaming";
+import { verifyHrsTransfer, getPlatformAddress, isValidEthAddress } from "./hrsToken";
 
 // Travony Rewards — TikTok-style economy adapted for a mobility network.
 //   BUY:        Coins purchased from the existing AED wallet (packs).
@@ -35,35 +37,32 @@ export const rewardsRouter = Router();
 // Economy constants (server-owned; mirror TikTok's shape, Travony-tuned)
 // ---------------------------------------------------------------------------
 
-// 1 coin costs AED 0.10 when buying. A gifted coin becomes 1 diamond for the
-// recipient, and diamonds cash out at AED 0.05 — the platform keeps the same
-// ~50% spread TikTok does.
-const COIN_PRICE_AED = 0.1;
+// Coins are topped up with HRS tokens (1 coin = 1 HRS). A gifted coin becomes
+// 1 diamond for the recipient; diamonds cash out at AED 0.05.
 const DIAMOND_VALUE_AED = 0.05;
 const MIN_CASHOUT_DIAMONDS = 200;
 const DAILY_EARN_CAP = 200; // coins/day from check-in + missions combined
 
 const COIN_PACKS = [
-  { id: "spark", coins: 70, priceAed: 7 },
-  { id: "cruise", coins: 350, priceAed: 35 },
-  { id: "boost", coins: 700, priceAed: 70 },
-  { id: "turbo", coins: 1400, priceAed: 140 },
-  { id: "falcon", coins: 3500, priceAed: 350 },
-  { id: "legend", coins: 7000, priceAed: 700 },
+  { id: "starter", coins: 70, priceHrs: 70, label: "Starter" },
+  { id: "cruiser", coins: 350, priceHrs: 350, label: "Cruiser" },
+  { id: "booster", coins: 700, priceHrs: 700, label: "Booster" },
+  { id: "turbo", coins: 1400, priceHrs: 1400, label: "Turbo" },
+  { id: "falcon", coins: 3500, priceHrs: 3500, label: "Falcon" },
+  { id: "legend", coins: 7000, priceHrs: 7000, label: "Legend" },
 ] as const;
 
-// Gulf/mobility-themed gift catalog (icon = Ionicons name).
+// Social + transportation gift catalog (icon = Ionicons name).
 const GIFT_CATALOG = [
-  { key: "rose", name: "Rose", coins: 1, icon: "rose-outline" },
-  { key: "karak", name: "Karak Tea", coins: 5, icon: "cafe-outline" },
-  { key: "coffee", name: "Arabic Coffee", coins: 10, icon: "cafe" },
-  { key: "dates", name: "Box of Dates", coins: 25, icon: "gift-outline" },
-  { key: "oud", name: "Oud", coins: 50, icon: "flame-outline" },
-  { key: "falcon", name: "Falcon", coins: 100, icon: "paper-plane" },
-  { key: "dune_rider", name: "Dune Rider", coins: 500, icon: "car-sport-outline" },
-  { key: "golden_wheel", name: "Golden Wheel", coins: 1000, icon: "aperture-outline" },
-  { key: "supercar", name: "Supercar", coins: 5000, icon: "car-sport" },
-  { key: "travony_star", name: "Travony Star", coins: 10000, icon: "star" },
+  { key: "fuel_up", name: "Fuel Up", coins: 5, icon: "flash-outline" },
+  { key: "karak_break", name: "Karak Break", coins: 10, icon: "cafe-outline" },
+  { key: "route_star", name: "Route Star", coins: 25, icon: "star-outline" },
+  { key: "green_light", name: "Green Light", coins: 50, icon: "checkmark-circle-outline" },
+  { key: "road_king", name: "Road King", coins: 100, icon: "car-sport-outline" },
+  { key: "express_lane", name: "Express Lane", coins: 500, icon: "navigate-outline" },
+  { key: "golden_carriage", name: "Golden Carriage", coins: 1000, icon: "ribbon-outline" },
+  { key: "fleet_legend", name: "Fleet Legend", coins: 5000, icon: "trophy-outline" },
+  { key: "travony_crown", name: "Travony Crown", coins: 10000, icon: "diamond-outline" },
 ] as const;
 
 // Day 1..7 check-in rewards; an unbroken streak cycles back through the
@@ -345,6 +344,8 @@ rewardsRouter.get("/api/rewards/me", async (req, res) => {
       packs: COIN_PACKS,
       catalog: GIFT_CATALOG,
       dailyEarnCap: DAILY_EARN_CAP,
+      ethWalletAddress: (user as any).ethWalletAddress ?? null,
+      platformHrsAddress: getPlatformAddress(),
     });
   } catch (err: any) {
     console.error("[Rewards] me error:", err);
@@ -432,10 +433,35 @@ rewardsRouter.post("/api/rewards/missions/claim", async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/rewards/coins/purchase { packId } — debit AED wallet, credit coins
+// PATCH /api/rewards/wallet-address { ethAddress } — save ETH wallet
 // ---------------------------------------------------------------------------
 
-rewardsRouter.post("/api/rewards/coins/purchase", async (req, res) => {
+rewardsRouter.patch("/api/rewards/wallet-address", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ message: "Sign in first" });
+    const { ethAddress } = req.body || {};
+    if (!ethAddress || !isValidEthAddress(ethAddress)) {
+      return res.status(400).json({ message: "Enter a valid Ethereum wallet address" });
+    }
+    await db
+      .update(users)
+      .set({ ethWalletAddress: ethAddress } as any)
+      .where(eq(users.id, user.id));
+    res.json({ saved: true });
+  } catch (err: any) {
+    console.error("[Rewards] wallet-address error:", err);
+    res.status(500).json({ message: "Could not save wallet address" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/rewards/coins/hrs-initiate { packId, ethAddress? }
+// Creates a 30-min payment intent. User sends HRS on Ethereum mainnet,
+// then calls hrs-verify to confirm and receive coins.
+// ---------------------------------------------------------------------------
+
+rewardsRouter.post("/api/rewards/coins/hrs-initiate", async (req, res) => {
   try {
     const user = await getWriteUser(req);
     if (!user) return res.status(401).json({ message: "Sign in first" });
@@ -443,40 +469,122 @@ rewardsRouter.post("/api/rewards/coins/purchase", async (req, res) => {
     const pack = COIN_PACKS.find((p) => p.id === req.body?.packId);
     if (!pack) return res.status(400).json({ message: "Unknown coin pack" });
 
+    const ethAddress = (req.body?.ethAddress || (user as any).ethWalletAddress || "").trim();
+    if (!ethAddress || !isValidEthAddress(ethAddress)) {
+      return res.status(400).json({ message: "Enter a valid Ethereum wallet address first" });
+    }
+
+    const platform = getPlatformAddress();
+    if (!platform) {
+      return res.status(503).json({ message: "Payment is temporarily unavailable" });
+    }
+
+    if (ethAddress !== (user as any).ethWalletAddress) {
+      await db
+        .update(users)
+        .set({ ethWalletAddress: ethAddress } as any)
+        .where(eq(users.id, user.id));
+    }
+
     await getOrCreateAccount(user.id);
 
-    const result = await db.transaction(async (tx) => {
-      // Atomic guarded wallet debit — no read-modify-write races.
-      const debit = await tx.execute(sql`
-        UPDATE users
-        SET wallet_balance = wallet_balance - ${pack.priceAed.toFixed(2)}::numeric
-        WHERE id = ${user.id} AND wallet_balance >= ${pack.priceAed.toFixed(2)}::numeric
-        RETURNING wallet_balance
-      `);
-      if (!debit.rows.length) return null;
-
-      await tx.insert(walletTransactions).values({
-        id: uuidv4(),
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const [intent] = await db
+      .insert(hrsPaymentIntents)
+      .values({
         userId: user.id,
-        type: "coin_purchase",
-        amount: pack.priceAed.toFixed(2),
-        currency: "AED",
-        status: "completed",
-        description: `Travony Coins — ${pack.coins} coins`,
-        completedAt: new Date(),
-      });
+        packId: pack.id,
+        hrsAmount: pack.priceHrs.toString(),
+        coins: pack.coins,
+        platformAddress: platform,
+        userEthAddress: ethAddress,
+        expiresAt,
+      })
+      .returning();
 
-      await creditRewards(tx, user.id, "coin_purchase", uuidv4(), pack.coins, 0, pack.id);
-      return { newWalletBalance: String((debit.rows[0] as any).wallet_balance) };
+    res.json({
+      intentId: intent.id,
+      hrsAmount: pack.priceHrs,
+      coins: pack.coins,
+      platformAddress: platform,
+      expiresAt: expiresAt.toISOString(),
+    });
+  } catch (err: any) {
+    console.error("[Rewards] hrs-initiate error:", err);
+    res.status(500).json({ message: "Could not create payment" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/rewards/coins/hrs-verify { intentId }
+// Scans Ethereum mainnet for the HRS transfer and credits coins if found.
+// ---------------------------------------------------------------------------
+
+rewardsRouter.post("/api/rewards/coins/hrs-verify", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ message: "Sign in first" });
+
+    const { intentId } = req.body || {};
+    if (!intentId) return res.status(400).json({ message: "Intent ID required" });
+
+    const [intent] = await db
+      .select()
+      .from(hrsPaymentIntents)
+      .where(and(eq(hrsPaymentIntents.id, intentId), eq(hrsPaymentIntents.userId, user.id)));
+
+    if (!intent) return res.status(404).json({ message: "Payment not found" });
+
+    if (intent.status === "verified") {
+      return res.json({ verified: true, coins: intent.coins, alreadyVerified: true });
+    }
+    if (intent.status === "expired" || new Date() > intent.expiresAt) {
+      await db
+        .update(hrsPaymentIntents)
+        .set({ status: "expired" })
+        .where(eq(hrsPaymentIntents.id, intentId));
+      return res.status(400).json({ message: "This payment window has expired. Start a new one." });
+    }
+
+    const check = await verifyHrsTransfer(
+      intent.userEthAddress,
+      intent.platformAddress,
+      Number(intent.hrsAmount),
+    );
+
+    if (!check.found || !check.txHash) {
+      return res.status(202).json({
+        verified: false,
+        message: "Payment not detected yet. Send the HRS and try again.",
+      });
+    }
+
+    // Guard against double-claiming the same on-chain transfer.
+    const [existing] = await db
+      .select({ id: hrsPaymentIntents.id })
+      .from(hrsPaymentIntents)
+      .where(
+        and(
+          eq(hrsPaymentIntents.txHash, check.txHash),
+          eq(hrsPaymentIntents.status, "verified"),
+        ),
+      );
+    if (existing) {
+      return res.status(409).json({ message: "This payment was already used" });
+    }
+
+    await db.transaction(async (tx) => {
+      await tx
+        .update(hrsPaymentIntents)
+        .set({ status: "verified", txHash: check.txHash })
+        .where(eq(hrsPaymentIntents.id, intentId));
+      await creditRewards(tx, user.id, "coin_purchase", intentId, intent.coins, 0, intent.packId);
     });
 
-    if (!result) {
-      return res.status(400).json({ message: "Not enough wallet balance for this pack" });
-    }
-    res.json({ coins: pack.coins, walletBalance: result.newWalletBalance });
+    res.json({ verified: true, coins: intent.coins, txHash: check.txHash });
   } catch (err: any) {
-    console.error("[Rewards] purchase error:", err);
-    res.status(500).json({ message: "Purchase failed" });
+    console.error("[Rewards] hrs-verify error:", err);
+    res.status(500).json({ message: "Verification failed" });
   }
 });
 

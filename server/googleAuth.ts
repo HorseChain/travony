@@ -29,9 +29,12 @@ function getBaseUrl(): string {
   if (process.env.GOOGLE_CALLBACK_URL) {
     return process.env.GOOGLE_CALLBACK_URL.replace(/\/api\/auth\/google\/callback.*$/, "");
   }
+  // Prefer REPLIT_DOMAINS (the user-facing production domains) over
+  // REPLIT_DEV_DOMAIN (the internal preview/dev domain, which is also set
+  // in production Cloud Run containers and must NOT be used for OAuth).
   const domain =
-    process.env.REPLIT_DEV_DOMAIN ||
-    process.env.REPLIT_DOMAINS?.split(",")[0];
+    process.env.REPLIT_DOMAINS?.split(",")[0] ||
+    process.env.REPLIT_DEV_DOMAIN;
   return domain ? `https://${domain}` : "http://localhost:5000";
 }
 

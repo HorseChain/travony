@@ -9,10 +9,11 @@ import {
   ridePosts,
   users,
   drivers,
+  vehicles,
   hubs,
   type Ride,
 } from "@shared/schema";
-import { and, desc, eq, gte, sql, count } from "drizzle-orm";
+import { and, desc, eq, gte, isNull, sql, count } from "drizzle-orm";
 import { detectRegionFromCoordinates } from "./regionService";
 
 const router: RouterType = Router();
@@ -695,6 +696,296 @@ router.post("/api/search/click", async (req, res) => {
   } catch (err: any) {
     console.error("[discovery] click log failed:", err);
     res.status(500).json({ message: "Failed to log click" });
+  }
+});
+
+// ============================================================================
+// Driver Discovery Feed — Nearby + Following
+// ============================================================================
+
+// ---------- pure-JS helpers ----------
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+// ETA: straight-line distance ÷ 30 kph × 60 min × 1.3 traffic factor, capped 60 min
+function etaFromDistanceKm(distanceKm: number): number {
+  return Math.min(Math.round((distanceKm / 30) * 60 * 1.3), 60);
+}
+
+// Upfront fare estimate for a 3 km baseline trip — pure JS, no DB call.
+const BASELINE_KM = 3;
+const REGION_RATES: Record<string, { base: number; perKm: number; currency: string; symbol: string }> = {
+  AE: { base: 5.00,  perKm: 1.50,  currency: "AED", symbol: "AED" },
+  BD: { base: 40,    perKm: 12,    currency: "BDT", symbol: "৳"   },
+  IN: { base: 30,    perKm: 8,     currency: "INR", symbol: "₹"   },
+  PK: { base: 120,   perKm: 30,    currency: "PKR", symbol: "Rs"  },
+  NG: { base: 400,   perKm: 100,   currency: "NGN", symbol: "₦"   },
+  KE: { base: 50,    perKm: 12,    currency: "KES", symbol: "KSh" },
+  TH: { base: 35,    perKm: 9,     currency: "THB", symbol: "฿"   },
+  ID: { base: 8000,  perKm: 2500,  currency: "IDR", symbol: "Rp"  },
+  VN: { base: 8000,  perKm: 2500,  currency: "VND", symbol: "₫"   },
+  PH: { base: 40,    perKm: 12,    currency: "PHP", symbol: "₱"   },
+};
+
+function upfrontFareEstimate(regionCode: string): { fare: number; currency: string; symbol: string } {
+  const r = REGION_RATES[regionCode] ?? REGION_RATES.AE;
+  return {
+    fare: Math.round((r.base + BASELINE_KM * r.perKm) * 100) / 100,
+    currency: r.currency,
+    symbol: r.symbol,
+  };
+}
+
+// ---------- shared result type ----------
+
+export type DiscoveryDriver = {
+  driverId: string;
+  userId: string;
+  name: string;
+  avatar: string | null;
+  rating: string | null;
+  totalTrips: number | null;
+  vehicle: {
+    make: string;
+    model: string;
+    color: string | null;
+    licensePlate: string;
+    photo: string | null;
+    type: string | null;
+  } | null;
+  distanceKm: number;
+  etaMinutes: number;
+  upfrontFare: number;
+  currency: string;
+  currencySymbol: string;
+  isLive: boolean;
+  postId: string | null;
+  streamProvider: "agora" | "twitch" | null;
+  /** Coarsened to ~1 km precision (2 decimal places) — safe to expose in feed */
+  approxLat: number | null;
+  approxLng: number | null;
+};
+
+// ---------- shared query builder ----------
+
+type RawDriverRow = {
+  driverId: string;
+  userId: string;
+  name: string;
+  avatar: string | null;
+  rating: string | null;
+  totalTrips: number | null;
+  currentLat: string | null;
+  currentLng: string | null;
+  vehicleMake: string | null;
+  vehicleModel: string | null;
+  vehicleColor: string | null;
+  vehiclePlate: string | null;
+  vehiclePhoto: string | null;
+  vehicleType: string | null;
+  postId: string | null;
+  postIsLive: boolean | null;
+  streamProvider: string | null;
+};
+
+const DRIVER_COLUMNS = {
+  driverId: drivers.id,
+  userId: users.id,
+  name: users.name,
+  avatar: users.avatar,
+  rating: drivers.rating,
+  totalTrips: drivers.totalTrips,
+  currentLat: drivers.currentLat,
+  currentLng: drivers.currentLng,
+  vehicleMake: vehicles.make,
+  vehicleModel: vehicles.model,
+  vehicleColor: vehicles.color,
+  vehiclePlate: vehicles.plateNumber,
+  vehiclePhoto: vehicles.photo,
+  vehicleType: vehicles.type,
+  postId: ridePosts.id,
+  postIsLive: ridePosts.isLive,
+  streamProvider: ridePosts.streamProvider,
+} as const;
+
+async function fetchNearbyRows(lat: number, lng: number): Promise<RawDriverRow[]> {
+  return db
+    .select(DRIVER_COLUMNS)
+    .from(drivers)
+    .innerJoin(users, eq(users.id, drivers.userId))
+    .leftJoin(vehicles, and(eq(vehicles.driverId, drivers.id), eq(vehicles.isActive, true)))
+    .leftJoin(
+      ridePosts,
+      and(
+        eq(ridePosts.userId, users.id),
+        eq(ridePosts.isLive, true),
+        isNull(ridePosts.endedAt),
+        eq(ridePosts.type, "stream"),
+      ),
+    )
+    .where(
+      and(
+        eq(drivers.isOnline, true),
+        eq(drivers.status, "approved"),
+        sql`${drivers.currentLat} IS NOT NULL`,
+        sql`${drivers.currentLng} IS NOT NULL`,
+        // Bounding box pre-filter (~55 km) to avoid full-table scan
+        sql`abs(CAST(${drivers.currentLat} AS float) - ${lat}) < 0.5`,
+        sql`abs(CAST(${drivers.currentLng} AS float) - ${lng}) < 0.5`,
+      ),
+    )
+    .limit(100) as unknown as RawDriverRow[];
+}
+
+async function fetchFollowedRows(followerId: string): Promise<RawDriverRow[]> {
+  return db
+    .select(DRIVER_COLUMNS)
+    .from(drivers)
+    .innerJoin(users, eq(users.id, drivers.userId))
+    .leftJoin(vehicles, and(eq(vehicles.driverId, drivers.id), eq(vehicles.isActive, true)))
+    .leftJoin(
+      ridePosts,
+      and(
+        eq(ridePosts.userId, users.id),
+        eq(ridePosts.isLive, true),
+        isNull(ridePosts.endedAt),
+        eq(ridePosts.type, "stream"),
+      ),
+    )
+    .where(
+      and(
+        eq(drivers.isOnline, true),
+        eq(drivers.status, "approved"),
+        // Filter to drivers the caller follows (raw SQL avoids an extra JOIN)
+        sql`EXISTS (
+          SELECT 1 FROM user_follows uf
+          WHERE uf.follower_id = ${followerId}
+            AND uf.following_id = ${users.id}
+        )`,
+      ),
+    )
+    .limit(100) as unknown as RawDriverRow[];
+}
+
+// De-duplicate rows produced by the LEFT JOIN on vehicles (one row per vehicle),
+// compute distance/ETA/fare, return one DiscoveryDriver per userId.
+function buildDiscoveryDrivers(
+  rows: RawDriverRow[],
+  refLat: number | null,
+  refLng: number | null,
+): DiscoveryDriver[] {
+  const seen = new Map<string, DiscoveryDriver>();
+  for (const row of rows) {
+    if (seen.has(row.userId)) continue; // first vehicle row wins
+
+    const dLat = parseFloat(row.currentLat ?? "");
+    const dLng = parseFloat(row.currentLng ?? "");
+    const hasDriverCoords = isFinite(dLat) && isFinite(dLng);
+    const distanceKm =
+      hasDriverCoords && refLat !== null && refLng !== null
+        ? haversineKm(refLat, refLng, dLat, dLng)
+        : 9999;
+
+    const regionCode = hasDriverCoords
+      ? detectRegionFromCoordinates(dLat, dLng)
+      : "AE";
+    const fareEst = upfrontFareEstimate(regionCode);
+
+    seen.set(row.userId, {
+      driverId: row.driverId,
+      userId: row.userId,
+      name: row.name,
+      avatar: row.avatar ?? null,
+      rating: row.rating ?? null,
+      totalTrips: row.totalTrips ?? null,
+      vehicle: row.vehicleMake
+        ? {
+            make: row.vehicleMake,
+            model: row.vehicleModel ?? "",
+            color: row.vehicleColor ?? null,
+            licensePlate: row.vehiclePlate ?? "",
+            photo: row.vehiclePhoto ?? null,
+            type: row.vehicleType ?? null,
+          }
+        : null,
+      distanceKm: Math.round(distanceKm * 100) / 100,
+      etaMinutes: etaFromDistanceKm(distanceKm),
+      upfrontFare: fareEst.fare,
+      currency: fareEst.currency,
+      currencySymbol: fareEst.symbol,
+      isLive: !!(row.postIsLive && row.postId),
+      postId: row.postId ?? null,
+      streamProvider: (row.streamProvider as "agora" | "twitch" | null) ?? null,
+      // Coarsened to ~1 km (2 dp) — safe to expose in discovery feed
+      approxLat: hasDriverCoords ? Math.round(dLat * 100) / 100 : null,
+      approxLng: hasDriverCoords ? Math.round(dLng * 100) / 100 : null,
+    });
+  }
+  return Array.from(seen.values());
+}
+
+// ============================================================================
+// GET /api/discovery/nearby?lat=&lng=&limit=
+// Public — no auth required.
+// Returns up to 20 online approved drivers sorted by straight-line distance.
+// ============================================================================
+router.get("/api/discovery/nearby", async (req, res) => {
+  try {
+    const lat = parseFloat(String(req.query.lat ?? ""));
+    const lng = parseFloat(String(req.query.lng ?? ""));
+    if (!isFinite(lat) || !isFinite(lng)) {
+      return res.status(400).json({ error: "lat and lng query params are required and must be numbers" });
+    }
+    const limit = Math.min(parseInt(String(req.query.limit ?? "20")) || 20, 50);
+
+    const rows = await fetchNearbyRows(lat, lng);
+    const result = buildDiscoveryDrivers(rows, lat, lng);
+    result.sort((a, b) => a.distanceKm - b.distanceKm);
+
+    res.json({ drivers: result.slice(0, limit) });
+  } catch (err: any) {
+    console.error("[discovery] nearby failed:", err);
+    res.status(500).json({ error: "Failed to load nearby drivers" });
+  }
+});
+
+// ============================================================================
+// GET /api/discovery/following?lat=&lng=
+// Auth required. Returns online drivers the caller follows, live-first then
+// by distance. lat/lng are optional (omit when device location is unavailable).
+// ============================================================================
+router.get("/api/discovery/following", async (req, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ error: "Authentication required" });
+
+    const lat = parseFloat(String(req.query.lat ?? ""));
+    const lng = parseFloat(String(req.query.lng ?? ""));
+    const hasCoords = isFinite(lat) && isFinite(lng);
+
+    const rows = await fetchFollowedRows(session.userId);
+    const result = buildDiscoveryDrivers(rows, hasCoords ? lat : null, hasCoords ? lng : null);
+
+    // Live drivers surface first; within each group, sort by proximity
+    result.sort((a, b) => {
+      if (a.isLive !== b.isLive) return a.isLive ? -1 : 1;
+      return a.distanceKm - b.distanceKm;
+    });
+
+    res.json({ drivers: result });
+  } catch (err: any) {
+    console.error("[discovery] following failed:", err);
+    res.status(500).json({ error: "Failed to load followed drivers" });
   }
 });
 
