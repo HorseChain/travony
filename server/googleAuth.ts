@@ -23,6 +23,23 @@ const STATE_SECRET_KEY: Buffer = process.env.GOOGLE_OAUTH_CLIENT_SECRET
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 
+// ---------------------------------------------------------------------------
+// Poll store — Android can't route a custom-scheme redirect back into the app
+// without an EAS build that includes explicit intentFilters. As a fallback the
+// client passes a poll_key before opening the browser; after OAuth completes
+// the server parks the token here; the app polls /api/auth/google/poll until
+// it gets the token (≤ 10 min TTL, single-use).
+// ---------------------------------------------------------------------------
+const pollStore = new Map<string, { token: string; expiresAt: Date }>();
+
+// Sweep expired entries every 5 minutes so the map doesn't grow unbounded.
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of pollStore) {
+    if (val.expiresAt.getTime() < now) pollStore.delete(key);
+  }
+}, 5 * 60 * 1000).unref?.();
+
 function getBaseUrl(): string {
   // GOOGLE_CALLBACK_URL lets the operator pin the exact callback URL that is
   // registered in Google Cloud Console (Authorized redirect URIs).
@@ -82,6 +99,15 @@ function isAllowedRedirect(uri: string): boolean {
   try {
     const parsed = new URL(uri);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
+    // Accept any Replit-hosted domain (covers Expo dev tunnel *.expo.riker.replit.dev
+    // as well as *.replit.app, *.replit.dev, *.riker.replit.dev)
+    if (
+      parsed.hostname.endsWith(".replit.app") ||
+      parsed.hostname.endsWith(".replit.dev") ||
+      parsed.hostname.endsWith(".riker.replit.dev")
+    ) {
+      return true;
+    }
     const allowedHosts = new Set<string>();
     if (process.env.REPLIT_DEV_DOMAIN) allowedHosts.add(process.env.REPLIT_DEV_DOMAIN);
     (process.env.REPLIT_DOMAINS || "")
@@ -104,6 +130,98 @@ function appendParams(uri: string, params: Record<string, string>): string {
   return uri.includes("?") ? `${uri}&${qs}` : `${uri}?${qs}`;
 }
 
+// Minimal HTML escape for attribute/text values embedded in server-rendered HTML.
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+// Bounce back to the app. For custom-scheme URIs (travony://, exp://) we serve
+// an HTML intermediate page.
+//
+// PRIMARY path (iOS + Android with new EAS build that includes intentFilters):
+//   window.location.replace fires an Android Intent → OS routes to the app →
+//   openAuthSessionAsync returns { type: 'success' }.
+//
+// FALLBACK path (Android without intentFilters — existing APKs):
+//   window.location.replace fails silently (Chrome can't route the scheme).
+//   The page shows a clear "You're signed in — close this tab" message.
+//   The app polls /api/auth/google/poll?key=<pollKey> and logs in that way.
+function bounceToApp(res: any, targetUrl: string, pollKey?: string) {
+  const isCustomScheme = /^(exp|exps|travony|travony-rider|travony-driver):\/\//i.test(targetUrl);
+  if (!isCustomScheme) {
+    return res.redirect(targetUrl);
+  }
+  const safeUrl = escHtml(targetUrl);
+  const jsonUrl = JSON.stringify(targetUrl);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  return res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Signed in to Travony</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{display:flex;flex-direction:column;align-items:center;justify-content:center;
+         min-height:100dvh;background:#0d1b0d;font-family:system-ui,sans-serif;
+         color:#fff;gap:24px;padding:32px;text-align:center;}
+    .check{font-size:56px;line-height:1;}
+    .title{font-size:22px;font-weight:700;}
+    .sub{font-size:15px;color:#8aad8a;line-height:1.6;}
+    .btn{display:block;padding:18px 40px;background:#00B14F;color:#fff;
+         font-size:18px;font-weight:700;border-radius:16px;text-decoration:none;
+         box-shadow:0 4px 20px rgba(0,177,79,0.4);letter-spacing:0.3px;}
+    .btn:active{opacity:0.85;}
+    .note{font-size:13px;color:#4a7a4a;line-height:1.5;}
+  </style>
+  <script>
+    var deepUrl = ${jsonUrl};
+    var isAndroid = /Android/i.test(navigator.userAgent);
+
+    if (!isAndroid) {
+      // iOS / desktop: auto-redirect works cleanly — do it right away
+      try { window.location.replace(deepUrl); } catch(e) {}
+      setTimeout(function(){ window.location.href = deepUrl; }, 300);
+    }
+    // On Android we do NOT auto-redirect because the system banner ("Open in T Ride?")
+    // confuses users — they dismiss it, close the tab, and never get logged in.
+    // Instead we show our own prominent "Open T Ride" button immediately.
+    // Tapping our button fires the Chrome intent directly, and openAuthSessionAsync
+    // captures it as a 'success' URL — no banner confusion.
+
+    function showDone() {
+      var l = document.getElementById('loading');
+      var d = document.getElementById('done');
+      if (l) l.style.display = 'none';
+      if (d) { d.style.display = 'flex'; d.style.flexDirection = 'column'; }
+    }
+
+    if (isAndroid) {
+      // Show the button immediately — don't make Android users wait
+      document.addEventListener('DOMContentLoaded', showDone);
+    } else {
+      // Non-Android: show button after 0.8 s (give auto-redirect a chance)
+      setTimeout(showDone, 800);
+    }
+  </script>
+</head>
+<body>
+  <div id="loading">
+    <div class="check">✓</div>
+    <div class="title">Signed in!</div>
+    <div class="sub">Opening Travony…</div>
+  </div>
+  <div id="done" style="display:none;">
+    <div class="check">✓</div>
+    <div class="title">You're signed in!</div>
+    <div class="sub">Tap the button to return to the app.</div>
+    <a class="btn" href="${safeUrl}" id="openBtn">Open T Ride</a>
+    <div class="note">Don't close this tab — tap the button above first.</div>
+  </div>
+</body>
+</html>`);
+}
+
 async function createSessionToken(userId: string, role: string): Promise<string> {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
@@ -115,6 +233,23 @@ export const googleAuthRouter = Router();
 
 googleAuthRouter.get("/api/auth/google/status", (_req, res) => {
   res.json({ configured: isConfigured() });
+});
+
+// ─── DEV-ONLY: inject a token into the poll store ────────────────────────────
+// Used by automated tests to simulate a successful OAuth completion without
+// needing real Google credentials.
+// Blocked in production: the Replit start script sets NODE_ENV=development
+// for the dev server; the production deploy runs without NODE_ENV set at all,
+// so we gate on !== "development" (not === "production") to stay safe.
+googleAuthRouter.post("/api/auth/google/_test/inject-poll", (req, res) => {
+  if (process.env.NODE_ENV !== "development") {
+    return res.status(404).json({ message: "Not found" });
+  }
+  const { key, token, ttlMs } = req.body as { key?: string; token?: string; ttlMs?: number };
+  if (!key || !token) return res.status(400).json({ message: "key and token required" });
+  const expiresAt = new Date(Date.now() + (ttlMs ?? 10 * 60 * 1000));
+  pollStore.set(key, { token, expiresAt });
+  res.json({ ok: true, key, expiresAt });
 });
 
 googleAuthRouter.get("/api/auth/google/start", (req, res) => {
@@ -130,11 +265,16 @@ googleAuthRouter.get("/api/auth/google/start", (req, res) => {
   }
   const role = req.query.role === "driver" ? "driver" : "customer";
 
+  // poll_key is a client-generated random string; embedded in the signed state
+  // so the callback can park the token for /poll to pick up (Android fallback).
+  const pollKey = String(req.query.poll_key || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 64) || undefined;
+
   const state = signState({
     r: redirectUri,
     role,
     ts: Date.now(),
     n: randomBytes(8).toString("hex"),
+    ...(pollKey ? { pk: pollKey } : {}),
   });
 
   const authUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
@@ -148,6 +288,26 @@ googleAuthRouter.get("/api/auth/google/start", (req, res) => {
   res.redirect(authUrl.toString());
 });
 
+// Poll endpoint — client calls this after openAuthSessionAsync returns 'cancel'
+// on Android (where custom-scheme routing needs a native rebuild). Single-use:
+// the token is deleted from the store on the first successful poll.
+googleAuthRouter.get("/api/auth/google/poll", (req, res) => {
+  const key = String(req.query.key || "").replace(/[^a-z0-9_-]/gi, "").slice(0, 64);
+  if (!key) return res.status(400).json({ ready: false, error: "missing key" });
+
+  const entry = pollStore.get(key);
+  if (!entry) return res.json({ ready: false });
+
+  if (Date.now() > entry.expiresAt.getTime()) {
+    pollStore.delete(key);
+    return res.json({ ready: false, expired: true });
+  }
+
+  // Single-use: delete immediately so a leaked key can't be replayed.
+  pollStore.delete(key);
+  return res.json({ ready: true, token: entry.token });
+});
+
 googleAuthRouter.get("/api/auth/google/callback", async (req, res) => {
   const state = verifyState(String(req.query.state || ""));
   if (!state || !state.r || !isAllowedRedirect(state.r)) {
@@ -155,7 +315,7 @@ googleAuthRouter.get("/api/auth/google/callback", async (req, res) => {
   }
 
   const bounce = (params: Record<string, string>) =>
-    res.redirect(appendParams(state.r, params));
+    bounceToApp(res, appendParams(state.r, params), state.pk);
 
   if (req.query.error) {
     return bounce({ gauth: "error", message: "Google sign-in was cancelled." });
@@ -222,6 +382,16 @@ googleAuthRouter.get("/api/auth/google/callback", async (req, res) => {
     }
 
     const token = await createSessionToken(user.id, user.role);
+
+    // Park the token for the poll-based fallback (Android without intentFilters).
+    if (state.pk) {
+      pollStore.set(state.pk, {
+        token,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      });
+      console.log(`[googleAuth] token parked for poll key ${state.pk.slice(0, 8)}…`);
+    }
+
     return bounce({ gauth: "success", token, isNewUser: isNewUser ? "1" : "0" });
   } catch (error: any) {
     console.error("[googleAuth] callback error:", error?.message || error);

@@ -33,7 +33,7 @@ interface PhoneCode {
   name: string;
 }
 
-type SheetStep = "options" | "phone" | "otp" | "name";
+type SheetStep = "options" | "phone" | "otp" | "name" | "email";
 type UserRole = "customer" | "driver";
 
 export function LoginSheet() {
@@ -53,6 +53,10 @@ export function LoginSheet() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
   const [name, setName] = useState("");
   const [sessionToken, setSessionToken] = useState("");
+  const [emailInput, setEmailInput] = useState("");
+  const [passwordInput, setPasswordInput] = useState("");
+  const [emailName, setEmailName] = useState("");
+  const [smsUnavailable, setSmsUnavailable] = useState(false);
   const [selectedCountry, setSelectedCountry] = useState<PhoneCode>({
     code: "AE",
     phoneCode: "+971",
@@ -85,6 +89,10 @@ export function LoginSheet() {
     setOtp(["", "", "", "", "", ""]);
     setName("");
     setSessionToken("");
+    setEmailInput("");
+    setPasswordInput("");
+    setEmailName("");
+    setSmsUnavailable(false);
     setIsLoading(false);
     setGoogleLoading(false);
   };
@@ -113,7 +121,21 @@ export function LoginSheet() {
         headers: { "Content-Type": "application/json" },
       });
       if (response.success) {
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (response.deliveryFailed) {
+          // SMS is geo-blocked in this region (e.g. Syria). The code was saved
+          // server-side; support can deliver it manually. Be honest instead of
+          // letting the user wait for an SMS that will never arrive.
+          setSmsUnavailable(true);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+          Alert.alert(
+            "SMS unavailable in your region",
+            response.message ||
+              "SMS is not available in your region. Your code has been saved — please contact support@travony.app or message @TravonySupport on Telegram with your phone number to receive it.",
+          );
+        } else {
+          setSmsUnavailable(false);
+          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
         setStep("otp");
       }
     } catch (error: any) {
@@ -209,6 +231,52 @@ export function LoginSheet() {
 
   const handleGoogle = async () => {
     setGoogleLoading(true);
+    // Guard so the first path to resolve (deep-link or poll) wins; prevents double-login.
+    let loginHandled = false;
+
+    const finishWithToken = async (token: string): Promise<boolean> => {
+      if (loginHandled) return false;
+      loginHandled = true;
+      try {
+        const meRes = await fetch(new URL("/api/auth/me", getApiUrl()).toString(), {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!meRes.ok) return false;
+        const me = await meRes.json();
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await completeLogin(me.user, token);
+        return true;
+      } catch {
+        loginHandled = false; // allow retry
+        return false;
+      }
+    };
+
+    // Poll the server for up to `maxAttempts × intervalMs` ms.
+    // Used on Android when openAuthSessionAsync returns 'cancel' because the
+    // custom-scheme deep link couldn't route back (missing intentFilters in the
+    // current APK). After the user closes the in-browser success page, polling
+    // picks up the token the server already parked for this pollKey.
+    const pollForToken = async (pollKey: string, maxAttempts = 20, intervalMs = 2000): Promise<void> => {
+      for (let i = 0; i < maxAttempts && !loginHandled; i++) {
+        await new Promise((r) => setTimeout(r, intervalMs));
+        try {
+          const pollRes = await fetch(
+            new URL(`/api/auth/google/poll?key=${encodeURIComponent(pollKey)}`, getApiUrl()).toString(),
+          );
+          if (!pollRes.ok) continue;
+          const data = await pollRes.json();
+          if (data.expired) break;
+          if (data.ready && data.token) {
+            await finishWithToken(data.token);
+            return;
+          }
+        } catch {
+          // network blip — keep trying
+        }
+      }
+    };
+
     try {
       const statusRes = await fetch(new URL("/api/auth/google/status", getApiUrl()).toString());
       const status = await statusRes.json().catch(() => ({ configured: false }));
@@ -220,49 +288,76 @@ export function LoginSheet() {
         return;
       }
 
+      // Random poll key — lets the server park a token so polling can pick it up
+      // even when the Android custom-scheme redirect doesn't fire (no intentFilters).
+      const pollKey =
+        Math.random().toString(36).slice(2) +
+        Math.random().toString(36).slice(2) +
+        Date.now().toString(36);
+
       const redirectUri = Linking.createURL("google-auth");
       const startUrl = new URL("/api/auth/google/start", getApiUrl());
       startUrl.searchParams.set("redirect_uri", redirectUri);
       startUrl.searchParams.set("role", userRole);
+      startUrl.searchParams.set("poll_key", pollKey);
+
+      // ── Start polling IMMEDIATELY in the background ──────────────────────────
+      // On Android, users often dismiss the "Open in T Ride?" system banner and
+      // close the browser tab themselves — this makes openAuthSessionAsync return
+      // 'dismiss', but the OAuth may have already completed and the token IS
+      // parked on the server. Running the poll concurrently catches that case
+      // regardless of how the browser session ends.
+      // The loginHandled guard prevents double-login if both paths resolve.
+      const bgPollPromise = pollForToken(pollKey, 20, 2000);
+
+      // When the poll wins the race (before the browser closes), dismiss the
+      // Chrome Custom Tab so the user isn't left in the browser.
+      bgPollPromise.then(() => {
+        if (loginHandled) {
+          // Close the Chrome Custom Tab if the poll resolved login before the browser did
+          try { void WebBrowser.dismissAuthSession?.(); } catch (_) {}
+        }
+      });
 
       const result = await WebBrowser.openAuthSessionAsync(
         startUrl.toString(),
         redirectUri,
       );
-      if (result.type === "cancel" || result.type === "dismiss") {
-        return;
-      }
-      if (result.type !== "success" || !result.url) {
-        Alert.alert(
-          "Google sign-in",
-          "Sign-in did not complete. Make sure you allow Travony to open in your browser and try again.",
-        );
-        return;
-      }
-      const parsed = Linking.parse(result.url);
-      const params = (parsed.queryParams || {}) as Record<string, string>;
-      if (params.gauth === "error") {
-        Alert.alert("Google sign-in", params.message || "Google sign-in failed. Please try again.");
-        return;
-      }
-      const token = params.token;
-      if (params.gauth !== "success" || !token) {
-        Alert.alert("Google sign-in", "Sign-in did not complete. Please try again.");
-        return;
+
+      // --- Primary path: deep-link routing worked (iOS always; Android with new build) ---
+      if (result.type === "success" && result.url) {
+        const parsed = Linking.parse(result.url);
+        const params = (parsed.queryParams || {}) as Record<string, string>;
+        if (params.gauth === "error") {
+          Alert.alert("Google sign-in", params.message || "Google sign-in failed. Please try again.");
+          return;
+        }
+        if (params.gauth === "success" && params.token) {
+          const ok = await finishWithToken(params.token);
+          // loginHandled may already be true if bgPoll won the race — don't show error
+          if (!ok && !loginHandled) Alert.alert("Google sign-in", "Could not finish signing you in. Please try again.");
+          return;
+        }
+        // Unexpected URL — fall through to poll below
       }
 
-      const meRes = await fetch(new URL("/api/auth/me", getApiUrl()).toString(), {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!meRes.ok) {
-        Alert.alert("Google sign-in", "Could not finish signing you in. Please try again.");
-        return;
+      // --- Fallback path: wait for the background poll ────────────────────────
+      // The poll has been running the entire time auth was open.
+      // This catches: 'cancel' (browser closed by system), 'dismiss' (user closed
+      // the tab after OAuth completed but before tapping the banner), and any
+      // other non-success result where auth may have completed server-side.
+      await bgPollPromise;
+
+      if (!loginHandled) {
+        Alert.alert(
+          "Google sign-in",
+          "Sign-in did not complete. Please try again — when prompted, tap Open to return to the app.",
+        );
       }
-      const me = await meRes.json();
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await completeLogin(me.user, token);
     } catch (error: any) {
-      Alert.alert("Google sign-in", error?.message || "Google sign-in failed. Please try again.");
+      if (!loginHandled) {
+        Alert.alert("Google sign-in", error?.message || "Google sign-in failed. Please try again.");
+      }
     } finally {
       setGoogleLoading(false);
     }
@@ -277,10 +372,43 @@ export function LoginSheet() {
     );
   };
 
+  const handleEmailAuth = async () => {
+    if (!emailInput || !passwordInput) {
+      Alert.alert("Error", "Please enter your email and password");
+      return;
+    }
+    if (activeMode === "signup" && !emailName.trim()) {
+      Alert.alert("Error", "Please enter your name");
+      return;
+    }
+    setIsLoading(true);
+    try {
+      const endpoint = activeMode === "signup" ? "/api/auth/register" : "/api/auth/login";
+      const body: any = { email: emailInput.trim(), password: passwordInput };
+      if (activeMode === "signup") {
+        body.name = emailName.trim();
+        body.role = userRole;
+      }
+      const response = await apiRequest(endpoint, {
+        method: "POST",
+        body: JSON.stringify(body),
+        headers: { "Content-Type": "application/json" },
+      });
+      if (response.user && response.token) {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        await completeLogin(response.user, response.token);
+      }
+    } catch (error: any) {
+      Alert.alert("Error", error.message || "Authentication failed");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleBack = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     if (step === "otp") setStep("phone");
-    else if (step === "phone" || step === "name") setStep("options");
+    else if (step === "phone" || step === "name" || step === "email") setStep("options");
   };
 
   const optionRowStyle = ({ pressed }: { pressed: boolean }) => [
@@ -299,8 +427,13 @@ export function LoginSheet() {
 
       <View style={styles.optionsList}>
         <Pressable style={optionRowStyle} onPress={() => setStep("phone")}>
-          <Ionicons name="person" size={20} color={theme.text} style={styles.optionIcon} />
+          <Ionicons name="call-outline" size={20} color={theme.text} style={styles.optionIcon} />
           <ThemedText style={styles.optionLabel}>Use phone number</ThemedText>
+        </Pressable>
+
+        <Pressable style={optionRowStyle} onPress={() => setStep("email")}>
+          <Ionicons name="mail-outline" size={20} color={theme.text} style={styles.optionIcon} />
+          <ThemedText style={styles.optionLabel}>Use email &amp; password</ThemedText>
         </Pressable>
 
         <Pressable style={optionRowStyle} onPress={handleGoogle} disabled={googleLoading}>
@@ -450,7 +583,9 @@ export function LoginSheet() {
     <View style={styles.stepContainer}>
       <ThemedText style={styles.stepTitle}>Verify your number</ThemedText>
       <ThemedText style={[styles.stepDescription, { color: theme.textSecondary }]}>
-        Enter the 6-digit code sent to {getFullPhoneNumber()}
+        {smsUnavailable
+          ? `SMS can't reach ${getFullPhoneNumber()} in your region. Email support@travony.app or message @TravonySupport on Telegram with your phone number to receive your code, then enter it below.`
+          : `Enter the 6-digit code sent to ${getFullPhoneNumber()}`}
       </ThemedText>
       <View style={styles.otpContainer}>
         {otp.map((digit, index) => (
@@ -484,6 +619,79 @@ export function LoginSheet() {
       {isLoading ? (
         <ActivityIndicator color={Colors.travonyGreen} style={{ marginTop: Spacing.xl }} />
       ) : null}
+    </View>
+  );
+
+  const renderEmailStep = () => (
+    <View style={styles.stepContainer}>
+      <ThemedText style={styles.stepTitle}>
+        {activeMode === "signup" ? "Create your account" : "Welcome back"}
+      </ThemedText>
+      <ThemedText style={[styles.stepDescription, { color: theme.textSecondary }]}>
+        {activeMode === "signup" ? "Sign up with your email address" : "Log in with your email and password"}
+      </ThemedText>
+
+      {activeMode === "signup" && (
+        <TextInput
+          style={[
+            styles.nameInput,
+            { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border },
+          ]}
+          placeholder="Full name"
+          placeholderTextColor={theme.textMuted}
+          value={emailName}
+          onChangeText={setEmailName}
+          autoCapitalize="words"
+          autoFocus
+        />
+      )}
+
+      <TextInput
+        style={[
+          styles.nameInput,
+          { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border },
+        ]}
+        placeholder="Email address"
+        placeholderTextColor={theme.textMuted}
+        value={emailInput}
+        onChangeText={setEmailInput}
+        keyboardType="email-address"
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoFocus={activeMode !== "signup"}
+      />
+
+      <TextInput
+        style={[
+          styles.nameInput,
+          { backgroundColor: theme.backgroundDefault, color: theme.text, borderColor: theme.border },
+        ]}
+        placeholder="Password"
+        placeholderTextColor={theme.textMuted}
+        value={passwordInput}
+        onChangeText={setPasswordInput}
+        secureTextEntry
+      />
+
+      <Pressable
+        style={({ pressed }) => [
+          styles.primaryButton,
+          {
+            backgroundColor: Colors.travonyGreen,
+            opacity: pressed || !emailInput || !passwordInput ? 0.5 : 1,
+          },
+        ]}
+        onPress={handleEmailAuth}
+        disabled={isLoading || !emailInput || !passwordInput}
+      >
+        {isLoading ? (
+          <ActivityIndicator color={Colors.light.textOnPrimary} />
+        ) : (
+          <ThemedText style={styles.primaryButtonText}>
+            {activeMode === "signup" ? "Create Account" : "Sign In"}
+          </ThemedText>
+        )}
+      </Pressable>
     </View>
   );
 
@@ -564,6 +772,7 @@ export function LoginSheet() {
             {step === "phone" ? renderPhoneStep() : null}
             {step === "otp" ? renderOtpStep() : null}
             {step === "name" ? renderNameStep() : null}
+            {step === "email" ? renderEmailStep() : null}
           </KeyboardAwareScrollViewCompat>
 
           {step === "options" ? (
