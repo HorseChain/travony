@@ -153,6 +153,7 @@ function bounceToApp(res: any, targetUrl: string, pollKey?: string) {
   }
   const safeUrl = escHtml(targetUrl);
   const jsonUrl = JSON.stringify(targetUrl);
+  const appName = /^travony-driver:/i.test(targetUrl) ? "T Driver" : "T Ride";
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   return res.send(`<!DOCTYPE html>
 <html lang="en">
@@ -215,7 +216,7 @@ function bounceToApp(res: any, targetUrl: string, pollKey?: string) {
     <div class="check">✓</div>
     <div class="title">You're signed in!</div>
     <div class="sub">Tap the button to return to the app.</div>
-    <a class="btn" href="${safeUrl}" id="openBtn">Open T Ride</a>
+    <a class="btn" href="${safeUrl}" id="openBtn">Open ${appName}</a>
     <div class="note">Don't close this tab — tap the button above first.</div>
   </div>
 </body>
