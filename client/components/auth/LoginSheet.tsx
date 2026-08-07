@@ -237,19 +237,28 @@ export function LoginSheet() {
     const finishWithToken = async (token: string): Promise<boolean> => {
       if (loginHandled) return false;
       loginHandled = true;
-      try {
-        const meRes = await fetch(new URL("/api/auth/me", getApiUrl()).toString(), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!meRes.ok) return false;
-        const me = await meRes.json();
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        await completeLogin(me.user, token);
-        return true;
-      } catch {
-        loginHandled = false; // allow retry
-        return false;
+      // Retry /me a few times — a transient network blip here must not throw
+      // away an otherwise valid token (the server keeps the poll entry alive
+      // only for a short grace window).
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const meRes = await fetch(new URL("/api/auth/me", getApiUrl()).toString(), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (meRes.ok) {
+            const me = await meRes.json();
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            await completeLogin(me.user, token);
+            return true;
+          }
+          if (meRes.status === 401 || meRes.status === 403) break; // token truly bad
+        } catch {
+          // network blip — retry after a short delay
+        }
+        await new Promise((r) => setTimeout(r, 1000));
       }
+      loginHandled = false; // allow the other path (or a manual retry) to proceed
+      return false;
     };
 
     // Poll the server for up to `maxAttempts × intervalMs` ms.

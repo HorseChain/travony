@@ -99,22 +99,23 @@ function isAllowedRedirect(uri: string): boolean {
   try {
     const parsed = new URL(uri);
     if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return false;
-    // Accept any Replit-hosted domain (covers Expo dev tunnel *.expo.riker.replit.dev
-    // as well as *.replit.app, *.replit.dev, *.riker.replit.dev)
+    // SECURITY: only first-party hosts may receive the token-bearing redirect.
+    // A broad *.replit.app / *.replit.dev wildcard would let ANY Replit-hosted
+    // attacker site receive the victim's session token (open redirect).
+    // Expo dev tunnel (*.expo.riker.replit.dev) is allowed in development only.
     if (
-      parsed.hostname.endsWith(".replit.app") ||
-      parsed.hostname.endsWith(".replit.dev") ||
-      parsed.hostname.endsWith(".riker.replit.dev")
+      process.env.NODE_ENV === "development" &&
+      parsed.hostname.endsWith(".expo.riker.replit.dev")
     ) {
       return true;
     }
-    const allowedHosts = new Set<string>();
+    const allowedHosts = new Set<string>(["travony.replit.app"]);
     if (process.env.REPLIT_DEV_DOMAIN) allowedHosts.add(process.env.REPLIT_DEV_DOMAIN);
     (process.env.REPLIT_DOMAINS || "")
       .split(",")
-      .map((d) => d.trim())
+      .map((d: string) => d.trim())
       .filter(Boolean)
-      .forEach((d) => allowedHosts.add(d));
+      .forEach((d: string) => allowedHosts.add(d));
     allowedHosts.add("localhost");
     allowedHosts.add("127.0.0.1");
     return allowedHosts.has(parsed.hostname);
@@ -152,7 +153,13 @@ function bounceToApp(res: any, targetUrl: string, pollKey?: string) {
     return res.redirect(targetUrl);
   }
   const safeUrl = escHtml(targetUrl);
-  const jsonUrl = JSON.stringify(targetUrl);
+  // SECURITY: JSON.stringify does not escape "<" — a URL containing "</script>"
+  // would break out of the inline script block (XSS on the token-bearing page).
+  const jsonUrl = JSON.stringify(targetUrl)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
   const appName = /^travony-driver:/i.test(targetUrl) ? "T Driver" : "T Ride";
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   return res.send(`<!DOCTYPE html>
@@ -304,8 +311,13 @@ googleAuthRouter.get("/api/auth/google/poll", (req, res) => {
     return res.json({ ready: false, expired: true });
   }
 
-  // Single-use: delete immediately so a leaked key can't be replayed.
-  pollStore.delete(key);
+  // Near-single-use: keep the entry alive for a short grace window (60s) after
+  // the first read so a transient client network failure during /me validation
+  // doesn't permanently consume the token. It expires on its own after that.
+  const grace = Date.now() + 60 * 1000;
+  if (entry.expiresAt.getTime() > grace) {
+    entry.expiresAt = new Date(grace);
+  }
   return res.json({ ready: true, token: entry.token });
 });
 
