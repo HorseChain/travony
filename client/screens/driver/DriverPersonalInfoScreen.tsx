@@ -34,9 +34,13 @@ export default function DriverPersonalInfoScreen() {
   const [phone, setPhone] = useState("");
   const [isDataLoaded, setIsDataLoaded] = useState(false);
 
-  const { data: driverData, isLoading } = useQuery<DriverData>({
+  // retry:false + gate on settled (not success): for a brand-new driver this
+  // endpoint 404s until their driver record exists — the screen must still let
+  // them edit name/phone, otherwise Save is permanently disabled.
+  const { data: driverData, isLoading, isFetched, isError } = useQuery<DriverData>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
+    retry: false,
   });
 
 
@@ -48,17 +52,22 @@ export default function DriverPersonalInfoScreen() {
   }, [user]);
 
   useEffect(() => {
-    if (driverData) {
-      if (driverData.phone) {
-        setPhone(driverData.phone);
-      }
+    if (driverData?.phone) {
+      setPhone(driverData.phone);
+    }
+    // Enable Save once the query has settled — including the 404 case where
+    // the driver record doesn't exist yet (name/phone live on the user, not
+    // the driver record, so saving is still valid).
+    if (isFetched || isError) {
       setIsDataLoaded(true);
     }
-  }, [driverData]);
+  }, [driverData, isFetched, isError]);
 
   const updateMutation = useMutation({
     mutationFn: async () => {
-      await apiRequest("/api/users/me", {
+      // NOTE: there is no /api/users/me on the server — the real profile
+      // endpoint is PATCH /api/users/:id (self-only).
+      await apiRequest(`/api/users/${user?.id}`, {
         method: "PATCH",
         body: JSON.stringify({ name, phone }),
         headers: { "Content-Type": "application/json" },
