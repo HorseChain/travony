@@ -49,7 +49,7 @@ import {
   getRideMessages, 
   getSupportedLanguages 
 } from "./translationService";
-import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured } from "./twilioService";
+import { sendOtp, sendOtpSms, sendVerifyOtp, checkVerifyOtp, isVerifyConfigured, isTwilioConfigured, isWhatsAppConfigured, isOFACBlocked } from "./twilioService";
 import {
   initializeMexicoCityLaunch,
   getCityBySlug,
@@ -144,6 +144,7 @@ import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRou
 import { streamShareRouter } from "./streamShareRoutes";
 import { streamAdRouter } from "./streamAdRoutes";
 import { agentRouter } from "./agentRoutes";
+import { goLiveRequestRouter } from "./goLiveRequestRoutes";
 import { db } from "./db";
 import { eq, and, gte, desc, count, like } from "drizzle-orm";
 
@@ -248,7 +249,9 @@ async function requireAdmin(req: any, res: any, next: any) {
 // approve/assign drivers, so they must never be publicly callable. Requires the
 // ADMIN_DEBUG_TOKEN secret to be presented via the x-admin-token header.
 function requireDebugToken(req: any, res: any, next: any) {
-  const expected = process.env.ADMIN_DEBUG_TOKEN;
+  // ADMIN_DEBUG_TOKEN preferred; falls back to ADMIN_PASSWORD (which IS set in
+  // production) so operational approvals work on the deployed server too.
+  const expected = process.env.ADMIN_DEBUG_TOKEN || process.env.ADMIN_PASSWORD;
   if (!expected || req.get("x-admin-token") !== expected) {
     return res.status(403).json({ message: "Forbidden" });
   }
@@ -299,7 +302,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/auth/register", async (req, res) => {
     try {
-      const { email, password, name, phone } = req.body;
+      const { email, password, name, phone, role } = req.body;
       
       if (!email || !password || !name) {
         return res.status(400).json({ message: "Email, password, and name are required" });
@@ -310,13 +313,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Email already registered" });
       }
 
+      // Accept "driver" or "customer" from the client; default to "customer".
+      const assignedRole: "customer" | "driver" = role === "driver" ? "driver" : "customer";
+
       const user = await storage.createUser({
         id: uuidv4(),
         email,
         password: hashPassword(password),
         name,
         phone: phone || null,
-        role: "customer",
+        role: assignedRole,
       });
 
       const token = await createSession(user.id, user.role);
@@ -430,6 +436,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Valid phone number is required" });
       }
 
+      // Pre-check: OFAC-sanctioned countries (Syria, Iran, Cuba, DPRK, Crimea).
+      // Twilio often ACCEPTS these messages without throwing an error but never
+      // delivers them. Detect by prefix here so users get an honest message
+      // instead of waiting for an SMS that will never arrive.
+      if (isOFACBlocked(phone)) {
+        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+        otpStore.set(phone, { otp, expiresAt, attempts: 0 });
+        console.warn(`⚠️  OFAC-blocked number ${phone}. OTP stored for manual retrieval.`);
+        console.warn(`🔑  OTP for ${phone}: ${otp} (valid 5 min)`);
+        return res.json({
+          success: true,
+          deliveryFailed: true,
+          message:
+            "SMS is not available in your region. Your code has been saved — please contact support@travony.app or message @TravonySupport on Telegram with your phone number to receive it.",
+          channel: "unavailable",
+        });
+      }
+
+      // Track geo-blocking across BOTH channels (Verify + direct SMS) so a
+      // Verify geo-rejection isn't lost when the SMS fallback fails generically.
+      let verifyGeoBlocked = false;
+
       // Try Twilio Verify first (works globally, best for production)
       if (isVerifyConfigured()) {
         console.log(`Using Twilio Verify for ${phone}`);
@@ -445,7 +474,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             channel: 'verify'
           });
         }
-        console.log(`Verify failed for ${phone}, falling back to direct SMS`);
+        verifyGeoBlocked = verifyResult.geoBlocked === true;
+        console.log(`Verify failed for ${phone}${verifyGeoBlocked ? " (geo-blocked)" : ""}, falling back to direct SMS`);
       }
 
       // Fallback: Generate our own OTP and send via SMS
@@ -456,14 +486,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const otpResult = await sendOtp(phone, otp, false); // SMS only, no WhatsApp sandbox
       
       if (!otpResult.success) {
-        // SMS failed — keep OTP in store and log it so admin can retrieve it
+        // OTP stored for admin retrieval regardless of delivery outcome
         console.warn(`⚠️  SMS delivery failed for ${phone}. OTP stored for manual retrieval.`);
         console.warn(`🔑  OTP for ${phone}: ${otp} (valid 5 min)`);
-        // Still return success so user can enter the code (admin checks logs)
-        return res.json({ 
-          success: true, 
-          message: "Verification code sent via SMS",
-          channel: 'sms'
+        const isGeoBlocked = otpResult.geoBlocked === true || verifyGeoBlocked;
+        return res.json({
+          success: true,
+          deliveryFailed: isGeoBlocked,
+          message: isGeoBlocked
+            ? "SMS is not available in your region. Your code has been saved — please contact support@travony.app or message @TravonySupport on Telegram with your phone number to receive it."
+            : "Verification code sent via SMS",
+          channel: isGeoBlocked ? 'unavailable' : 'sms',
         });
       }
 
@@ -2883,13 +2916,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Approve a driver by phone number (DEBUG ONLY)
-  app.post("/api/debug/approve-driver/:phone", requireDebugToken, async (req, res) => {
+  // Approve a driver by phone number OR email (DEBUG/ADMIN ONLY)
+  app.post("/api/debug/approve-driver/:identifier", requireDebugToken, async (req, res) => {
     try {
-      const { phone } = req.params;
-      const user = await storage.getUserByPhone(phone);
+      const { identifier } = req.params;
+      const user = identifier.includes("@")
+        ? await storage.getUserByEmail(identifier.toLowerCase())
+        : await storage.getUserByPhone(identifier);
       if (!user) {
         return res.status(404).json({ error: "User not found" });
+      }
+      // Google-signup riders switching to driving may still be role=customer.
+      if (user.role === "customer") {
+        await storage.updateUser(user.id, { role: "driver" } as any);
       }
       // Create the driver record if the user signed up as a driver but never
       // got one (phone-signup accounts create the record lazily).
@@ -8206,6 +8245,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(streamAdRouter);
   initDiscovery();
   app.use(agentRouter);
+  app.use(goLiveRequestRouter);
 
   const httpServer = createServer(app);
 
