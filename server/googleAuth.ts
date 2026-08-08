@@ -392,6 +392,13 @@ googleAuthRouter.get("/api/auth/google/callback", async (req, res) => {
         avatar: info.picture || undefined,
         role: state.role === "driver" ? "driver" : "customer",
       } as any);
+    } else if (state.role === "driver" && user.role === "customer") {
+      // An existing rider deliberately signing into the DRIVER app: upgrade
+      // the account to driver (mirrors phone-signup role assignment). Without
+      // this, the session is minted as "customer" and every /api/drivers/*
+      // endpoint 404s, leaving the driver app permanently logged out-looking.
+      const upgraded = await storage.updateUser(user.id, { role: "driver" } as any);
+      if (upgraded) user = upgraded;
     }
 
     const token = await createSessionToken(user.id, user.role);
