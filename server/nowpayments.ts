@@ -1,4 +1,5 @@
 import { v4 as uuidv4 } from "uuid";
+import { createHmac } from "crypto";
 
 const NOWPAYMENTS_API_URL = "https://api.nowpayments.io/v1";
 
@@ -182,15 +183,13 @@ export class NowPaymentsService {
       return true;
     }
     try {
-      const crypto = require("crypto");
       const sortedPayload = Object.keys(payload)
         .sort()
         .reduce((result: any, key: string) => {
           result[key] = payload[key];
           return result;
         }, {});
-      const hmac = crypto
-        .createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
+      const hmac = createHmac("sha512", process.env.NOWPAYMENTS_IPN_SECRET)
         .update(JSON.stringify(sortedPayload))
         .digest("hex");
       return hmac === receivedSignature;

@@ -137,7 +137,7 @@ import { networkStatsRouter } from "./networkStats";
 import { socialRouter } from "./socialRoutes";
 import { matchRouter, startMatchAgent } from "./matchAgent";
 import { rewardsRouter, qualifyReferralsForRide } from "./rewardsRoutes";
-import { agoraRouter, startAgoraViewerLoop } from "./agoraStreaming";
+import { agoraRouter, startAgoraViewerLoop, endStreamsForRide } from "./agoraStreaming";
 import { tgStreamRouter } from "./telegramStreaming";
 import { googleAuthRouter } from "./googleAuth";
 import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRoutes";
@@ -1508,6 +1508,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const ride = await storage.updateRide(req.params.id, allowedUpdates);
       if (!ride) {
         return res.status(404).json({ message: "Ride not found" });
+      }
+
+      // The ride is the stage: when it ends (completed or cancelled), end any
+      // live in-app streams attached to it so no ghost "live" cards remain.
+      // Fire-and-forget — stream teardown must never fail the status update.
+      if (
+        (ride.status === "completed" || ride.status === "cancelled") &&
+        existingRide.status !== ride.status
+      ) {
+        endStreamsForRide(ride.id).catch((err) =>
+          console.error("[Agora] end streams on ride end failed:", err?.message || err),
+        );
       }
 
       if (req.body.status === "cancelled" && existingRide.status !== "cancelled") {

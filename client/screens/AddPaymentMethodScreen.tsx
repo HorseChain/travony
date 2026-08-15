@@ -11,6 +11,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 export default function AddPaymentMethodScreen() {
   const insets = useSafeAreaInsets();
@@ -28,14 +29,19 @@ export default function AddPaymentMethodScreen() {
       color: Colors.travonyGreen,
       status: "Always available",
     },
-    {
-      id: "usdt",
-      title: "USDT (Crypto)",
-      subtitle: "Pay with USDT stablecoin. Low fees (0.5%), fast transactions, powered by NOWPayments.",
-      icon: "logo-usd" as const,
-      color: theme.crypto,
-      status: "Available",
-    },
+    // Crypto is long-tail: hidden unless the feature flag is on.
+    ...(FEATURES.crypto
+      ? [
+          {
+            id: "usdt",
+            title: "USDT (Crypto)",
+            subtitle: "Pay with USDT stablecoin. Low fees (0.5%), fast transactions, powered by NOWPayments.",
+            icon: "logo-usd" as const,
+            color: theme.crypto,
+            status: "Available",
+          },
+        ]
+      : []),
   ];
 
   return (

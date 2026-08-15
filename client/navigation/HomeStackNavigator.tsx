@@ -65,7 +65,7 @@ export type HomeStackParamList = {
     dropoff: { address: string; lat: number; lng: number };
   };
   ActiveRide: { rideId: string };
-  GoLive: { rideId: string };
+  GoLive: { rideId?: string; postId?: string };
   Rating: { rideId: string; driverId: string; driverName: string };
   Invoice: { rideId: string };
   OpenClaw: { variant: "rider" };

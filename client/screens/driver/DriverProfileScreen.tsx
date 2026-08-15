@@ -16,6 +16,7 @@ import QRCodeSheet from "@/components/profile/QRCodeSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { DriverProfileStackParamList } from "@/navigation/driver/DriverProfileStackNavigator";
 
 interface MenuItem {
@@ -229,7 +230,7 @@ export default function DriverProfileScreen() {
             <ThemedText style={[styles.profileEmail, { color: theme.textSecondary }]}>
               {user?.email}
             </ThemedText>
-            {(driverData?.prayerRideCount ?? 0) > 0 ? (
+            {FEATURES.prayerRides && (driverData?.prayerRideCount ?? 0) > 0 ? (
               <View style={[styles.prayerBadge, { backgroundColor: Colors.travonyGreen + "18" }]}>
                 <Ionicons name="moon-outline" size={13} color={Colors.travonyGreen} />
                 <ThemedText style={[styles.prayerBadgeText, { color: Colors.travonyGreen }]}>

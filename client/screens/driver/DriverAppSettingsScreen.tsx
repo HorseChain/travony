@@ -14,6 +14,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 interface SettingItem {
   icon: keyof typeof Ionicons.glyphMap;
@@ -341,6 +342,7 @@ export default function DriverAppSettingsScreen() {
           </View>
         </View>
 
+        {FEATURES.prayerRides ? (
         <View style={styles.section}>
           <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
             PRAYER-PAUSE
@@ -409,6 +411,7 @@ export default function DriverAppSettingsScreen() {
             ) : null}
           </View>
         </View>
+        ) : null}
 
         <View style={styles.section}>
           <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>

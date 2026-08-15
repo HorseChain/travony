@@ -104,10 +104,6 @@ interface RideReceiptData {
 }
 
 export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log("Email not configured - skipping receipt email");
-    return false;
-  }
 
   const polygonScanUrl = data.blockchainTxHash
     ? `https://amoy.polygonscan.com/tx/${data.blockchainTxHash}`
@@ -269,19 +265,14 @@ export async function sendRideReceiptEmail(data: RideReceiptData): Promise<boole
 </html>
   `;
 
-  try {
-    await transporter.sendMail({
-      from: `"Travony" <${process.env.SMTP_USER}>`,
-      to: data.customerEmail,
-      subject: `Your Travony Ride Receipt - ${cur} ${data.fare}`,
-      html: htmlContent,
-    });
-    console.log(`Ride receipt email sent to ${data.customerEmail}`);
-    return true;
-  } catch (error) {
-    console.error("Failed to send ride receipt email:", error);
-    return false;
-  }
+  queueEmail(
+    data.customerEmail,
+    `Your Travony Ride Receipt - ${cur} ${data.fare}`,
+    htmlContent,
+    htmlToPlainText(htmlContent),
+  );
+  console.log(`Ride receipt email queued for ${data.customerEmail}`);
+  return true;
 }
 
 interface DriverEarningsEmailData {
@@ -301,10 +292,6 @@ interface DriverEarningsEmailData {
 }
 
 export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log("Email not configured - skipping driver earnings email");
-    return false;
-  }
 
   // Region-aware money labels so budget markets (e.g. BD = 5% fee) read correctly.
   const cur = data.currency || "AED";
@@ -434,19 +421,14 @@ export async function sendDriverEarningsEmail(data: DriverEarningsEmailData): Pr
 </html>
   `;
 
-  try {
-    await transporter.sendMail({
-      from: `"Travony" <${process.env.SMTP_USER}>`,
-      to: data.driverEmail,
-      subject: `Route Completed - Yield: ${cur} ${data.earnings}`,
-      html: htmlContent,
-    });
-    console.log(`Driver earnings email sent to ${data.driverEmail}`);
-    return true;
-  } catch (error) {
-    console.error("Failed to send driver earnings email:", error);
-    return false;
-  }
+  queueEmail(
+    data.driverEmail,
+    `Route Completed - Yield: ${cur} ${data.earnings}`,
+    htmlContent,
+    htmlToPlainText(htmlContent),
+  );
+  console.log(`Driver earnings email queued for ${data.driverEmail}`);
+  return true;
 }
 
 interface DriverRideRequestEmailData {
@@ -464,10 +446,6 @@ interface DriverRideRequestEmailData {
 }
 
 export async function sendDriverRideRequestEmail(data: DriverRideRequestEmailData): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log("Email not configured - skipping driver ride request email");
-    return false;
-  }
 
   // Driver share percent reflects the ride's region (e.g. BD = 95% to driver).
   const drvPct = 100 - (data.feePercent ?? 10);
@@ -600,10 +578,6 @@ interface WeeklyFeedbackData {
 }
 
 export async function sendWeeklyFeedbackEmail(data: WeeklyFeedbackData): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.log("Email not configured - skipping weekly feedback email");
-    return false;
-  }
 
   const ratingChange = data.previousAverageRating 
     ? data.averageRating - data.previousAverageRating 
@@ -760,19 +734,14 @@ export async function sendWeeklyFeedbackEmail(data: WeeklyFeedbackData): Promise
 </html>
   `;
 
-  try {
-    await transporter.sendMail({
-      from: `"Travony" <${process.env.SMTP_USER}>`,
-      to: data.driverEmail,
-      subject: `Your Weekly Performance: ★${data.averageRating.toFixed(1)} Rating, ${data.totalRides} Rides`,
-      html: htmlContent,
-    });
-    console.log(`Weekly feedback email sent to ${data.driverEmail}`);
-    return true;
-  } catch (error) {
-    console.error("Failed to send weekly feedback email:", error);
-    return false;
-  }
+  queueEmail(
+    data.driverEmail,
+    `Your Weekly Performance: ★${data.averageRating.toFixed(1)} Rating, ${data.totalRides} Rides`,
+    htmlContent,
+    htmlToPlainText(htmlContent),
+  );
+  console.log(`Weekly feedback email queued for ${data.driverEmail}`);
+  return true;
 }
 
 export async function sendDriverOnboardingEmail(data: {
@@ -781,8 +750,6 @@ export async function sendDriverOnboardingEmail(data: {
   cityName: string;
   vehicleType: string;
 }): Promise<boolean> {
-  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) return false;
-  
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
 <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background-color:#f5f5f5;">
 <table width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;margin:0 auto;background:#fff;">

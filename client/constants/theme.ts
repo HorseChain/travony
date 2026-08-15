@@ -299,6 +299,55 @@ export const Typography = {
   },
 };
 
+/**
+ * Motion — the single motion language for the app.
+ * Use these durations/springs everywhere instead of ad-hoc numbers so
+ * transitions, presses, and badge pulses all feel like one system.
+ *   fast    → micro-interactions (press feedback, toggles)
+ *   base    → most UI transitions (tab underline, fades, sheet content)
+ *   slow    → larger moves (sheets entering, screen-level fades)
+ *   pulse   → looping attention effects (live dot, skeletons)
+ */
+export const Motion = {
+  duration: {
+    fast: 150,
+    base: 220,
+    slow: 350,
+    pulse: 900,
+  },
+  // Spring config for Animated.spring press feedback (Button et al.)
+  spring: {
+    speed: 50,
+    bounciness: 4,
+  },
+  pressScale: 0.97,
+} as const;
+
+/**
+ * Opacity — shared interaction-state opacities. Pair with Motion.
+ */
+export const Opacity = {
+  pressed: 0.85,
+  disabled: 0.5,
+  overlayText: 0.75,
+} as const;
+
+/**
+ * Glass — the dark glassmorphic overlay treatment used on live surfaces
+ * (Go Live, stream viewer, hook feed). One set of scrims/chips so every
+ * overlay element sits in the same visual layer.
+ */
+export const Glass = {
+  chip: "rgba(0,0,0,0.55)",       // pills/chips floating on video
+  scrim: "rgba(0,0,0,0.65)",      // panels/cards floating on video
+  scrimHeavy: "rgba(0,0,0,0.78)", // toasts needing max contrast
+  border: "rgba(255,255,255,0.25)",
+  iconOnGlass: "#FFFFFF",
+  textOnGlass: "#FFFFFF",
+  textOnGlassDim: "rgba(255,255,255,0.75)",
+  fill: "rgba(255,255,255,0.2)",  // avatar/icon circles on glass
+} as const;
+
 export const Shadows = {
   card: Platform.select({
     ios: {

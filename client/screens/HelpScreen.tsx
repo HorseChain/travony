@@ -9,6 +9,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 const faqs = [
   {
@@ -21,7 +22,9 @@ const faqs = [
   },
   {
     question: "What payment methods are accepted?",
-    answer: "We accept cash, credit/debit cards, Travony wallet balance, and USDT stablecoin cryptocurrency payments. You can manage your payment methods from the Wallet tab. All transactions are processed securely.",
+    answer: FEATURES.crypto
+      ? "We accept cash, credit/debit cards, Travony wallet balance, and USDT stablecoin cryptocurrency payments. You can manage your payment methods from the Wallet tab. All transactions are processed securely."
+      : "We accept cash, credit/debit cards, and Travony wallet balance. You can manage your payment methods from the Wallet tab. All transactions are processed securely.",
   },
   {
     question: "How can I cancel a request?",

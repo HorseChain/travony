@@ -35,6 +35,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { apiRequest } from "@/lib/query-client";
 
 interface VehicleData {
@@ -463,6 +464,8 @@ export default function DriverVehicleDetailsScreen() {
         <FieldInput label="Colour" value={color} onChangeText={setColor} placeholder="e.g., White, Black, Silver" theme={theme} />
         <FieldInput label="Plate Number" value={plateNumber} onChangeText={setPlateNumber} placeholder="e.g., A 12345" autoCapitalize="characters" theme={theme} highlight={isMissing("plateNumber")} />
 
+        {/* EV setting is flag-gated; existing isElectric data is preserved untouched. */}
+        {FEATURES.ev ? (
         <View style={[styles.section, { backgroundColor: theme.backgroundElevated }]}>
           <View style={styles.evToggleRow}>
             <View style={styles.evToggleInfo}>
@@ -477,6 +480,7 @@ export default function DriverVehicleDetailsScreen() {
             />
           </View>
         </View>
+        ) : null}
       </>
     );
   };

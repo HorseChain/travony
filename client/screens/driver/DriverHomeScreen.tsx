@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { View, StyleSheet, Pressable, Alert, Platform, Modal, Linking } from "react-native";
+import { View, StyleSheet, Pressable, Alert, Platform, Modal, Linking, ActivityIndicator } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -28,6 +28,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthGate } from "@/hooks/useAuthGate";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { apiRequest } from "@/lib/query-client";
 import type { DriverHomeStackParamList } from "@/navigation/driver/DriverHomeStackNavigator";
 import { DriverHomeSkeleton } from "@/components/SkeletonLoader";
@@ -121,8 +122,168 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): num
 }
 
 const COUNTDOWN_SECONDS = 15;
+const GO_LIVE_COUNTDOWN = 30;
 const RING_SIZE = 80;
 const RING_BORDER = 6;
+
+// ---------------------------------------------------------------------------
+// GoLiveRequestCard — full-quality animated card for a rider's live request
+// ---------------------------------------------------------------------------
+function GoLiveRequestCard({
+  req,
+  countdown,
+  bottom,
+  accepting,
+  onAccept,
+  onDecline,
+}: {
+  req: { id: string; riderName: string; riderAvatar: string | null; expiresAt: string };
+  countdown: number;
+  bottom: number;
+  accepting: boolean;
+  onAccept: () => void;
+  onDecline: () => void;
+}) {
+  const { theme } = useTheme();
+
+  // Slide up entrance animation
+  const slideY = useSharedValue(120);
+  const cardOpacity = useSharedValue(0);
+  useEffect(() => {
+    slideY.value = withSpring(0, { damping: 22, stiffness: 180 });
+    cardOpacity.value = withTiming(1, { duration: 220 });
+  }, []);
+
+  const cardStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: slideY.value }],
+    opacity: cardOpacity.value,
+  }));
+
+  // Pulsing LIVE dot
+  const dotScale = useSharedValue(1);
+  const dotOpacity = useSharedValue(1);
+  useEffect(() => {
+    dotScale.value = withRepeat(withSequence(withTiming(1.5, { duration: 550 }), withTiming(1, { duration: 550 })), -1, false);
+    dotOpacity.value = withRepeat(withSequence(withTiming(0.35, { duration: 550 }), withTiming(1, { duration: 550 })), -1, false);
+  }, []);
+  const dotStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: dotScale.value }],
+    opacity: dotOpacity.value,
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          position: "absolute",
+          left: Spacing.md,
+          right: Spacing.md,
+          bottom,
+          borderRadius: 20,
+          backgroundColor: theme.backgroundRoot,
+          borderWidth: 1,
+          borderColor: Colors.liveRed + "30",
+          overflow: "hidden",
+          shadowColor: Colors.liveRed,
+          shadowOffset: { width: 0, height: 8 },
+          shadowOpacity: 0.18,
+          shadowRadius: 20,
+          elevation: 12,
+        },
+        cardStyle,
+      ]}
+    >
+      {/* Live accent bar at top */}
+      <View style={{ height: 3, backgroundColor: Colors.liveRed, borderRadius: 1.5 }} />
+
+      <View style={{ padding: Spacing.lg }}>
+        {/* Header row: LIVE badge + countdown ring */}
+        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: Spacing.md }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: Spacing.sm }}>
+            <Animated.View
+              style={[
+                { width: 10, height: 10, borderRadius: 5, backgroundColor: Colors.liveRed },
+                dotStyle,
+              ]}
+            />
+            <ThemedText style={{ fontSize: 12, fontWeight: "800", color: Colors.liveRed, letterSpacing: 1.2, textTransform: "uppercase" }}>
+              Go Live Request
+            </ThemedText>
+          </View>
+          <CountdownRing seconds={countdown} total={GO_LIVE_COUNTDOWN} />
+        </View>
+
+        {/* Rider info row */}
+        <View style={[{ flexDirection: "row", alignItems: "center", gap: Spacing.sm, padding: Spacing.md, borderRadius: 12, marginBottom: Spacing.md }, { backgroundColor: theme.backgroundElevated }]}>
+          <View style={{ width: 36, height: 36, borderRadius: 18, backgroundColor: Colors.liveRed + "20", alignItems: "center", justifyContent: "center" }}>
+            <Ionicons name="person" size={18} color={Colors.liveRed} />
+          </View>
+          <View style={{ flex: 1 }}>
+            <ThemedText style={{ fontSize: 15, fontWeight: "700", color: theme.textPrimary }}>
+              {req.riderName}
+            </ThemedText>
+            <ThemedText style={{ fontSize: 12, color: theme.textMuted, marginTop: 1 }}>
+              wants you to start a live stream
+            </ThemedText>
+          </View>
+          <View style={{ backgroundColor: Colors.liveRed + "15", borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 }}>
+            <Ionicons name="radio" size={16} color={Colors.liveRed} />
+          </View>
+        </View>
+
+        {/* Action buttons */}
+        <View style={{ flexDirection: "row", gap: Spacing.sm }}>
+          <Pressable
+            onPress={onDecline}
+            style={{
+              flex: 1,
+              paddingVertical: 13,
+              borderRadius: 12,
+              borderWidth: 1.5,
+              borderColor: theme.border,
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <ThemedText style={{ fontSize: 14, fontWeight: "600", color: theme.textSecondary }}>
+              Decline
+            </ThemedText>
+          </Pressable>
+          <Pressable
+            onPress={accepting ? undefined : onAccept}
+            disabled={accepting}
+            style={{
+              flex: 2,
+              paddingVertical: 13,
+              borderRadius: 12,
+              backgroundColor: accepting ? Colors.liveRed + "60" : Colors.liveRed,
+              alignItems: "center",
+              justifyContent: "center",
+              flexDirection: "row",
+              gap: 7,
+              shadowColor: Colors.liveRed,
+              shadowOffset: { width: 0, height: 4 },
+              shadowOpacity: 0.4,
+              shadowRadius: 10,
+              elevation: 6,
+            }}
+          >
+            {accepting ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: "#fff" }} />
+                <ThemedText style={{ fontSize: 15, fontWeight: "800", color: "#fff", letterSpacing: -0.2 }}>
+                  Go Live
+                </ThemedText>
+              </>
+            )}
+          </Pressable>
+        </View>
+      </View>
+    </Animated.View>
+  );
+}
 
 function CountdownRing({ seconds, total, onGreenBg = false }: { seconds: number; total: number; onGreenBg?: boolean }) {
   const progress = seconds / total; // 1→0 as time runs out
@@ -404,6 +565,14 @@ export default function DriverHomeScreen() {
   const counteredRideIds = useRef<Set<string>>(new Set());
   const [checkInPrestige, setCheckInPrestige] = useState<number | null>(null);
 
+  // Go Live Request — a rider asked this driver to start a public stream
+  const [incomingGoLiveReq, setIncomingGoLiveReq] = useState<{
+    id: string; riderId: string; riderName: string; riderAvatar: string | null; expiresAt: string;
+  } | null>(null);
+  const [goLiveReqCountdown, setGoLiveReqCountdown] = useState(30);
+  const goLiveCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handledGoLiveReqIds = useRef<Set<string>>(new Set());
+
   const hubSlideIn = useSharedValue(-100);
   const hubOpacity = useSharedValue(0);
   const hubSwipeX = useSharedValue(0);
@@ -501,6 +670,15 @@ export default function DriverHomeScreen() {
   const goHereKey = goHere ? `${goHere.kind}:${goHere.lat.toFixed(4)},${goHere.lng.toFixed(4)}` : null;
   const showGoHere = !!goHere && !incomingRequest && dismissedGoHereKey !== goHereKey;
 
+  // Poll for rider go-live requests while online and no ride request is showing
+  const { data: goLiveIncomingData } = useQuery<{
+    requests: Array<{ id: string; riderId: string; riderName: string; riderAvatar: string | null; expiresAt: string }>;
+  }>({
+    queryKey: ["/api/go-live-requests/incoming"],
+    refetchInterval: 5000,
+    enabled: isOnline && !incomingRequest,
+  });
+
   const toggleOnlineMutation = useMutation({
     mutationFn: async ({ online, evReady: ready }: { online: boolean; evReady?: boolean }) => {
       const body: { isOnline: boolean; evReady?: boolean; lat?: number; lng?: number } = { isOnline: online };
@@ -532,6 +710,25 @@ export default function DriverHomeScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/pending-rides"] });
     },
     onError: () => {},
+  });
+
+  const acceptGoLiveMutation = useMutation({
+    mutationFn: async (reqId: string) =>
+      apiRequest(`/api/go-live-requests/${reqId}/accept`, { method: "PATCH" }),
+    onSuccess: (data: any) => {
+      const postId = data?.postId;
+      setIncomingGoLiveReq(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      if (postId) navigation.navigate("GoLive", { postId });
+    },
+    onError: () => setIncomingGoLiveReq(null),
+  });
+
+  const declineGoLiveMutation = useMutation({
+    mutationFn: async (reqId: string) =>
+      apiRequest(`/api/go-live-requests/${reqId}/decline`, { method: "PATCH" }),
+    onSuccess: () => setIncomingGoLiveReq(null),
+    onError: () => setIncomingGoLiveReq(null),
   });
 
   const checkInMutation = useMutation({
@@ -585,6 +782,41 @@ export default function DriverHomeScreen() {
       }
     }
   }, [pendingRides, isOnline]);
+
+  // Surface the first non-handled go-live request
+  useEffect(() => {
+    const first = goLiveIncomingData?.requests?.[0];
+    if (!first || handledGoLiveReqIds.current.has(first.id)) return;
+    if (!incomingGoLiveReq || incomingGoLiveReq.id !== first.id) {
+      setIncomingGoLiveReq(first);
+      setGoLiveReqCountdown(30);
+    }
+  }, [goLiveIncomingData]);
+
+  // Countdown timer for go-live request (auto-dismiss after 30s)
+  useEffect(() => {
+    if (!incomingGoLiveReq) {
+      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+      return;
+    }
+    setGoLiveReqCountdown(30);
+    if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+    const reqId = incomingGoLiveReq.id;
+    goLiveCountdownRef.current = setInterval(() => {
+      setGoLiveReqCountdown((s) => {
+        if (s <= 1) {
+          clearInterval(goLiveCountdownRef.current!);
+          setIncomingGoLiveReq(null);
+          handledGoLiveReqIds.current.add(reqId);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => {
+      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+    };
+  }, [incomingGoLiveReq?.id]);
 
   // Name Your Fare: after countering, poll my-bids — when the rider accepts
   // this driver's counter, jump straight into the active ride.
@@ -1030,14 +1262,14 @@ export default function DriverHomeScreen() {
                 </ThemedText>
               </View>
               <ThemedText style={[styles.statusLabel, { color: theme.textPrimary }]}>
-                {isOnline ? (isEvDriver && evReady ? "Online · EV Ready" : "Online") : "Offline"}
+                {isOnline ? (FEATURES.ev && isEvDriver && evReady ? "Online · EV Ready" : "Online") : "Offline"}
               </ThemedText>
             </View>
-            {isEvDriver ? null : (
+            {FEATURES.ev && isEvDriver ? null : (
               <AnimatedToggle value={isOnline} onValueChange={handleToggleOnline} />
             )}
           </View>
-          {isEvDriver ? (
+          {FEATURES.ev && isEvDriver ? (
             <EvHoldControl
               isOnline={isOnline}
               busy={toggleOnlineMutation.isPending}
@@ -1053,7 +1285,7 @@ export default function DriverHomeScreen() {
           </View>
         ) : null}
 
-        {prayerPauseActive ? (
+        {FEATURES.prayerRides && prayerPauseActive ? (
           <View style={[styles.prayerPauseBanner, { backgroundColor: theme.backgroundElevated, borderColor: Colors.travonyGreen + "60" }]}>
             <Ionicons name="moon-outline" size={16} color={Colors.travonyGreen} />
             <ThemedText style={[styles.prayerPauseBannerText, { color: theme.textPrimary }]} numberOfLines={2}>
@@ -1098,6 +1330,7 @@ export default function DriverHomeScreen() {
           </GestureDetector>
         ) : (
           <>
+            {FEATURES.networkHubs ? (
             <Pressable
               style={({ pressed }) => [
                 styles.networkHubsButton,
@@ -1118,7 +1351,9 @@ export default function DriverHomeScreen() {
               </View>
               <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
             </Pressable>
+            ) : null}
 
+            {FEATURES.ev ? (
             <Pressable
               style={({ pressed }) => [
                 styles.coffeeButton,
@@ -1132,7 +1367,9 @@ export default function DriverHomeScreen() {
             >
               <Ionicons name="battery-charging" size={22} color={Colors.travonyGreen} />
             </Pressable>
+            ) : null}
 
+            {FEATURES.coffee ? (
             <Pressable
               style={({ pressed }) => [
                 styles.coffeeButton,
@@ -1146,6 +1383,7 @@ export default function DriverHomeScreen() {
             >
               <Ionicons name="cafe" size={22} color={theme.warning} />
             </Pressable>
+            ) : null}
           </>
         )}
       </View>
@@ -1154,25 +1392,23 @@ export default function DriverHomeScreen() {
         <View style={[styles.bottomControls, { bottom: tabBarHeight + Spacing.lg }]}>
           {showGoLiveNudge ? (
             <Pressable
-              style={[styles.goLiveNudge, { backgroundColor: theme.backgroundRoot, borderColor: "#9146FF30" }]}
+              style={[styles.goLiveNudge, { backgroundColor: theme.backgroundRoot, borderColor: Colors.liveRed + "30" }]}
               onPress={() => {
                 setShowGoLiveNudge(false);
-                Linking.openURL("twitch://broadcast").catch(() =>
-                  Linking.openURL("https://www.twitch.tv")
-                );
+                navigation.navigate("GoLive", {});
               }}
             >
               <View style={styles.goLiveNudgeLeft}>
-                <View style={[styles.goLiveNudgeDot, { backgroundColor: "#9146FF" }]} />
+                <View style={[styles.goLiveNudgeDot, { backgroundColor: Colors.liveRed }]} />
                 <View>
                   <ThemedText style={styles.goLiveNudgeTitle}>Stream your ride live</ThemedText>
                   <ThemedText style={[styles.goLiveNudgeSub, { color: theme.textMuted }]}>
-                    Go live on Twitch while you drive
+                    Go live to Travony viewers while you drive
                   </ThemedText>
                 </View>
               </View>
               <View style={styles.goLiveNudgeRight}>
-                <View style={[styles.goLiveNudgeBtn, { backgroundColor: "#9146FF" }]}>
+                <View style={[styles.goLiveNudgeBtn, { backgroundColor: Colors.liveRed }]}>
                   <ThemedText style={styles.goLiveNudgeBtnText}>Go Live</ThemedText>
                 </View>
                 <Pressable
@@ -1190,6 +1426,27 @@ export default function DriverHomeScreen() {
             <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
           </View>
         </View>
+      ) : null}
+
+      {/* ── Go Live Request card — rider asked this driver to broadcast ── */}
+      {incomingGoLiveReq && !incomingRequest ? (
+        <GoLiveRequestCard
+          req={incomingGoLiveReq}
+          countdown={goLiveReqCountdown}
+          bottom={tabBarHeight + Spacing.lg}
+          accepting={acceptGoLiveMutation.isPending}
+          onAccept={() => {
+            const reqId = incomingGoLiveReq.id;
+            handledGoLiveReqIds.current.add(reqId);
+            setIncomingGoLiveReq(null);
+            acceptGoLiveMutation.mutate(reqId);
+          }}
+          onDecline={() => {
+            handledGoLiveReqIds.current.add(incomingGoLiveReq.id);
+            setIncomingGoLiveReq(null);
+            declineGoLiveMutation.mutate(incomingGoLiveReq.id);
+          }}
+        />
       ) : null}
 
       {incomingRequest ? (
@@ -1472,7 +1729,7 @@ export default function DriverHomeScreen() {
         </View>
       </Modal>
 
-      {proximityHub && !checkedInHubsThisSession.current.has(proximityHub.id) ? (
+      {FEATURES.networkHubs && proximityHub && !checkedInHubsThisSession.current.has(proximityHub.id) ? (
         <View style={[styles.proximitySheet, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
           {checkInSuccess ? (
             <View style={styles.checkInSuccessContent}>

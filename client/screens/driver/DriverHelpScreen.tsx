@@ -9,6 +9,7 @@ import { ThemedView } from "@/components/ThemedView";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 interface FAQ {
   question: string;
@@ -37,7 +38,9 @@ export default function DriverHelpScreen() {
     },
     {
       question: "When are payouts processed?",
-      answer: "Yield from completed routes is added to your asset balance immediately. You can withdraw to your bank account or as USDT cryptocurrency anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut.",
+      answer: FEATURES.crypto
+        ? "Yield from completed routes is added to your asset balance immediately. You can withdraw to your bank account or as USDT cryptocurrency anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut."
+        : "Earnings from completed routes are added to your balance immediately. You can withdraw to your bank account anytime when your balance exceeds AED 50. Bank payouts are processed within 2-3 business days. Tips from riders go 100% to you with no platform cut.",
     },
     {
       question: "What if a rider cancels?",

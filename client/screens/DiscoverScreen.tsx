@@ -21,6 +21,7 @@ import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import type { SocialStackParamList } from "@/navigation/SocialStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<SocialStackParamList, "Discover">;
@@ -173,7 +174,7 @@ export default function DiscoverScreen() {
       results.drivers.length > 0 ||
       results.routes.length > 0 ||
       results.posts.length > 0 ||
-      results.hubs.length > 0
+      (FEATURES.networkHubs && results.hubs.length > 0)
     );
   }, [results]);
 
@@ -308,7 +309,7 @@ export default function DiscoverScreen() {
                 </View>
               ) : null}
 
-              {results!.hubs.length > 0 ? (
+              {FEATURES.networkHubs && results!.hubs.length > 0 ? (
                 <View style={styles.section}>
                   <ThemedText style={styles.sectionTitle}>Hubs</ThemedText>
                   {results!.hubs.map((h) => (

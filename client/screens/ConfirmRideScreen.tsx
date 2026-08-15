@@ -22,6 +22,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography, Shadows, Colors } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "ConfirmRide">;
@@ -47,7 +48,8 @@ const vehicleTypes: VehicleType[] = [
 const paymentMethods = [
   { id: "cash", name: "Cash", icon: "banknotes" },
   { id: "wallet", name: "Wallet", icon: "credit-card" },
-  { id: "usdt", name: "USDT", icon: "dollar-sign" },
+  // Crypto is long-tail: hidden unless the feature flag is on.
+  ...(FEATURES.crypto ? [{ id: "usdt", name: "USDT", icon: "dollar-sign" }] : []),
 ];
 
 export default function ConfirmRideScreen() {
@@ -64,7 +66,9 @@ export default function ConfirmRideScreen() {
   const [selectedPayment, setSelectedPayment] = useState(paymentMethods[0]);
   const [promoCode, setPromoCode] = useState("");
   const [showTransparency, setShowTransparency] = useState(false);
-  const [evPreferred, setEvPreferred] = useState(false);
+  const [evPreferredRaw, setEvPreferred] = useState(false);
+  // EV can only be preferred while the EV surface is enabled.
+  const evPreferred = FEATURES.ev && evPreferredRaw;
 
   const distance = useMemo(() => {
     const R = 6371;
@@ -100,8 +104,9 @@ export default function ConfirmRideScreen() {
     enabled: !!user?.id,
   });
 
-  // Check if EV drivers are available near pickup
+  // Check if EV drivers are available near pickup (EV is long-tail — flag-gated)
   const { data: evAvailability } = useQuery<{ evDriversAvailable: number; available: boolean }>({
+    enabled: FEATURES.ev,
     queryKey: ["/api/ai/ev-availability", pickup.lat, pickup.lng],
     queryFn: async () => {
       const response = await apiRequest(
@@ -148,7 +153,7 @@ export default function ConfirmRideScreen() {
           platformFee: platformFee.toFixed(2),
           driverEarnings: driverEarnings.toFixed(2),
           priceBreakdown: JSON.stringify(aiPricing || {}),
-          isEvRide: evPreferred,
+          isEvRide: FEATURES.ev && evPreferred,
         }),
         headers: { "Content-Type": "application/json" },
       });
@@ -239,7 +244,7 @@ export default function ConfirmRideScreen() {
         </View>
       </Card>
 
-      {evAvailability?.available ? (
+      {FEATURES.ev && evAvailability?.available ? (
         <Pressable
           style={({ pressed }) => [
             styles.evOptionCard,

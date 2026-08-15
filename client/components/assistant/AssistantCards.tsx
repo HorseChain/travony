@@ -8,6 +8,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { apiRequest } from "@/lib/query-client";
+import { FEATURES } from "@/constants/features";
 import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
 
 // ============================================================================
@@ -852,11 +853,11 @@ export function AssistantCard({
     case "rides":
       return <RidesCard card={card} />;
     case "coffee":
-      return <CoffeeCard card={card} />;
+      return FEATURES.coffee ? <CoffeeCard card={card} /> : null;
     case "prayer":
-      return <PrayerCard card={card} />;
+      return FEATURES.prayerRides ? <PrayerCard card={card} /> : null;
     case "arrival":
-      return <ArrivalCard card={card} />;
+      return FEATURES.onTimeArrivals ? <ArrivalCard card={card} /> : null;
     case "rewards":
       return <RewardsCard card={card} />;
     case "missions":
@@ -864,11 +865,12 @@ export function AssistantCard({
     case "earnings":
       return <EarningsCard card={card} />;
     case "ladder":
-      return <LadderCard card={card} />;
+      // Car Ladder is long tail — hidden unless the flag is on.
+      return FEATURES.carLadder ? <LadderCard card={card} /> : null;
     case "pending_rides":
       return <PendingRidesCard card={card} />;
     case "coffee_orders":
-      return <CoffeeOrdersCard card={card} />;
+      return FEATURES.coffee ? <CoffeeOrdersCard card={card} /> : null;
     case "trending":
       return <TrendingCard card={card} />;
     default:

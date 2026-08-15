@@ -6,6 +6,7 @@ import * as path from "path";
 import swaggerUi from "swagger-ui-express";
 import { apiSpec } from "./apiSpec";
 import { apiKeyMiddleware } from "./apiKeyMiddleware";
+import { isAppError } from "./errors";
 import { setupTaxiModeRoutes } from "./taxiModeRoutes";
 
 const app = express();
@@ -555,8 +556,6 @@ function configureExpoAndLanding(app: express.Application) {
 
 function setupErrorHandler(app: express.Application) {
   app.use((err: unknown, req: Request, res: Response, _next: NextFunction) => {
-    const { AppError, isAppError } = require("./errors");
-    
     let statusCode = 500;
     let errorResponse: Record<string, any> = {
       error: "InternalServerError",

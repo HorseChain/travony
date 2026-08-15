@@ -14,6 +14,7 @@ import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { apiRequest, getApiUrl } from "@/lib/query-client";
 import type { WalletStackParamList } from "@/navigation/WalletStackNavigator";
 
@@ -185,15 +186,19 @@ export default function WalletScreen() {
       <View style={[styles.balanceCard, { backgroundColor: theme.primary }]}>
         <ThemedText style={styles.balanceLabel}>Travony Wallet</ThemedText>
         <ThemedText style={styles.balanceAmount}>AED {balance}</ThemedText>
+        {FEATURES.crypto ? (
         <View style={styles.balanceActions}>
+          {/* Top-up is USDT-only today, so the whole entry is crypto-gated. */}
           <Pressable style={styles.balanceAction} onPress={() => setTopupModalVisible(true)}>
             <Ionicons name="add-outline" size={20} color={theme.textOnPrimary} />
             <ThemedText style={styles.balanceActionText}>Add Money</ThemedText>
           </Pressable>
         </View>
+        ) : null}
       </View>
 
-      {/* HRS Token Card */}
+      {/* HRS Token Card (crypto-gated) */}
+      {!FEATURES.crypto ? null : (
       <Pressable
         style={[styles.hrsCard, { backgroundColor: HRS_COLOR }]}
         onPress={() => {
@@ -239,6 +244,7 @@ export default function WalletScreen() {
           )}
         </View>
       </Pressable>
+      )}
 
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
@@ -263,7 +269,8 @@ export default function WalletScreen() {
           </View>
         </Card>
 
-        {/* USDT */}
+        {/* USDT (crypto-gated) */}
+        {!FEATURES.crypto ? null : (
         <Card style={styles.paymentCard}>
           <View style={styles.paymentRow}>
             <View style={[styles.cardIconContainer, { backgroundColor: theme.crypto + "20" }]}>
@@ -280,8 +287,10 @@ export default function WalletScreen() {
             </View>
           </View>
         </Card>
+        )}
 
-        {/* HRS */}
+        {/* HRS (crypto-gated) */}
+        {!FEATURES.crypto ? null : (
         <Card style={styles.paymentCard}>
           <View style={styles.paymentRow}>
             <View style={[styles.cardIconContainer, { backgroundColor: HRS_COLOR + "20" }]}>
@@ -303,6 +312,7 @@ export default function WalletScreen() {
             </Pressable>
           </View>
         </Card>
+        )}
 
         {/* Card */}
         <Card style={styles.paymentCard}>

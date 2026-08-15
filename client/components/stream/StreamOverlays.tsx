@@ -7,6 +7,7 @@ import Animated, {
   withTiming,
   withSequence,
   withDelay,
+  withRepeat,
   Easing,
   FadeInDown,
   FadeOutUp,
@@ -15,7 +16,7 @@ import Animated, {
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors, Glass, Motion } from "@/constants/theme";
 import type { StreamEvent } from "@/hooks/useStreamChannel";
 
 // ---------------------------------------------------------------------------
@@ -33,9 +34,23 @@ export function ViewerCountChip({ count }: { count: number }) {
 }
 
 export function LiveBadge() {
+  // Gentle looping pulse on the dot — the app-wide "live" motion signature.
+  const pulse = useSharedValue(1);
+  useEffect(() => {
+    pulse.value = withRepeat(
+      withSequence(
+        withTiming(0.35, { duration: Motion.duration.pulse, easing: Easing.inOut(Easing.ease) }),
+        withTiming(1, { duration: Motion.duration.pulse, easing: Easing.inOut(Easing.ease) }),
+      ),
+      -1,
+      false,
+    );
+  }, [pulse]);
+  const dotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
   return (
     <View style={styles.liveBadge}>
-      <View style={styles.liveDot} />
+      <Animated.View style={[styles.liveDot, dotStyle]} />
       <ThemedText style={styles.liveBadgeText}>LIVE</ThemedText>
     </View>
   );
@@ -264,7 +279,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: 4,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: Glass.chip,
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: 5,
@@ -297,7 +312,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.md,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: Glass.scrim,
     borderRadius: BorderRadius.full,
     paddingVertical: Spacing.sm,
     paddingHorizontal: Spacing.md,
@@ -307,7 +322,7 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: Glass.fill,
     alignItems: "center",
     justifyContent: "center",
   },

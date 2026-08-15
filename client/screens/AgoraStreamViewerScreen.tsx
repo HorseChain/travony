@@ -21,7 +21,7 @@ import {
   ActiveProduct,
 } from "@/components/stream/StreamOverlays";
 import GiftSheet from "@/components/rewards/GiftSheet";
-import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors, Glass } from "@/constants/theme";
 
 interface StreamSnapshot {
   id: string;
@@ -356,7 +356,7 @@ const styles = StyleSheet.create({
   },
   fallbackBody: {
     ...Typography.small,
-    color: "rgba(255,255,255,0.7)",
+    color: Glass.textOnGlassDim,
     textAlign: "center",
   },
   topBar: {
@@ -372,7 +372,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    backgroundColor: "rgba(0,0,0,0.45)",
+    backgroundColor: Glass.chip,
     borderRadius: BorderRadius.full,
     paddingRight: Spacing.md,
     paddingLeft: 4,
@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   hostAvatarFallback: {
-    backgroundColor: "rgba(255,255,255,0.25)",
+    backgroundColor: Glass.fill,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: Glass.chip,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -425,7 +425,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.xs,
-    backgroundColor: "rgba(0,0,0,0.65)",
+    backgroundColor: Glass.scrim,
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     paddingVertical: Spacing.xs,

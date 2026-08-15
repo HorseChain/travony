@@ -15,6 +15,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { apiRequest } from "@/lib/query-client";
 
 interface Driver {
@@ -334,7 +335,8 @@ export default function DriverEarningsScreen() {
               </View>
             </View>
 
-            {/* USDT Crypto Earnings Card */}
+            {/* USDT Crypto Earnings Card (long tail — hidden unless crypto flag on) */}
+            {!FEATURES.crypto ? null : (
             <View style={[styles.cryptoCard, { backgroundColor: theme.backgroundElevated }]}>
               <View style={styles.cryptoHeader}>
                 <View style={styles.cryptoTitleRow}>
@@ -387,6 +389,7 @@ export default function DriverEarningsScreen() {
                 )}
               </View>
             </View>
+            )}
 
             {/* Vehicle Wallet entry point */}
             <Pressable

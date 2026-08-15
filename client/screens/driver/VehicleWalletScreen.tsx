@@ -22,6 +22,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest } from "@/lib/query-client";
 import { Typography, Colors, Spacing, BorderRadius } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 interface VehicleIdentity {
   id: string;
@@ -252,7 +253,7 @@ export default function VehicleWalletScreen() {
 
   const { data: ladder } = useQuery<LadderStatus>({
     queryKey: ["/api/ladder/me"],
-    enabled: !!user?.id && user?.role === "driver",
+    enabled: FEATURES.carLadder && !!user?.id && user?.role === "driver",
   });
 
   const changeTargetMutation = useMutation({
@@ -470,7 +471,7 @@ export default function VehicleWalletScreen() {
                     </View>
                   ) : null}
 
-                  {ladder?.hasGoal && ladder.target ? (
+                  {FEATURES.carLadder && ladder?.hasGoal && ladder.target ? (
                     <Pressable
                       style={styles.ladderRow}
                       onPress={() => setLadderOpen(true)}
@@ -661,7 +662,7 @@ export default function VehicleWalletScreen() {
       </Modal>
 
       <Modal
-        visible={ladderOpen}
+        visible={FEATURES.carLadder && ladderOpen}
         transparent
         animationType="slide"
         onRequestClose={() => setLadderOpen(false)}

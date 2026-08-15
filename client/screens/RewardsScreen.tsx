@@ -20,6 +20,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { ThemedView } from "@/components/ThemedView";
 import { useTheme } from "@/hooks/useTheme";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { apiRequest } from "@/lib/query-client";
 
 const COIN_COLOR = "#F5B301";
@@ -264,12 +265,15 @@ export default function RewardsScreen() {
                 </ThemedText>
               </View>
               <ThemedText style={styles.balanceValue}>{data.coins}</ThemedText>
+              {/* Coin purchase is HRS/crypto today — hidden while crypto is off. */}
+              {FEATURES.crypto ? (
               <Pressable
                 style={[styles.smallButton, { backgroundColor: COIN_COLOR }]}
                 onPress={() => openPacks()}
               >
                 <ThemedText style={styles.smallButtonText}>Get Coins</ThemedText>
               </Pressable>
+              ) : null}
             </View>
             <View style={[styles.balanceDivider, { backgroundColor: theme.border }]} />
             <View style={styles.balanceSide}>
@@ -521,9 +525,9 @@ export default function RewardsScreen() {
         </View>
       </ScrollView>
 
-      {/* HRS coin top-up — multi-step modal */}
+      {/* HRS coin top-up — multi-step modal (crypto-gated) */}
       <Modal
-        visible={modalStep !== "closed"}
+        visible={FEATURES.crypto && modalStep !== "closed"}
         transparent
         animationType="slide"
         onRequestClose={() => setModalStep("closed")}

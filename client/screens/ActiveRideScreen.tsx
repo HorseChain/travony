@@ -30,6 +30,7 @@ import { GoLiveInAppButton, ShareLiveButton } from "@/components/RideSocial";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "ActiveRide">;
@@ -127,6 +128,125 @@ interface TelemetryData {
     vehicleVerified?: boolean;
     isElectric?: boolean;
   } | null;
+}
+
+// ---------------------------------------------------------------------------
+// RequestLiveChip — rider requests their driver to start a public stream
+// ---------------------------------------------------------------------------
+function RequestLiveChip({ driverId }: { driverId: string }) {
+  const { theme } = useTheme();
+  const [status, setStatus] = useState<"idle" | "waiting" | "declined" | "sent">("idle");
+  const [reqId, setReqId] = useState<string | null>(null);
+  const [countdown, setCountdown] = useState(30);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const sendMutation = useMutation({
+    mutationFn: () =>
+      apiRequest("/api/go-live-requests", {
+        method: "POST",
+        body: JSON.stringify({ driverId }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: (data: any) => {
+      setReqId(data?.request?.id ?? null);
+      setStatus("waiting");
+      setCountdown(30);
+    },
+    onError: () => setStatus("idle"),
+  });
+
+  // Poll request status while waiting
+  const { data: pollData } = useQuery<{ request: { status: string } }>({
+    queryKey: ["/api/go-live-requests", reqId],
+    queryFn: () => apiRequest(`/api/go-live-requests/${reqId}`),
+    enabled: !!reqId && status === "waiting",
+    refetchInterval: 3000,
+  });
+
+  useEffect(() => {
+    if (!pollData?.request) return;
+    const s = pollData.request.status;
+    if (s === "accepted") { setStatus("sent"); setReqId(null); setTimeout(() => setStatus("idle"), 3000); }
+    else if (s === "declined" || s === "expired" || s === "cancelled") { setStatus("declined"); setReqId(null); setTimeout(() => setStatus("idle"), 2500); }
+  }, [pollData]);
+
+  // Client-side countdown while waiting
+  useEffect(() => {
+    if (status !== "waiting") { if (countdownRef.current) clearInterval(countdownRef.current); return; }
+    setCountdown(30);
+    countdownRef.current = setInterval(() => {
+      setCountdown((s) => {
+        if (s <= 1) { clearInterval(countdownRef.current!); setStatus("idle"); setReqId(null); return 0; }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
+  }, [status]);
+
+  const isIdle = status === "idle";
+  const isWaiting = status === "waiting";
+  const isSent = status === "sent";
+  const isDeclined = status === "declined";
+
+  const bgColor = isDeclined
+    ? theme.error + "18"
+    : isSent
+    ? Colors.travonyGreen + "18"
+    : isWaiting
+    ? Colors.liveRed + "15"
+    : "transparent";
+
+  const borderColor = isDeclined
+    ? theme.error + "50"
+    : isSent
+    ? Colors.travonyGreen + "50"
+    : Colors.liveRed + "60";
+
+  return (
+    <Pressable
+      onPress={isIdle ? () => sendMutation.mutate() : undefined}
+      disabled={!isIdle}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+        paddingHorizontal: 14,
+        paddingVertical: 9,
+        borderRadius: 24,
+        borderWidth: 1.5,
+        borderColor,
+        backgroundColor: bgColor,
+        marginTop: Spacing.sm,
+        alignSelf: "flex-start",
+      }}
+    >
+      {isWaiting ? (
+        <ActivityIndicator size="small" color={Colors.liveRed} style={{ width: 16, height: 16 }} />
+      ) : (
+        <Ionicons
+          name={isSent ? "checkmark-circle" : isDeclined ? "close-circle" : "radio"}
+          size={15}
+          color={isSent ? Colors.travonyGreen : isDeclined ? theme.error : Colors.liveRed}
+        />
+      )}
+      <ThemedText
+        style={{
+          fontSize: 13,
+          fontWeight: "600",
+          color: isSent ? Colors.travonyGreen : isDeclined ? theme.error : Colors.liveRed,
+          letterSpacing: -0.1,
+        }}
+      >
+        {isSent
+          ? "Request sent!"
+          : isDeclined
+          ? "Driver declined"
+          : isWaiting
+          ? `Waiting for driver… ${countdown}s`
+          : "Request Live"}
+      </ThemedText>
+    </Pressable>
+  );
 }
 
 export default function ActiveRideScreen() {
@@ -265,7 +385,7 @@ export default function ActiveRideScreen() {
         }, 8000);
       }
 
-      if ((status === "in_progress" || status === "started") && !coffeePromptShown) {
+      if (FEATURES.coffee && (status === "in_progress" || status === "started") && !coffeePromptShown) {
         setCoffeePromptShown(true);
         setShowCoffeeCard(true);
         Animated.spring(coffeeCardAnim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 8 }).start();
@@ -480,6 +600,10 @@ export default function ActiveRideScreen() {
             </View>
           ) : null}
           {rideId ? <GoLiveInAppButton rideId={rideId} rideStatus={ride?.status} /> : null}
+          {/* Request Live — rider asks the driver to start a public stream */}
+          {ride?.driverId && ["accepted", "started", "in_progress"].includes(ride?.status ?? "") ? (
+            <RequestLiveChip driverId={ride.driverId} />
+          ) : null}
           {/* Share Live — visible when the driver is actively streaming.
               Generates a short-lived browser link for a trusted contact. */}
           {rideId ? <ShareLiveButton rideId={rideId} /> : null}
@@ -671,7 +795,7 @@ export default function ActiveRideScreen() {
           </ThemedText>
         ) : null}
 
-        {showCoffeeCard ? (
+        {FEATURES.coffee && showCoffeeCard ? (
           <Animated.View
             style={[
               styles.coffeeCard,

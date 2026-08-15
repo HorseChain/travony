@@ -32,6 +32,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAuthGate } from "@/hooks/useAuthGate";
 import { apiRequest } from "@/lib/query-client";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 
 interface PmgthDriver {
   driverId: string;
@@ -321,7 +322,10 @@ function detectRegionFromCoordinates(lat: number, lng: number): string {
 const paymentMethods = [
   { id: "cash", name: "Cash", icon: "cash-outline", description: "Pay driver directly" },
   { id: "wallet", name: "Wallet", icon: "wallet-outline", description: "Pay from your wallet balance" },
-  { id: "usdt", name: "USDT", icon: "logo-bitcoin", description: "Pay with crypto (0.5% fee)" },
+  // Crypto is long-tail: hidden unless the feature flag is on.
+  ...(FEATURES.crypto
+    ? [{ id: "usdt", name: "USDT", icon: "logo-bitcoin", description: "Pay with crypto (0.5% fee)" }]
+    : []),
 ];
 
 type TabType = "location" | "rides" | "confirm";
@@ -505,6 +509,7 @@ export default function BookingBottomSheet({
 
   // Sharing is only offered for genuine three-wheelers in a region that seats >= 2.
   const shareEligible = useMemo(() => {
+    if (!FEATURES.pooling) return false;
     if (!THREE_WHEELER_TYPES.includes(selectedVehicle.type)) return false;
     const vt = (regionConfig?.vehicleTypes || []).find((v: any) => v.type === selectedVehicle.type);
     return (vt?.maxPassengers ?? 0) >= 2;
@@ -524,7 +529,7 @@ export default function BookingBottomSheet({
   // Name Your Fare guardrails (server re-validates): floor = region minimum
   // fare, ceiling = surge-capped estimate. Fixed-price modes are excluded.
   const nameFareEligible =
-    !shareActive && !selectedPmgthDriver && selectedVehicle.type !== "safe_driver";
+    FEATURES.namedFare && !shareActive && !selectedPmgthDriver && selectedVehicle.type !== "safe_driver";
   const nameFareActive = nameFareSelected && nameFareEligible;
   const nameFareFloor = Math.max(regionConfig?.minFare ?? 5, 1);
   const nameFareCeiling = Math.max(
@@ -885,7 +890,7 @@ export default function BookingBottomSheet({
 
   const renderRidesTab = () => (
     <View style={styles.tabContent}>
-      {evModeSelected ? (
+      {!FEATURES.ev ? null : evModeSelected ? (
         evDriversAvailable > 0 ? (
           <View style={[styles.evIndicatorBanner, { backgroundColor: Colors.travonyGreen + "15" }]}>
             <Ionicons name={"flash" as any} size={14} color={Colors.travonyGreen} />
@@ -1045,6 +1050,7 @@ export default function BookingBottomSheet({
           </View>
         ) : null}
 
+        {FEATURES.ev ? (
         <Pressable
           onPress={handleEvModeToggle}
           style={[
@@ -1054,7 +1060,7 @@ export default function BookingBottomSheet({
               borderColor: evModeSelected ? Colors.travonyGreen : theme.border,
             },
           ]}
-        >
+>
           <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={18} color={evModeSelected ? Colors.travonyGreen : theme.textMuted} />
           <View style={{ flex: 1 }}>
             <ThemedText style={{ ...Typography.labelBold, color: evModeSelected ? Colors.travonyGreen : theme.text }}>
@@ -1068,6 +1074,7 @@ export default function BookingBottomSheet({
             {evModeSelected ? <Ionicons name="checkmark" size={12} color={Colors.light.textOnPrimary} /> : null}
           </View>
         </Pressable>
+        ) : null}
 
         {shareEligible ? (
           <Pressable

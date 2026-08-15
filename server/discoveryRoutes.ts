@@ -770,7 +770,7 @@ export type DiscoveryDriver = {
   currencySymbol: string;
   isLive: boolean;
   postId: string | null;
-  streamProvider: "agora" | "twitch" | null;
+  streamProvider: "agora" | null;
   /** Coarsened to ~1 km precision (2 decimal places) — safe to expose in feed */
   approxLat: number | null;
   approxLng: number | null;
@@ -831,6 +831,9 @@ async function fetchNearbyRows(lat: number, lng: number): Promise<RawDriverRow[]
         eq(ridePosts.isLive, true),
         isNull(ridePosts.endedAt),
         eq(ridePosts.type, "stream"),
+        // Only in-app (Agora) streams are watchable; legacy twitch rows must
+        // never surface as live cards.
+        eq(ridePosts.streamProvider, "agora"),
       ),
     )
     .where(
@@ -860,6 +863,7 @@ async function fetchFollowedRows(followerId: string): Promise<RawDriverRow[]> {
         eq(ridePosts.isLive, true),
         isNull(ridePosts.endedAt),
         eq(ridePosts.type, "stream"),
+        eq(ridePosts.streamProvider, "agora"),
       ),
     )
     .where(
@@ -925,7 +929,7 @@ function buildDiscoveryDrivers(
       currencySymbol: fareEst.symbol,
       isLive: !!(row.postIsLive && row.postId),
       postId: row.postId ?? null,
-      streamProvider: (row.streamProvider as "agora" | "twitch" | null) ?? null,
+      streamProvider: row.streamProvider === "agora" ? "agora" : null,
       // Coarsened to ~1 km (2 dp) — safe to expose in discovery feed
       approxLat: hasDriverCoords ? Math.round(dLat * 100) / 100 : null,
       approxLng: hasDriverCoords ? Math.round(dLng * 100) / 100 : null,

@@ -27,7 +27,7 @@ import {
   useGiftAnimations,
 } from "@/components/stream/StreamOverlays";
 import { useVehicleSpeed } from "@/hooks/useVehicleSpeed";
-import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors, Glass } from "@/constants/theme";
 
 interface CatalogProduct {
   key: string;
@@ -44,7 +44,10 @@ export default function GoLiveScreen() {
   const navigation = useNavigation<any>();
   const route = useRoute<any>();
   const queryClient = useQueryClient();
-  const rideId: string = route.params?.rideId;
+  const rideId: string | undefined = route.params?.rideId;
+  // When a go-live request is accepted by the driver the server pre-creates the
+  // stream post and passes its id here — we skip the startMutation entirely.
+  const preStartedPostId: string | undefined = route.params?.postId;
 
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
   const [micPermission, requestMicPermission] = useMicrophonePermissions();
@@ -61,6 +64,8 @@ export default function GoLiveScreen() {
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
   const [post, setPost] = useState<any>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
+  // Distinguishes first connect from a mid-stream drop for the status badge.
+  const everPublishedRef = useRef(false);
 
   // Speed-based distraction-prevention lockout (task #83)
   const { movingState } = useVehicleSpeed();
@@ -107,12 +112,23 @@ export default function GoLiveScreen() {
     };
   }, []);
 
+  // When the driver accepted a go-live request the server pre-created the
+  // stream post. Jump straight to "starting" without calling /start.
+  useEffect(() => {
+    if (preStartedPostId && phase === "preview") {
+      setPost({ id: preStartedPostId });
+      setPhase("starting");
+      queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preStartedPostId]);
+
   // ---------------------------------------------------------------------------
   // Go Live flow
   // ---------------------------------------------------------------------------
   const startMutation = useMutation({
     mutationFn: async () =>
-      apiRequest(`/api/agora/streams/${rideId}/start`, { method: "POST" }),
+      apiRequest(rideId ? `/api/agora/streams/${rideId}/start` : `/api/agora/streams/standalone/start`, { method: "POST" }),
     onSuccess: (data) => {
       setPost(data.post);
       setPhase("starting");
@@ -145,13 +161,27 @@ export default function GoLiveScreen() {
   });
   const tokens = tokenQuery.data ?? null;
 
+  // Abort a half-started stream so a failed Go Live never leaves a phantom
+  // "live" card in the feed. Fire-and-forget; the server host-grace loop is
+  // the backstop if this request itself fails.
+  const abortStartedPost = useCallback((postId?: string) => {
+    const id = postId ?? postRef.current?.id;
+    if (!id) return;
+    apiRequest(`/api/agora/streams/${id}/stop`, { method: "POST" }).catch(() => {});
+    setPost(null);
+    queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
+  }, [queryClient]);
+  const postRef = useRef<any>(null);
+  useEffect(() => { postRef.current = post; }, [post]);
+
   // If the token query errors out, bounce back to preview so we're not stuck.
   useEffect(() => {
     if (tokenQuery.isError && phase === "starting") {
       setLiveError("Couldn't get a stream token — check your connection and try again.");
       setPhase("preview");
+      abortStartedPost();
     }
-  }, [tokenQuery.isError, phase]);
+  }, [tokenQuery.isError, phase, abortStartedPost]);
 
   // Safety timeout: if still "starting" after 25s, something silently failed.
   useEffect(() => {
@@ -159,9 +189,32 @@ export default function GoLiveScreen() {
     const t = setTimeout(() => {
       setLiveError("Stream took too long to start. Please try again.");
       setPhase("preview");
+      abortStartedPost();
     }, 25000);
     return () => clearTimeout(t);
-  }, [phase]);
+  }, [phase, abortStartedPost]);
+
+  // Host heartbeat — the server's authoritative "still broadcasting" signal.
+  // Keeps the stream alive through the host-grace loop and detects the server
+  // ending the stream (ride completed, admin stop) so the UI exits cleanly.
+  useEffect(() => {
+    if (phase !== "live" || !post?.id) return;
+    let stopped = false;
+    const beat = async () => {
+      try {
+        const r = await apiRequest(`/api/agora/streams/${post.id}/heartbeat`, { method: "POST" });
+        if (!stopped && r && r.live === false) {
+          queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
+          navigation.goBack();
+        } else if (!stopped && typeof r?.viewerCount === "number") {
+          setViewerCount(r.viewerCount);
+        }
+      } catch {} // transient network errors: keep broadcasting, keep trying
+    };
+    beat();
+    const t = setInterval(beat, 15000);
+    return () => { stopped = true; clearInterval(t); };
+  }, [phase, post?.id]);
 
   // Initialize Agora and join the channel once the token arrives.
   // CameraView stays mounted throughout — expo-camera is the broadcaster's
@@ -188,6 +241,7 @@ export default function GoLiveScreen() {
       const bail = (msg: string) => {
         setLiveError(msg);
         setPhase("preview");
+        abortStartedPost();
         try { localEngine?.leaveChannel?.(); } catch {}
         try { localEngine?.release?.(); } catch {}
       };
@@ -195,19 +249,27 @@ export default function GoLiveScreen() {
         // onJoinChannelSuccess confirms the server-side connection —
         // we go LIVE immediately after calling join (same as original code),
         // and use this callback only to light up the wifi icon.
-        onJoinChannelSuccess: () => setPublishing(true),
+        onJoinChannelSuccess: () => { everPublishedRef.current = true; setPublishing(true); },
         onError: (err: number, msg: string) =>
           console.log("[GoLive] RTC error", err, msg),
         onConnectionStateChanged: (_conn: any, state: number, reason: number) => {
           console.log("[GoLive] connection state", state, "reason", reason);
-          // state 3 = RECONNECTING, state 4 = FAILED/DISCONNECTED
-          // Let the publishing indicator reflect the real connection status
-          // so the host can see when the stream drops and is recovering.
-          if (state === 3) {
-            setPublishing(false); // triggers "reconnecting" visual in header
-          } else if (state === 1 || state === 2) {
-            setPublishing(true);  // CONNECTING / CONNECTED → go-live indicator on
+          // Agora ConnectionStateType: 1 DISCONNECTED, 2 CONNECTING,
+          // 3 CONNECTED, 4 RECONNECTING, 5 FAILED.
+          if (state === 5) {
+            // Terminal failure — Agora gave up reconnecting. End honestly:
+            // stop the server post so viewers aren't stranded on a dead card.
+            setPublishing(false);
+            setLiveError("Stream connection failed. Please try again.");
+            setPhase("preview");
+            abortStartedPost();
+          } else if (state === 3) {
+            everPublishedRef.current = true;
+            setPublishing(true);  // connected → go-live indicator on
+          } else if (state === 1 || state === 4) {
+            setPublishing(false); // dropped → "reconnecting" badge
           }
+          // state 2 (CONNECTING): leave the indicator as-is until resolved
         },
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
@@ -256,6 +318,7 @@ export default function GoLiveScreen() {
       console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
       setLiveError("Failed to start stream. Please try again.");
       setPhase("preview");
+      abortStartedPost();
       try { localEngine?.release?.(); } catch {}
     }
   }, [rtc, tokens, phase, agoraAppId]);
@@ -388,6 +451,24 @@ export default function GoLiveScreen() {
       {phase === "starting" ? (
         <View style={[StyleSheet.absoluteFill, styles.startingOverlay]}>
           <ActivityIndicator color="#fff" size="large" />
+          <ThemedText style={styles.startingText}>
+            {!post?.id
+              ? "Starting your stream…"
+              : !tokens
+                ? "Securing your channel…"
+                : "Connecting…"}
+          </ThemedText>
+        </View>
+      ) : null}
+
+      {/* Reconnecting badge — visible whenever the live connection drops so
+          the host always knows the stream state (Agora auto-reconnects). */}
+      {phase === "live" && !publishing ? (
+        <View style={[styles.reconnectBadge, { top: insets.top + Spacing.md + 52 }]}>
+          <ActivityIndicator size="small" color="#fff" />
+          <ThemedText style={styles.reconnectText}>
+            {everPublishedRef.current ? "Reconnecting…" : "Connecting…"}
+          </ThemedText>
         </View>
       ) : null}
 
@@ -410,7 +491,20 @@ export default function GoLiveScreen() {
             >
               <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
             </Pressable>
-            <Pressable style={styles.roundButton} onPress={() => navigation.goBack()}>
+            <Pressable
+              style={styles.roundButton}
+              onPress={() => {
+                // Closing while live must END the stream — leaving it running
+                // would strand viewers on a frozen frame until the server
+                // grace timeout and leave a ghost "live" card in the feed.
+                if (phase === "live" && post?.id) {
+                  stopMutation.mutate();
+                } else {
+                  if (phase === "starting") abortStartedPost();
+                  navigation.goBack();
+                }
+              }}
+            >
               <Ionicons name="close" size={20} color="#fff" />
             </Pressable>
           </View>
@@ -584,9 +678,31 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: "#000" },
   center: { alignItems: "center", justifyContent: "center", gap: Spacing.md, padding: Spacing.xl },
   startingOverlay: {
-    backgroundColor: "rgba(0,0,0,0.55)",
+    backgroundColor: Glass.chip,
     alignItems: "center" as const,
     justifyContent: "center" as const,
+    gap: Spacing.md,
+  },
+  startingText: {
+    ...Typography.small,
+    color: Glass.textOnGlassDim,
+  },
+  reconnectBadge: {
+    position: "absolute",
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.xs,
+    backgroundColor: Glass.scrim,
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.xs,
+    zIndex: 20,
+    elevation: 20,
+  },
+  reconnectText: {
+    ...Typography.small,
+    color: "#fff",
   },
   liveBg: {
     backgroundColor: "#0d0d0d",
@@ -605,7 +721,7 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.6)",
   },
   permTitle: { ...Typography.h3, color: "#fff", textAlign: "center" },
-  permBody: { ...Typography.small, color: "rgba(255,255,255,0.7)", textAlign: "center" },
+  permBody: { ...Typography.small, color: Glass.textOnGlassDim, textAlign: "center" },
   primaryButton: {
     flexDirection: "row", alignItems: "center", justifyContent: "center",
     height: 46, borderRadius: BorderRadius.full, paddingHorizontal: Spacing.xl, marginTop: Spacing.md,
@@ -620,7 +736,7 @@ const styles = StyleSheet.create({
   topRight: { flexDirection: "row", alignItems: "center", gap: Spacing.sm },
   roundButton: {
     width: 40, height: 40, borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.5)", alignItems: "center", justifyContent: "center",
+    backgroundColor: Glass.chip, alignItems: "center", justifyContent: "center",
   },
   giftLayer: {
     position: "absolute", left: Spacing.lg, right: Spacing.lg,
@@ -628,7 +744,7 @@ const styles = StyleSheet.create({
   },
   preLiveOverlay: {
     position: "absolute", left: Spacing.xl, right: Spacing.xl,
-    alignItems: "center", backgroundColor: "rgba(0,0,0,0.65)",
+    alignItems: "center", backgroundColor: Glass.scrim,
     borderRadius: BorderRadius.lg, padding: Spacing.xl, gap: Spacing.sm,
     zIndex: 10, elevation: 10,
   },
@@ -637,7 +753,7 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(233,25,22,0.18)", alignItems: "center", justifyContent: "center",
   },
   preLiveTitle: { ...Typography.h3, color: "#fff", textAlign: "center" },
-  preLiveBody: { ...Typography.small, color: "rgba(255,255,255,0.75)", textAlign: "center" },
+  preLiveBody: { ...Typography.small, color: Glass.textOnGlassDim, textAlign: "center" },
   goLiveButton: {
     height: 48, borderRadius: BorderRadius.full, backgroundColor: Colors.liveRed,
     alignItems: "center", justifyContent: "center",
@@ -666,14 +782,14 @@ const styles = StyleSheet.create({
     position: "absolute", left: Spacing.lg, right: Spacing.lg,
     flexDirection: "row", alignItems: "center", justifyContent: "space-between",
     gap: Spacing.md, zIndex: 10, elevation: 10,
-    backgroundColor: "rgba(0,0,0,0.68)",
+    backgroundColor: Glass.scrim,
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.md,
     height: 52,
   },
   lockedText: {
     ...Typography.small,
-    color: "rgba(255,255,255,0.75)",
+    color: Glass.textOnGlassDim,
     flex: 1,
     textAlign: "center",
   },
@@ -689,7 +805,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: Spacing.sm,
-    backgroundColor: "rgba(0,0,0,0.78)",
+    backgroundColor: Glass.scrimHeavy,
     borderRadius: BorderRadius.full,
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,

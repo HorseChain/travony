@@ -25,6 +25,7 @@ import BookingBottomSheet, { getPopularLocationsForRegion } from "@/components/B
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { Typography, Spacing, BorderRadius, Shadows, Colors } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import { HomeScreenSkeleton } from "@/components/SkeletonLoader";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 
@@ -372,7 +373,7 @@ export default function HomeScreen() {
     return <HomeScreenSkeleton />;
   }
 
-  const showEvHubCard = !evHubDismissed && nearbyEvHub !== null && nearbyEvHub !== undefined && !activeRide;
+  const showEvHubCard = FEATURES.ev && !evHubDismissed && nearbyEvHub !== null && nearbyEvHub !== undefined && !activeRide;
   const showDestinationChips = !activeRide && !!user && destinationChips.length > 0;
 
   return (
@@ -510,7 +511,7 @@ export default function HomeScreen() {
           </View>
         ) : null}
 
-        {nextArrival ? (
+        {FEATURES.onTimeArrivals && nextArrival ? (
           <Pressable
             style={[styles.arrivalCard, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
             onPress={() => navigation.navigate("ScheduledArrivals")}
@@ -531,7 +532,7 @@ export default function HomeScreen() {
           </Pressable>
         ) : null}
 
-        {prayerSub ? (
+        {FEATURES.prayerRides && prayerSub ? (
           <View
             style={[styles.arrivalCard, { backgroundColor: theme.backgroundElevated, borderColor: theme.border }]}
           >
@@ -564,6 +565,7 @@ export default function HomeScreen() {
         ) : null}
 
         <View style={styles.quickActionsRow}>
+          {FEATURES.networkHubs ? (
           <Pressable
             style={({ pressed }) => [
               styles.networkHubsButton,
@@ -584,8 +586,9 @@ export default function HomeScreen() {
             </View>
             <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
           </Pressable>
+          ) : null}
 
-          {evModeActive && (availableEvDriverCount > 0 || evHubsWithPorts.length > 0) ? (
+          {FEATURES.ev && evModeActive && (availableEvDriverCount > 0 || evHubsWithPorts.length > 0) ? (
             <View style={[styles.evAvailableBadge, { backgroundColor: Colors.travonyGreen }]}>
               <Ionicons name={"flash" as keyof typeof Ionicons.glyphMap} size={14} color={Colors.light.textOnPrimary} />
               <ThemedText style={styles.evAvailableBadgeText}>
@@ -596,6 +599,7 @@ export default function HomeScreen() {
             </View>
           ) : null}
 
+          {FEATURES.onTimeArrivals ? (
           <Pressable
             style={({ pressed }) => [
               styles.coffeeButton,
@@ -610,7 +614,9 @@ export default function HomeScreen() {
             <Ionicons name="alarm-outline" size={18} color={Colors.travonyGreen} />
             <ThemedText style={[styles.coffeeButtonText, { color: theme.text }]}>On Time</ThemedText>
           </Pressable>
+          ) : null}
 
+          {FEATURES.prayerRides ? (
           <Pressable
             style={({ pressed }) => [
               styles.coffeeButton,
@@ -625,7 +631,9 @@ export default function HomeScreen() {
             <Ionicons name="moon-outline" size={18} color={Colors.travonyGreen} />
             <ThemedText style={[styles.coffeeButtonText, { color: theme.text }]}>Prayer</ThemedText>
           </Pressable>
+          ) : null}
 
+          {FEATURES.coffee ? (
           <Pressable
             style={({ pressed }) => [
               styles.coffeeButton,
@@ -640,6 +648,7 @@ export default function HomeScreen() {
             <Ionicons name="cafe" size={18} color={Colors.light.textOnPrimary} />
             <ThemedText style={styles.coffeeButtonText}>Coffee</ThemedText>
           </Pressable>
+          ) : null}
         </View>
       </View>
 

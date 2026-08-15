@@ -9,6 +9,7 @@ import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useQuery } from "@tanstack/react-query";
 
 import { ThemedText } from "@/components/ThemedText";
+import { EmptyState } from "@/components/StateViews";
 import { ThemedView } from "@/components/ThemedView";
 import { Card } from "@/components/Card";
 import { useTheme } from "@/hooks/useTheme";
@@ -132,17 +133,16 @@ export default function BookingsScreen() {
   );
 
   const renderEmptyState = () => (
-    <View style={styles.emptyState}>
-      <View style={[styles.emptyIcon, { backgroundColor: theme.backgroundDefault }]}>
-        <Ionicons name="map-outline" size={48} color={theme.textMuted} />
-      </View>
-      <ThemedText style={styles.emptyTitle}>No Bookings Yet</ThemedText>
-      <ThemedText style={[styles.emptySubtitle, { color: theme.textSecondary }]}>
-        {activeTab === "upcoming"
+    <EmptyState
+      icon="map-outline"
+      title="No bookings yet"
+      body={
+        activeTab === "upcoming"
           ? "Your upcoming rides will appear here"
-          : "Your past rides will appear here"}
-      </ThemedText>
-    </View>
+          : "Your past rides will appear here"
+      }
+      style={styles.emptyState}
+    />
   );
 
   return (
@@ -296,21 +296,5 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: Spacing["3xl"],
-  },
-  emptyIcon: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: Spacing["2xl"],
-  },
-  emptyTitle: {
-    ...Typography.h3,
-    marginBottom: Spacing.sm,
-  },
-  emptySubtitle: {
-    ...Typography.body,
-    textAlign: "center",
   },
 });

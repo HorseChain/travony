@@ -34,7 +34,8 @@ export const AGORA_SERVER_UID = "travony-server";
 const TOKEN_TTL_SECONDS = 60 * 60; // ~1h
 const VIEWER_POLL_MS = 4000; // presence poll cadence
 const VIEWER_PUBLISH_MIN_MS = 3000; // never publish viewer.count more often
-const HOST_GRACE_MS = 60 * 1000; // host absent from channel this long → ended
+const HOST_GRACE_MS = 90 * 1000; // host absent (no presence AND no heartbeat) this long → ended
+const VIEWER_PRESENCE_TTL_MS = 45 * 1000; // snapshot/share polls count as presence this long
 
 function agoraConfig() {
   const appId = process.env.AGORA_APP_ID || "";
@@ -76,7 +77,7 @@ async function getSessionUser(req: any) {
   return session;
 }
 
-async function getWriteUser(req: any) {
+export async function getWriteUser(req: any) {
   const session = await getSessionUser(req);
   if (!session) return null;
   const user = await storage.getUser(session.userId);
@@ -337,6 +338,60 @@ agoraRouter.post("/api/agora/web-viewer-token", async (req, res) => {
 
 const STREAMABLE_STATUSES = ["accepted", "arriving", "started", "in_progress"];
 
+// ---------------------------------------------------------------------------
+// Standalone stream start — no ride context (e.g. driver goes live via a
+// rider's go-live request that was already accepted and has a postId,
+// OR driver initiates without any active ride).
+// ---------------------------------------------------------------------------
+agoraRouter.post("/api/agora/streams/standalone/start", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    if (!agoraEnabled()) {
+      return res.status(503).json({ error: "In-app streaming is not configured yet" });
+    }
+
+    // Idempotent: return existing live standalone post if one exists
+    const [existing] = await db
+      .select()
+      .from(ridePosts)
+      .where(and(
+        eq(ridePosts.userId, user.id),
+        eq(ridePosts.type, "stream"),
+        eq(ridePosts.streamProvider, "agora"),
+        eq(ridePosts.isLive, true),
+        isNull(ridePosts.rideId),
+        isNull(ridePosts.endedAt),
+      ));
+    if (existing) {
+      hostLastSeen.set(existing.id, Date.now());
+      return res.json({ post: existing });
+    }
+
+    const [post] = await db
+      .insert(ridePosts)
+      .values({
+        rideId: null,
+        userId: user.id,
+        type: "stream",
+        streamProvider: "agora",
+        twitchChannel: (null as any),
+        cityName: null,
+        distanceKm: null,
+        isLive: true,
+        hostLastSeenAt: new Date(),
+      })
+      .returning();
+
+    hostLastSeen.set(post.id, Date.now());
+    publishStreamEvent(post.id, "stream.state", { state: "live", hostName: user.name });
+    res.json({ post });
+  } catch (error: any) {
+    console.error("[Agora] standalone stream start error:", error);
+    res.status(500).json({ error: "Could not start the stream" });
+  }
+});
+
 agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
   try {
     const user = await getWriteUser(req);
@@ -380,6 +435,7 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
         cityName: null,
         distanceKm: ride.distance ?? null,
         isLive: true,
+        hostLastSeenAt: new Date(),
       })
       .returning();
 
@@ -393,17 +449,88 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
   }
 });
 
-export async function endAgoraStream(postId: string, reason: "host_stopped" | "host_lost") {
+// ---------------------------------------------------------------------------
+// Host heartbeat — the authoritative "I'm still broadcasting" signal.
+// The broadcaster app POSTs this every ~15 s while live. It keeps the stream
+// alive even when the Agora REST presence API is unavailable (no customer
+// key/secret configured), which would otherwise make presence permanently
+// stale and end every stream at the grace timeout.
+// ---------------------------------------------------------------------------
+agoraRouter.post("/api/agora/streams/:postId/heartbeat", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const [post] = await db
+      .select({ id: ridePosts.id, userId: ridePosts.userId, type: ridePosts.type, provider: ridePosts.streamProvider, endedAt: ridePosts.endedAt })
+      .from(ridePosts)
+      .where(eq(ridePosts.id, req.params.postId));
+    if (!post || post.type !== "stream" || post.provider !== "agora") {
+      return res.status(404).json({ error: "Stream not found" });
+    }
+    if (post.userId !== user.id) return res.status(403).json({ error: "Not your stream" });
+    if (post.endedAt) return res.json({ live: false });
+    hostLastSeen.set(post.id, Date.now());
+    // Durable liveness — survives server restarts and works across replicas.
+    await db
+      .update(ridePosts)
+      .set({ hostLastSeenAt: new Date() })
+      .where(and(eq(ridePosts.id, post.id), isNull(ridePosts.endedAt)));
+    res.json({ live: true, viewerCount: getAgoraViewerCount(post.id) });
+  } catch (error: any) {
+    console.error("[Agora] heartbeat error:", error?.message || error);
+    res.status(500).json({ error: "Heartbeat failed" });
+  }
+});
+
+/** End every live Agora stream attached to a ride. Called when the ride
+ * completes or is cancelled so no ghost "live" cards outlive the trip. */
+export async function endStreamsForRide(rideId: string): Promise<void> {
+  const posts = await db
+    .select({ id: ridePosts.id })
+    .from(ridePosts)
+    .where(and(
+      eq(ridePosts.rideId, rideId),
+      eq(ridePosts.type, "stream"),
+      eq(ridePosts.streamProvider, "agora"),
+      isNull(ridePosts.endedAt),
+    ));
+  for (const p of posts) {
+    try {
+      await endAgoraStream(p.id, "host_stopped");
+    } catch (err: any) {
+      console.error(`[Agora] end stream ${p.id} for ride ${rideId} failed:`, err?.message || err);
+    }
+  }
+}
+
+export async function endAgoraStream(
+  postId: string,
+  reason: "host_stopped" | "host_lost",
+  /** For host_lost: only end if the durable heartbeat is still older than
+   * this cutoff — makes the grace decision atomic against a concurrent
+   * heartbeat (same process or another replica). */
+  notSeenSince?: Date,
+) {
+  const conditions = [eq(ridePosts.id, postId), isNull(ridePosts.endedAt)];
+  if (reason === "host_lost" && notSeenSince) {
+    conditions.push(
+      sql`(${ridePosts.hostLastSeenAt} IS NULL OR ${ridePosts.hostLastSeenAt} < ${notSeenSince})`,
+    );
+  }
   const [updated] = await db
     .update(ridePosts)
     .set({ endedAt: new Date(), isLive: false })
-    .where(and(eq(ridePosts.id, postId), isNull(ridePosts.endedAt)))
+    .where(and(...conditions))
     .returning({ id: ridePosts.id });
+  // Only clean up in-memory state when the stream actually ended — a
+  // host_lost attempt beaten by a concurrent heartbeat must not erase the
+  // fresh liveness data.
+  if (!updated) return false;
   hostLastSeen.delete(postId);
   lastViewerPublish.delete(postId);
   lastViewerCount.delete(postId);
   peakViewerCount.delete(postId);
-  if (!updated) return false;
+  viewerPresence.delete(postId);
   // Clear any active product card, then announce the end. Post-commit only.
   try {
     await db
@@ -453,13 +580,17 @@ agoraRouter.get("/api/agora/streams/:postId", async (req, res) => {
       .select()
       .from(streamProducts)
       .where(and(eq(streamProducts.postId, post.id), isNull(streamProducts.clearedAt)));
+    // Snapshot polls double as viewer presence when REST presence is off.
+    if (!post.endedAt && session.userId !== post.userId) {
+      recordViewerPresence(post.id, session.userId);
+    }
     res.json({
       id: post.id,
       isLive: !post.endedAt,
       hostId: post.userId,
       hostName: host?.name || null,
       hostAvatar: host?.avatar || null,
-      viewerCount: lastViewerCount.get(post.id) ?? 0,
+      viewerCount: getAgoraViewerCount(post.id),
       activeProduct: product
         ? {
             productId: product.id,
@@ -588,10 +719,37 @@ agoraRouter.post("/api/agora/products/:productId/tap", async (req, res) => {
 // died), the stream is marked ended.
 // ---------------------------------------------------------------------------
 
-const hostLastSeen = new Map<string, number>(); // postId -> ms epoch
+export const hostLastSeen = new Map<string, number>(); // postId -> ms epoch
 const lastViewerPublish = new Map<string, number>(); // postId -> ms epoch
 const lastViewerCount = new Map<string, number>(); // postId -> last count
 const peakViewerCount = new Map<string, number>(); // postId -> peak count
+
+// Fallback viewer presence when the Agora REST presence API is unavailable:
+// every snapshot poll (in-app viewer) or share-page poll registers the caller
+// here with a short TTL. postId -> (viewerKey -> lastSeen ms).
+const viewerPresence = new Map<string, Map<string, number>>();
+
+/** Register a viewer sighting for presence-based viewer counting. */
+export function recordViewerPresence(postId: string, viewerKey: string): void {
+  let m = viewerPresence.get(postId);
+  if (!m) {
+    m = new Map();
+    viewerPresence.set(postId, m);
+  }
+  m.set(viewerKey, Date.now());
+}
+
+/** Count distinct viewers seen within the presence TTL (prunes as it goes). */
+function presenceViewerCount(postId: string): number {
+  const m = viewerPresence.get(postId);
+  if (!m) return 0;
+  const cutoff = Date.now() - VIEWER_PRESENCE_TTL_MS;
+  for (const [k, ts] of m) {
+    if (ts < cutoff) m.delete(k);
+  }
+  if (m.size === 0) viewerPresence.delete(postId);
+  return m.size;
+}
 
 // ---------------------------------------------------------------------------
 // Hyper-local geo stream ads
@@ -718,9 +876,12 @@ async function autoUpdateStreamAd(postId: string, rideId: string): Promise<void>
   });
 }
 
-/** Last known viewer count for a live Agora stream (0 when unknown). */
+/** Last known viewer count for a live Agora stream. Uses the REST presence
+ * count when available, otherwise the snapshot-poll presence fallback. */
 export function getAgoraViewerCount(postId: string): number {
-  return lastViewerCount.get(postId) ?? 0;
+  const rest = lastViewerCount.get(postId);
+  const presence = presenceViewerCount(postId);
+  return Math.max(rest ?? 0, presence);
 }
 
 /** Peak viewer count observed for a stream since it started (0 when unknown). */
@@ -752,7 +913,13 @@ async function channelUsers(channel: string): Promise<string[] | null> {
 async function viewerLoopTick() {
   try {
     const live = await db
-      .select({ id: ridePosts.id, userId: ridePosts.userId, createdAt: ridePosts.createdAt, rideId: ridePosts.rideId })
+      .select({
+        id: ridePosts.id,
+        userId: ridePosts.userId,
+        createdAt: ridePosts.createdAt,
+        rideId: ridePosts.rideId,
+        hostLastSeenAt: ridePosts.hostLastSeenAt,
+      })
       .from(ridePosts)
       .where(and(
         eq(ridePosts.type, "stream"),
@@ -769,7 +936,11 @@ async function viewerLoopTick() {
       if (members !== null) {
         const hostPresent = members.includes(post.userId);
         if (hostPresent) hostLastSeen.set(post.id, now);
-        const count = Math.max(0, members.filter((m) => m !== post.userId).length);
+        const count = Math.max(
+          0,
+          members.filter((m) => m !== post.userId).length,
+          presenceViewerCount(post.id),
+        );
 
         const lastAt = lastViewerPublish.get(post.id) ?? 0;
         const lastCount = lastViewerCount.get(post.id);
@@ -782,14 +953,24 @@ async function viewerLoopTick() {
         }
       }
 
-      // Grace timeout: seed on first sighting so brand-new streams get the
-      // full window before presence data shows up.
-      const seen = hostLastSeen.get(post.id) ?? new Date(post.createdAt).getTime();
-      if (!hostLastSeen.has(post.id)) hostLastSeen.set(post.id, seen);
+      // Grace timeout. Liveness = freshest of (in-memory sighting, durable
+      // DB heartbeat). Brand-new streams and post-restart streams get a full
+      // window seeded from max(createdAt, loop boot) so a genuinely-live
+      // stream isn't ended before its host's next heartbeat arrives.
+      const memorySeen = hostLastSeen.get(post.id)
+        ?? Math.max(new Date(post.createdAt).getTime(), viewerLoopBootedAt);
+      if (!hostLastSeen.has(post.id)) hostLastSeen.set(post.id, memorySeen);
+      const dbSeen = post.hostLastSeenAt ? new Date(post.hostLastSeenAt).getTime() : 0;
+      const seen = Math.max(memorySeen, dbSeen);
       if (now - seen > HOST_GRACE_MS) {
-        console.log(`[Agora] host absent > grace for stream ${post.id}, marking ended`);
-        await endAgoraStream(post.id, "host_lost");
-        continue; // stream ended — skip geo-ad check
+        // Atomic: the end only lands if the durable heartbeat is still older
+        // than the cutoff — a concurrent heartbeat wins and the stream lives.
+        const cutoff = new Date(now - HOST_GRACE_MS);
+        const ended = await endAgoraStream(post.id, "host_lost", cutoff);
+        if (ended) {
+          console.log(`[Agora] host absent > grace for stream ${post.id}, marked ended`);
+          continue; // stream ended — skip geo-ad check
+        }
       }
 
       // Geo-ad auto-pin: fire-and-forget so it never blocks the viewer loop.
@@ -805,9 +986,26 @@ async function viewerLoopTick() {
 }
 
 let viewerLoopStarted = false;
+let viewerLoopBootedAt = Date.now();
 export function startAgoraViewerLoop() {
   if (viewerLoopStarted) return;
   viewerLoopStarted = true;
+  viewerLoopBootedAt = Date.now();
+  // One-time sweep: retire legacy non-Agora (Twitch-era) live rows so they
+  // can never surface as permanent unplayable "live" cards — the Agora grace
+  // loop only manages agora streams and would never end them.
+  db.update(ridePosts)
+    .set({ isLive: false, endedAt: new Date() })
+    .where(and(
+      eq(ridePosts.type, "stream"),
+      isNull(ridePosts.endedAt),
+      sql`${ridePosts.streamProvider} <> 'agora'`,
+    ))
+    .returning({ id: ridePosts.id })
+    .then((rows) => {
+      if (rows.length) console.log(`[Agora] retired ${rows.length} legacy non-agora live stream rows`);
+    })
+    .catch((err) => console.error("[Agora] legacy stream sweep failed:", err?.message || err));
   setInterval(() => {
     viewerLoopTick().catch(() => {});
   }, VIEWER_POLL_MS);

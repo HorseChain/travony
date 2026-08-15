@@ -32,6 +32,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAuthGate } from "@/hooks/useAuthGate";
 import { apiRequest } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+import { FEATURES } from "@/constants/features";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 import {
   AssistantCard,
@@ -289,14 +290,26 @@ export default function AssistantHomeScreen() {
   // Guests see a real, inviting home — tapping anything opens the login sheet.
   const guestChips = [
     { id: "guest_ride", icon: "car-outline", label: "Book a ride", message: "I need a ride" },
-    { id: "guest_coffee", icon: "cafe-outline", label: "Order coffee", message: "I'd like a coffee" },
-    { id: "guest_prayer", icon: "moon-outline", label: "Prayer ride", message: "Take me to the mosque" },
+    ...(FEATURES.coffee
+      ? [{ id: "guest_coffee", icon: "cafe-outline", label: "Order coffee", message: "I'd like a coffee" }]
+      : []),
+    ...(FEATURES.prayerRides
+      ? [{ id: "guest_prayer", icon: "moon-outline", label: "Prayer ride", message: "Take me to the mosque" }]
+      : []),
     { id: "guest_places", icon: "compass-outline", label: "Places nearby", message: "What's around me?" },
   ];
 
   const greeting = home?.greeting || "Hello";
   const subline = home?.subline || "Where to? Ask me anything.";
-  const chips = user?.id ? home?.chips || [] : guestChips;
+  // Server chips are filtered by the client feature switchboard — long-tail
+  // entry points (coffee/prayer/on-time) stay hidden while their flags are off.
+  const hiddenChipIds = [
+    ...(FEATURES.coffee ? [] : ["order_coffee"]),
+    ...(FEATURES.prayerRides ? [] : ["prayer_ride"]),
+    ...(FEATURES.onTimeArrivals ? [] : ["schedule_arrival"]),
+  ];
+  const serverChips = (home?.chips || []).filter((c) => !hiddenChipIds.includes(c.id));
+  const chips = user?.id ? serverChips : guestChips;
   const conversationStarted = messages.length > 0;
 
   return (
@@ -453,7 +466,7 @@ export default function AssistantHomeScreen() {
         >
           <TextInput
             style={[styles.input, { color: theme.text }]}
-            placeholder="Ask for a ride, coffee, anything…"
+            placeholder={FEATURES.coffee ? "Ask for a ride, coffee, anything…" : "Where to? Ask me anything…"}
             placeholderTextColor={theme.textMuted}
             value={input}
             onChangeText={setInput}

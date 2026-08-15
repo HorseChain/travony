@@ -59,7 +59,7 @@ export const users = pgTable("users", {
   preferredLanguage: text("preferred_language").default("en"),
   telegramChatId: text("telegram_chat_id"),
   whatsappOptIn: boolean("whatsapp_opt_in").default(false),
-  // Twitch channel login for ride streaming (validated against Twitch on save).
+  // Legacy column from the removed Twitch integration; unused.
   twitchChannel: text("twitch_channel"),
   // Short public bio shown on the TikTok-style profile (max 80 chars, enforced server-side).
   bio: text("bio"),
@@ -1656,18 +1656,20 @@ export type InsertUserFollow = typeof userFollows.$inferInsert;
 export const ridePostTypeEnum = pgEnum("ride_post_type", ["published", "stream"]);
 
 // A ride shared to the social feed. type="published" is an after-ride card;
-// type="stream" is a live Twitch broadcast of an in-progress ride. Privacy:
-// only server-derived, coarse fields are stored (city name, distance) — never
-// addresses or coordinates. twitchChannel is snapshotted at post time.
+// type="stream" is a live in-app (Agora) broadcast of an in-progress ride.
+// Privacy: only server-derived, coarse fields are stored (city name,
+// distance) — never addresses or coordinates.
 export const ridePosts = pgTable("ride_posts", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   rideId: varchar("ride_id").references(() => rides.id),
   userId: varchar("user_id").references(() => users.id).notNull(),
   type: ridePostTypeEnum("type").notNull(),
+  // Legacy column from the removed Twitch integration; kept for old rows,
+  // always null on new posts.
   twitchChannel: text("twitch_channel"),
-  // Which system carries the live video: "twitch" (external app broadcast,
-  // WebView viewer) or "agora" (native in-app broadcast + viewer).
-  streamProvider: text("stream_provider").default("twitch").notNull(),
+  // Live video system. "agora" (native in-app broadcast + viewer) is the only
+  // provider; historical rows may still say "twitch".
+  streamProvider: text("stream_provider").default("agora").notNull(),
   caption: text("caption"),
   // Optional rider photo attached when sharing a ride memory to the feed.
   // Stored inline as a compressed data URL (validated + size-capped server-side).
@@ -1675,6 +1677,10 @@ export const ridePosts = pgTable("ride_posts", {
   cityName: text("city_name"),
   distanceKm: decimal("distance_km", { precision: 8, scale: 2 }),
   isLive: boolean("is_live").default(false).notNull(),
+  // Durable host liveness: refreshed by the broadcaster's heartbeat and by
+  // Agora REST presence when available. The host-grace loop ends a stream
+  // only when this is stale — DB-backed so it survives restarts and replicas.
+  hostLastSeenAt: timestamp("host_last_seen_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   endedAt: timestamp("ended_at"),
 });
@@ -2113,3 +2119,28 @@ export const hrsPaymentIntents = pgTable("hrs_payment_intents", {
 
 export type HrsPaymentIntent = typeof hrsPaymentIntents.$inferSelect;
 export type InsertHrsPaymentIntent = typeof hrsPaymentIntents.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Go Live Requests — riders ask a driver to start a public stream
+// ---------------------------------------------------------------------------
+
+export const goLiveRequestStatusEnum = pgEnum("go_live_request_status", [
+  "pending", "accepted", "declined", "cancelled", "expired",
+]);
+
+export const goLiveRequests = pgTable("go_live_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  riderId: varchar("rider_id").references(() => users.id).notNull(),
+  driverUserId: varchar("driver_user_id").references(() => users.id).notNull(),
+  rideId: varchar("ride_id").references(() => rides.id),
+  postId: varchar("post_id").references(() => ridePosts.id),
+  status: goLiveRequestStatusEnum("status").default("pending").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+}, (table) => [
+  index("go_live_requests_driver_idx").on(table.driverUserId, table.status),
+  index("go_live_requests_rider_idx").on(table.riderId, table.createdAt),
+]);
+
+export type GoLiveRequest = typeof goLiveRequests.$inferSelect;
+export type InsertGoLiveRequest = typeof goLiveRequests.$inferInsert;

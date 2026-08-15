@@ -2,7 +2,7 @@ import type { Request, Response, NextFunction } from "express";
 import { db } from "./db";
 import { apiKeys } from "@shared/schema";
 import { eq, and } from "drizzle-orm";
-import { randomBytes } from "crypto";
+import { randomBytes, createHash } from "crypto";
 import { scopesSatisfy } from "./partnerApi";
 
 export interface ApiKeyPayload {
@@ -91,7 +91,6 @@ export function generateApiKey(): { key: string; prefix: string; hash: string } 
   const secret = randomBytes(24).toString("hex");
   const key = `tvny_live_${secret}`;
   const prefix = key.slice(0, 16);
-  const { createHash } = require("crypto");
   const hash = createHash("sha256").update(key).digest("hex");
   return { key, prefix, hash };
 }

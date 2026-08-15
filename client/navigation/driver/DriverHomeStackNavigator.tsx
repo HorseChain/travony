@@ -12,7 +12,7 @@ import EvDriverScreen from "@/screens/driver/EvDriverScreen";
 export type DriverHomeStackParamList = {
   DriverHome: undefined;
   DriverActiveRide: { rideId: string };
-  GoLive: { rideId: string };
+  GoLive: { rideId?: string; postId?: string };
   OpenClaw: { variant: "driver" };
   HubDetail: { hubId: string; hubName: string };
   DriverCoffeeOrders: undefined;

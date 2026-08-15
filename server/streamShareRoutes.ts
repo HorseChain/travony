@@ -14,7 +14,7 @@ import { db } from "./db";
 import { storage } from "./storage";
 import { ridePosts, drivers, users } from "@shared/schema";
 import { eq, and, isNull } from "drizzle-orm";
-import { agoraEnabled } from "./agoraStreaming";
+import { agoraEnabled, recordViewerPresence } from "./agoraStreaming";
 import { getTravonyBaseUrl } from "./telegramStreaming";
 import agoraToken from "agora-token";
 
@@ -195,6 +195,9 @@ streamShareRouter.get("/api/stream-share/:token", async (req, res) => {
     if (!post || post.endedAt) {
       return res.status(410).json({ error: "The live stream has ended" });
     }
+
+    // Count this share-page poll as viewer presence (one viewer per link).
+    recordViewerPresence(data.postId, `share:${req.params.token}`);
 
     // Driver info + last-known location (coarse — matches the rides table lat/lng)
     let driverName: string | null = null;
@@ -456,7 +459,8 @@ streamShareRouter.get("/watch/:token", (req, res) => {
     // ── UI helpers ────────────────────────────────────────────────────────────
 
     function showStatus(icon, text) {
-      stopPolling();
+      // NOTE: does not stop polling — reconnect states rely on the metadata
+      // poll to confirm whether the stream is really over. showEnded stops it.
       document.getElementById("video-container").style.display = "none";
       var s = document.getElementById("status");
       s.style.display = "flex";
@@ -474,7 +478,29 @@ streamShareRouter.get("/watch/:token", (req, res) => {
 
     function showEnded(reason) {
       stopPolling();
+      cancelReconnectGrace();
       showStatus("✅", reason || "The ride has ended — thanks for following along.");
+    }
+
+    // ── Reconnect grace ──────────────────────────────────────────────────────
+    // A brief driver network drop fires user-left/user-unpublished. Instead of
+    // declaring the stream over, show "reconnecting" and wait for the host to
+    // republish. The server's own grace loop is the authority: if the stream
+    // is really over, the metadata poll returns 410/isLive=false and we end.
+    var RECONNECT_GRACE_MS = 90000;
+    var reconnectTimer = null;
+
+    function cancelReconnectGrace() {
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    }
+
+    function enterReconnecting(message) {
+      if (reconnectTimer) return; // already waiting
+      showStatus(null, message || "Driver reconnecting… hang tight.");
+      reconnectTimer = setTimeout(function () {
+        reconnectTimer = null;
+        showEnded("The live stream has ended.");
+      }, RECONNECT_GRACE_MS);
     }
 
     // ── Driver info ───────────────────────────────────────────────────────────
@@ -515,35 +541,43 @@ streamShareRouter.get("/watch/:token", (req, res) => {
       if (viewerCountPollTimer) { clearInterval(viewerCountPollTimer); viewerCountPollTimer = null; }
     }
 
+    async function pollMetadataOnce() {
+      try {
+        var r = await fetch("/api/stream-share/" + SHARE_TOKEN);
+        if (r.status === 410 || r.status === 404) {
+          showEnded("The ride has ended.");
+          if (agoraClient) agoraClient.leave().catch(function(){});
+          return;
+        }
+        if (r.ok) {
+          var info = await r.json();
+          if (!info.isLive) { showEnded("The live stream has ended."); return; }
+          applyDriverInfo(info);
+        }
+      } catch (e) {}
+    }
+
     function startLocationPolling() {
-      locationPollTimer = setInterval(async function () {
-        try {
-          var r = await fetch("/api/stream-share/" + SHARE_TOKEN);
-          if (r.status === 410 || r.status === 404) {
-            showEnded("The ride has ended.");
-            if (agoraClient) agoraClient.leave().catch(function(){});
-            return;
-          }
-          if (r.ok) {
-            var info = await r.json();
-            if (!info.isLive) { showEnded("The live stream has ended."); return; }
-            applyDriverInfo(info);
-          }
-        } catch (e) {}
-      }, 10000);
+      if (locationPollTimer) return;
+      pollMetadataOnce();
+      locationPollTimer = setInterval(pollMetadataOnce, 10000);
+    }
+
+    async function pollViewerCountOnce(postId) {
+      try {
+        var r = await fetch("/api/tg-viewer-count?postId=" + encodeURIComponent(postId));
+        if (r.ok) {
+          var d = await r.json();
+          var el = document.getElementById("viewer-count");
+          if (el) el.textContent = d.count;
+        }
+      } catch (e) {}
     }
 
     function startViewerCountPolling(postId) {
-      viewerCountPollTimer = setInterval(async function () {
-        try {
-          var r = await fetch("/api/tg-viewer-count?postId=" + encodeURIComponent(postId));
-          if (r.ok) {
-            var d = await r.json();
-            var el = document.getElementById("viewer-count");
-            if (el) el.textContent = d.count;
-          }
-        } catch (e) {}
-      }, 12000);
+      if (viewerCountPollTimer) return;
+      pollViewerCountOnce(postId);
+      viewerCountPollTimer = setInterval(function () { pollViewerCountOnce(postId); }, 12000);
     }
 
     // ── Main ──────────────────────────────────────────────────────────────────
@@ -594,23 +628,39 @@ streamShareRouter.get("/watch/:token", (req, res) => {
       agoraClient.on("user-published", async function(user, mediaType) {
         await agoraClient.subscribe(user, mediaType);
         if (mediaType === "video") {
+          cancelReconnectGrace(); // host is back (or here for the first time)
           showVideo();
           user.videoTrack.play("remote-video");
-          startLocationPolling();
-          startViewerCountPolling(info.postId);
         }
         if (mediaType === "audio") {
           user.audioTrack && user.audioTrack.play();
         }
       });
 
+      // A dropped connection on the driver's side fires these. Wait through
+      // the grace window instead of ending — the host auto-republishes on
+      // reconnect and user-published above restores the video.
       agoraClient.on("user-unpublished", function(_user, mediaType) {
-        if (mediaType === "video") showEnded("The driver has stopped streaming.");
+        if (mediaType === "video") enterReconnecting("Driver reconnecting… hang tight.");
       });
 
       agoraClient.on("user-left", function() {
-        showEnded("The driver has left the stream.");
+        enterReconnecting("Driver reconnecting… hang tight.");
       });
+
+      // The viewer's own network can also drop; Agora reconnects internally.
+      agoraClient.on("connection-state-change", function(cur, _prev, reason) {
+        if (cur === "RECONNECTING") {
+          enterReconnecting("Connection lost — reconnecting…");
+        } else if (cur === "CONNECTED") {
+          cancelReconnectGrace();
+        }
+      });
+
+      // Poll ride metadata + viewer count from the start (not only once video
+      // plays) so an ended ride or expired link is reflected promptly.
+      startLocationPolling();
+      startViewerCountPolling(info.postId);
 
       try {
         await agoraClient.join(tokenData.appId, tokenData.channel, tokenData.rtcToken, tokenData.uid);

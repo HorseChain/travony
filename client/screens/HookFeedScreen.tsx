@@ -39,13 +39,14 @@ import Animated, {
   useAnimatedStyle,
   withTiming,
   withRepeat,
+  withSequence,
   FadeIn,
   FadeInDown,
 } from "react-native-reanimated";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
 import { BlurView } from "expo-blur";
 import * as Location from "expo-location";
 
@@ -96,7 +97,7 @@ interface DiscoveryDriver {
   currencySymbol: string;
   isLive: boolean;
   postId: string | null;
-  streamProvider: "agora" | "twitch" | null;
+  streamProvider: "agora" | null;
   approxLat: number | null;
   approxLng: number | null;
 }
@@ -743,6 +744,98 @@ const reviewStyles = StyleSheet.create({
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// GoLiveButton — animated pulsing broadcast button for the action panel
+// ---------------------------------------------------------------------------
+
+function GoLiveButton({
+  onPress,
+  isWaiting,
+  countdown,
+}: {
+  onPress?: () => void;
+  isWaiting: boolean;
+  countdown?: number;
+}) {
+  const pulseScale = useSharedValue(1);
+  const pulseOpacity = useSharedValue(0.55);
+  const btnScale = useSharedValue(1);
+
+  useEffect(() => {
+    if (!isWaiting) {
+      // Outer ring pulses outward and fades — classic live-broadcast halo
+      pulseScale.value = withRepeat(
+        withSequence(withTiming(2.2, { duration: 900 }), withTiming(1, { duration: 0 })),
+        -1,
+        false,
+      );
+      pulseOpacity.value = withRepeat(
+        withSequence(withTiming(0, { duration: 900 }), withTiming(0.55, { duration: 0 })),
+        -1,
+        false,
+      );
+    } else {
+      pulseScale.value = withTiming(1, { duration: 250 });
+      pulseOpacity.value = withTiming(0, { duration: 250 });
+    }
+  }, [isWaiting]);
+
+  const ringStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }],
+    opacity: pulseOpacity.value,
+  }));
+
+  const btnStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: btnScale.value }],
+  }));
+
+  const handlePressIn = () => {
+    btnScale.value = withTiming(0.88, { duration: 100 });
+  };
+  const handlePressOut = () => {
+    btnScale.value = withSequence(withTiming(1.08, { duration: 100 }), withTiming(1, { duration: 100 }));
+  };
+
+  return (
+    <Pressable
+      onPress={isWaiting ? undefined : onPress}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
+      style={panelStyles.btn}
+      hitSlop={8}
+    >
+      <View style={panelStyles.goLiveWrap}>
+        {/* Pulsing halo ring — only when not waiting */}
+        {!isWaiting && (
+          <Animated.View style={[panelStyles.goLivePulse, ringStyle]} />
+        )}
+        {/* Core button */}
+        <Animated.View
+          style={[
+            panelStyles.goLiveCircle,
+            isWaiting && panelStyles.goLiveCircleWaiting,
+            btnStyle,
+          ]}
+        >
+          {isWaiting ? (
+            <ActivityIndicator size="small" color="rgba(255,255,255,0.85)" />
+          ) : (
+            <Ionicons name="radio" size={19} color="#fff" />
+          )}
+        </Animated.View>
+      </View>
+      {isWaiting && countdown !== undefined ? (
+        <Text style={panelStyles.goLiveCountdownLbl}>{countdown}s</Text>
+      ) : (
+        <Text style={[panelStyles.btnLbl, isWaiting && { color: "rgba(255,255,255,0.45)" }]}>
+          {isWaiting ? "Waiting…" : "Go Live"}
+        </Text>
+      )}
+    </Pressable>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // DiscoveryActionPanel — right-side vertical action stack
 // ---------------------------------------------------------------------------
 
@@ -754,6 +847,9 @@ function DiscoveryActionPanel({
   onReviews,
   onShare,
   onDriverProfile,
+  onGoLive,
+  goLiveState,
+  goLiveCountdown,
 }: {
   driver: DiscoveryDriver;
   bottom: number;
@@ -762,8 +858,12 @@ function DiscoveryActionPanel({
   onReviews: () => void;
   onShare: () => void;
   onDriverProfile: () => void;
+  onGoLive?: () => void;
+  goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
+  goLiveCountdown?: number;
 }) {
   const rating = driver.rating ? parseFloat(driver.rating) : null;
+  const isWaiting = goLiveState === "waiting";
 
   return (
     <View style={[panelStyles.container, { bottom }]}>
@@ -773,7 +873,7 @@ function DiscoveryActionPanel({
         <View style={panelStyles.onlineDot} />
       </Pressable>
 
-      {/* Book — navigates to assistant/booking flow */}
+      {/* Book */}
       <Pressable onPress={onBook} style={panelStyles.btn} hitSlop={8}>
         <View style={panelStyles.bookCircle}>
           <Ionicons name="add" size={22} color="#fff" />
@@ -781,7 +881,7 @@ function DiscoveryActionPanel({
         <Text style={panelStyles.btnLbl}>Book</Text>
       </Pressable>
 
-      {/* Accolades — star rating chip */}
+      {/* Stars */}
       <Pressable onPress={onAccolades} style={panelStyles.btn} hitSlop={8}>
         <View style={panelStyles.ratingWrap}>
           <Ionicons name="star" size={18} color="#FFD700" />
@@ -794,23 +894,22 @@ function DiscoveryActionPanel({
 
       {/* Reviews */}
       <Pressable onPress={onReviews} style={panelStyles.btn} hitSlop={8}>
-        <Ionicons
-          name="chatbubble-outline"
-          size={28}
-          color="#fff"
-          style={panelStyles.iconShadow}
-        />
+        <Ionicons name="chatbubble-outline" size={28} color="#fff" style={panelStyles.iconShadow} />
         <Text style={panelStyles.btnLbl}>Reviews</Text>
       </Pressable>
 
+      {/* Go Live — animated broadcast request button */}
+      {onGoLive !== undefined ? (
+        <GoLiveButton
+          onPress={onGoLive}
+          isWaiting={isWaiting}
+          countdown={isWaiting ? goLiveCountdown : undefined}
+        />
+      ) : null}
+
       {/* Share */}
       <Pressable onPress={onShare} style={panelStyles.btn} hitSlop={8}>
-        <Ionicons
-          name="share-outline"
-          size={28}
-          color="#fff"
-          style={panelStyles.iconShadow}
-        />
+        <Ionicons name="share-outline" size={28} color="#fff" style={panelStyles.iconShadow} />
         <Text style={panelStyles.btnLbl}>Share</Text>
       </Pressable>
     </View>
@@ -875,6 +974,46 @@ const panelStyles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 4,
   } as any,
+  // Go Live button
+  goLiveWrap: {
+    width: 48,
+    height: 48,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  goLivePulse: {
+    position: "absolute",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.liveRed,
+  },
+  goLiveCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: Colors.liveRed,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: Colors.liveRed,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  goLiveCircleWaiting: {
+    backgroundColor: "rgba(210,30,30,0.45)",
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  goLiveCountdownLbl: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "rgba(255,255,255,0.55)",
+    textShadowColor: "rgba(0,0,0,0.8)",
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -948,6 +1087,9 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
   onBook,
   onShare,
   onDriverProfile,
+  onGoLive,
+  goLiveState,
+  goLiveCountdown,
 }: {
   driver: DiscoveryDriver;
   isFocused: boolean;
@@ -958,6 +1100,9 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
   onBook: (d: DiscoveryDriver) => void;
   onShare: (d: DiscoveryDriver) => void;
   onDriverProfile: (d: DiscoveryDriver) => void;
+  onGoLive?: (d: DiscoveryDriver) => void;
+  goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
+  goLiveCountdown?: number;
 }) {
   const [mapExpanded, setMapExpanded] = useState(false);
 
@@ -1008,9 +1153,6 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
           <Text style={cardStyles.liveText}>LIVE</Text>
           {driver.streamProvider === "agora" && (
             <Text style={cardStyles.liveSub}> · In-app</Text>
-          )}
-          {driver.streamProvider === "twitch" && (
-            <Text style={cardStyles.liveSub}> · Twitch</Text>
           )}
         </Animated.View>
       ) : null}
@@ -1075,6 +1217,9 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
         onReviews={() => onReviews(driver)}
         onShare={() => onShare(driver)}
         onDriverProfile={() => onDriverProfile(driver)}
+        onGoLive={onGoLive ? () => onGoLive(driver) : undefined}
+        goLiveState={goLiveState}
+        goLiveCountdown={goLiveCountdown}
       />
 
       {/* ── Map expand modal ── */}
@@ -1257,6 +1402,104 @@ export default function HookFeedScreen() {
     }
   }, [currentIndex, drivers, qc, nativeOk]);
 
+  // ── Go Live Request state ─────────────────────────────────────────────────
+  const [goLiveReqId, setGoLiveReqId] = useState<string | null>(null);
+  const [goLiveDriverUserId, setGoLiveDriverUserId] = useState<string | null>(null);
+  const [goLiveStatus, setGoLiveStatus] = useState<
+    "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled"
+  >("idle");
+  const [goLiveCountdown, setGoLiveCountdown] = useState(30);
+  const [goLiveToast, setGoLiveToast] = useState<string | null>(null);
+  const goLiveCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const resetGoLiveState = useCallback(() => {
+    setGoLiveStatus("idle");
+    setGoLiveReqId(null);
+    setGoLiveDriverUserId(null);
+    setGoLiveCountdown(30);
+    if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+  }, []);
+
+  const sendGoLiveMutation = useMutation({
+    mutationFn: async ({ driverUserId }: { driverUserId: string }) =>
+      apiRequest("/api/go-live-requests", {
+        method: "POST",
+        body: JSON.stringify({ driverUserId }),
+        headers: { "Content-Type": "application/json" },
+      }),
+    onSuccess: (data: any) => {
+      setGoLiveReqId(data.request.id);
+      setGoLiveStatus("waiting");
+      setGoLiveCountdown(30);
+    },
+    onError: () => resetGoLiveState(),
+  });
+
+  const cancelGoLiveMutation = useMutation({
+    mutationFn: async (reqId: string) =>
+      apiRequest(`/api/go-live-requests/${reqId}/cancel`, { method: "PATCH" }),
+    onSettled: () => resetGoLiveState(),
+  });
+
+  // Poll for request status while waiting
+  const { data: goLiveStatusData } = useQuery<{ request: { status: string; postId: string | null } }>({
+    queryKey: ["/api/go-live-requests", goLiveReqId],
+    queryFn: () => apiRequest(`/api/go-live-requests/${goLiveReqId}`),
+    enabled: !!goLiveReqId && goLiveStatus === "waiting",
+    refetchInterval: 3000,
+  });
+
+  useEffect(() => {
+    if (!goLiveStatusData?.request) return;
+    const { status, postId } = goLiveStatusData.request;
+    if (status === "accepted" && postId) {
+      setGoLiveStatus("accepted");
+      resetGoLiveState();
+      // Open the live stream in the Social tab's AgoraStreamViewer
+      const parent = navigation.getParent<any>();
+      parent?.navigate("SocialTab", { screen: "AgoraStreamViewer", params: { postId } });
+    } else if (status === "declined") {
+      setGoLiveToast("Driver declined the request");
+      resetGoLiveState();
+      setTimeout(() => setGoLiveToast(null), 3000);
+    } else if (status === "expired" || status === "cancelled") {
+      resetGoLiveState();
+    }
+  }, [goLiveStatusData]);
+
+  // 30-second client-side countdown while waiting
+  useEffect(() => {
+    if (goLiveStatus !== "waiting") {
+      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+      return;
+    }
+    setGoLiveCountdown(30);
+    if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+    const capturedReqId = goLiveReqId;
+    goLiveCountdownRef.current = setInterval(() => {
+      setGoLiveCountdown((s) => {
+        if (s <= 1) {
+          clearInterval(goLiveCountdownRef.current!);
+          if (capturedReqId) cancelGoLiveMutation.mutate(capturedReqId);
+          return 0;
+        }
+        return s - 1;
+      });
+    }, 1000);
+    return () => { if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [goLiveStatus]);
+
+  const handleGoLive = useCallback(
+    (driver: DiscoveryDriver) => {
+      if (!isAuthenticated) { openLoginSheet(); return; }
+      if (goLiveStatus === "waiting") return;
+      setGoLiveDriverUserId(driver.userId);
+      sendGoLiveMutation.mutate({ driverUserId: driver.userId });
+    },
+    [isAuthenticated, openLoginSheet, goLiveStatus, sendGoLiveMutation],
+  );
+
   // ── Overlay state ─────────────────────────────────────────────────────────
   const [accoladesDriver, setAccoladesDriver] = useState<DiscoveryDriver | null>(null);
   const [reviewsDriver, setReviewsDriver] = useState<DiscoveryDriver | null>(null);
@@ -1295,20 +1538,27 @@ export default function HookFeedScreen() {
 
   // ── FlatList render helpers ───────────────────────────────────────────────
   const renderItem = useCallback(
-    ({ item, index }: { item: DiscoveryDriver; index: number }) => (
-      <DriverDiscoveryCard
-        driver={item}
-        isFocused={index === currentIndex}
-        cardBottomInset={cardBottomInset}
-        isAuthenticated={isAuthenticated}
-        onAccolades={setAccoladesDriver}
-        onReviews={setReviewsDriver}
-        onBook={handleBook}
-        onShare={handleShare}
-        onDriverProfile={handleDriverProfile}
-      />
-    ),
-    [currentIndex, cardBottomInset, isAuthenticated, handleBook, handleShare, handleDriverProfile],
+    ({ item, index }: { item: DiscoveryDriver; index: number }) => {
+      const isThisDriver = goLiveDriverUserId === item.userId;
+      return (
+        <DriverDiscoveryCard
+          driver={item}
+          isFocused={index === currentIndex}
+          cardBottomInset={cardBottomInset}
+          isAuthenticated={isAuthenticated}
+          onAccolades={setAccoladesDriver}
+          onReviews={setReviewsDriver}
+          onBook={handleBook}
+          onShare={handleShare}
+          onDriverProfile={handleDriverProfile}
+          onGoLive={handleGoLive}
+          goLiveState={isThisDriver ? goLiveStatus : "idle"}
+          goLiveCountdown={isThisDriver ? goLiveCountdown : undefined}
+        />
+      );
+    },
+    [currentIndex, cardBottomInset, isAuthenticated, handleBook, handleShare, handleDriverProfile,
+     handleGoLive, goLiveDriverUserId, goLiveStatus, goLiveCountdown],
   );
 
   const getItemLayout = useCallback(
@@ -1354,6 +1604,32 @@ export default function HookFeedScreen() {
         isAuthenticated={isAuthenticated}
       />
 
+      {/* Persistent booking entry — booking is always one obvious tap away */}
+      <Pressable
+        onPress={() => {
+          if (!isAuthenticated) { openLoginSheet(); return; }
+          navigation.navigate("AssistantHome");
+        }}
+        style={{
+          position: "absolute",
+          bottom: cardBottomInset + 12,
+          alignSelf: "center",
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 8,
+          backgroundColor: "rgba(20,20,20,0.85)",
+          borderWidth: 1,
+          borderColor: "rgba(255,255,255,0.18)",
+          borderRadius: 24,
+          paddingHorizontal: 20,
+          paddingVertical: 10,
+        }}
+        hitSlop={8}
+      >
+        <Ionicons name="navigate" size={16} color="#fff" />
+        <Text style={{ color: "#fff", fontSize: 14, fontWeight: "700" }}>Book a ride</Text>
+      </Pressable>
+
       {/* Loading spinner while initial fetch is in-flight */}
       {isLoading ? (
         <View
@@ -1384,6 +1660,30 @@ export default function HookFeedScreen() {
           onClose={() => setReviewsDriver(null)}
           isAuthenticated={isAuthenticated}
         />
+      ) : null}
+
+      {/* Go Live toast — declined / error */}
+      {goLiveToast ? (
+        <Animated.View
+          entering={FadeInDown.duration(260)}
+          style={{
+            position: "absolute",
+            bottom: cardBottomInset + 20,
+            alignSelf: "center",
+            backgroundColor: "rgba(20,20,20,0.92)",
+            borderRadius: 24,
+            paddingHorizontal: 20,
+            paddingVertical: 10,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+            borderWidth: 1,
+            borderColor: "rgba(255,255,255,0.1)",
+          }}
+        >
+          <Ionicons name="close-circle" size={16} color="rgba(255,80,80,0.9)" />
+          <Text style={{ color: "#fff", fontSize: 13, fontWeight: "600" }}>{goLiveToast}</Text>
+        </Animated.View>
       ) : null}
     </View>
   );

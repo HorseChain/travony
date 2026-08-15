@@ -37,7 +37,7 @@ function getClient(): twilio.Twilio | null {
 
 // ============ TWILIO VERIFY API (Production OTP - works globally) ============
 
-export async function sendVerifyOtp(to: string): Promise<{ success: boolean; error?: string; channel?: string }> {
+export async function sendVerifyOtp(to: string): Promise<{ success: boolean; error?: string; channel?: string; geoBlocked?: boolean }> {
   const twilioClient = getClient();
   const verifyServiceSid = getVerifyServiceSid();
   
@@ -65,7 +65,13 @@ export async function sendVerifyOtp(to: string): Promise<{ success: boolean; err
     return { success: true, channel: 'verify' };
   } catch (error: any) {
     console.error('Twilio Verify error:', error.message, 'Code:', error.code);
-    return { success: false, error: error.message };
+    // Detect geo-restriction / OFAC-sanctioned country (e.g. Syria +963)
+    const geoBlocked =
+      error.code === 21408 || error.code === 60410 || error.code === 30034 ||
+      String(error.message).toLowerCase().includes('geo_permission') ||
+      String(error.message).toLowerCase().includes('not supported') ||
+      String(error.message).toLowerCase().includes('permission to send');
+    return { success: false, error: error.message, geoBlocked };
   }
 }
 
@@ -139,13 +145,30 @@ export async function sendOtpWhatsApp(to: string, otp: string): Promise<{ succes
   }
 }
 
+// OFAC-sanctioned country dial codes — Twilio may accept these without throwing an
+// error (queues the message) but then silently fails delivery. Pre-check avoids
+// sending a code that will never arrive and lets us show the user a clear message.
+const OFAC_PREFIXES = [
+  '+963',  // Syria
+  '+98',   // Iran
+  '+850',  // North Korea
+  '+53',   // Cuba
+  '+7940', // Crimea (Ukrainian territory under Russian occupation)
+];
+
+export function isOFACBlocked(phone: string): boolean {
+  const cleaned = phone.trim().replace(/\s+/g, '');
+  const e164 = cleaned.startsWith('+') ? cleaned : '+' + cleaned;
+  return OFAC_PREFIXES.some((prefix) => e164.startsWith(prefix));
+}
+
 // Check if phone number is from India
 function isIndianNumber(phone: string): boolean {
   const cleaned = phone.replace(/\s+/g, '').replace(/^0+/, '');
   return cleaned.startsWith('+91') || cleaned.startsWith('91');
 }
 
-export async function sendOtpSms(to: string, otp: string): Promise<{ success: boolean; error?: string }> {
+export async function sendOtpSms(to: string, otp: string): Promise<{ success: boolean; error?: string; geoBlocked?: boolean }> {
   const twilioClient = getClient();
   const messagingServiceSid = getMessagingServiceSid();
   const fromNumber = getFromNumber();
@@ -223,7 +246,13 @@ export async function sendOtpSms(to: string, otp: string): Promise<{ success: bo
       }
     }
     
-    return { success: false, error: error.message };
+    // Detect geo-restriction errors (e.g. Syria +963, Iran +98, OFAC-sanctioned countries)
+    const geoBlocked =
+      error.code === 21408 || error.code === 21215 || error.code === 30034 ||
+      String(error.message).toLowerCase().includes('geo_permission') ||
+      String(error.message).toLowerCase().includes('permission to send') ||
+      String(error.message).toLowerCase().includes('not supported for this region');
+    return { success: false, error: error.message, geoBlocked };
   }
 }
 
@@ -260,7 +289,7 @@ export async function sendSmsMessage(to: string, body: string): Promise<{ succes
   }
 }
 
-export async function sendOtp(to: string, otp: string, preferWhatsApp: boolean = true): Promise<{ success: boolean; error?: string; channel?: string }> {
+export async function sendOtp(to: string, otp: string, preferWhatsApp: boolean = true): Promise<{ success: boolean; error?: string; channel?: string; geoBlocked?: boolean }> {
   const isIndia = isIndianNumber(to);
   const whatsappNumber = getWhatsappNumber();
   
