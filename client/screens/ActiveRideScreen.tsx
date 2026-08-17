@@ -27,6 +27,7 @@ import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
 import { GoLiveInAppButton, ShareLiveButton } from "@/components/RideSocial";
+import { SafetyBookmarkButton } from "@/components/SafetyBookmarkButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
@@ -722,6 +723,9 @@ export default function ActiveRideScreen() {
       </View>
 
       <View style={[styles.sideButtons, { bottom: (sheetHeight || tabBarHeight + 260) + Spacing.lg }]}>
+        {rideId && ["accepted", "arriving", "started", "in_progress"].includes(ride?.status ?? "") ? (
+          <SafetyBookmarkButton rideId={rideId} compact />
+        ) : null}
         <Pressable
           style={[styles.shareButton, { backgroundColor: theme.primary }]}
           onPress={handleShareRide}
@@ -1007,25 +1011,28 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   statusTitle: {
-    ...Typography.h4,
+    ...Typography.h4Heavy,
+    letterSpacing: -0.3,
   },
   statusSubtitle: {
     ...Typography.bodyMedium,
-    marginTop: Spacing.xs,
+    marginTop: 2,
   },
   etaBadge: {
     flexDirection: "row",
     alignItems: "center",
     alignSelf: "flex-start",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.xs,
+    paddingHorizontal: Spacing.md + 2,
+    paddingVertical: 6,
     borderRadius: BorderRadius.full,
     marginTop: Spacing.md,
     gap: Spacing.xs,
+    ...Shadows.card,
   },
   etaBadgeText: {
-    ...Typography.smallBold,
+    ...Typography.smallHeavy,
     color: Colors.light.textOnPrimary,
+    letterSpacing: 0.2,
   },
   fareLockBadge: {
     flexDirection: "row",
@@ -1079,22 +1086,25 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: Spacing.lg,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
     ...Shadows.card,
   },
   driverAvatar: {
-    width: 52,
-    height: 52,
-    borderRadius: 26,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: "center",
     justifyContent: "center",
+    borderWidth: 2,
+    borderColor: Colors.travonyGreen + "35",
   },
   driverInfo: {
     flex: 1,
     marginLeft: Spacing.md,
   },
   driverName: {
-    ...Typography.h4,
+    ...Typography.h4Heavy,
+    letterSpacing: -0.3,
   },
   driverDetails: {
     flexDirection: "row",
@@ -1195,10 +1205,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    borderTopLeftRadius: BorderRadius.lg,
-    borderTopRightRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.lg,
-    paddingTop: Spacing.lg,
+    borderTopLeftRadius: BorderRadius.xl,
+    borderTopRightRadius: BorderRadius.xl,
+    paddingHorizontal: Spacing.xl,
+    paddingTop: Spacing.xl,
     ...Shadows.bottomSheet,
   },
   rideDetails: {
@@ -1249,11 +1259,12 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xs,
   },
   fareValue: {
-    ...Typography.h3,
+    ...Typography.xlHeavy,
+    letterSpacing: -0.4,
   },
   otpValue: {
-    ...Typography.h3Heavy,
-    letterSpacing: 2,
+    ...Typography.xlHeavy,
+    letterSpacing: 4,
   },
   otpHint: {
     ...Typography.caption,
@@ -1287,8 +1298,8 @@ const styles = StyleSheet.create({
   },
   cancelButton: {
     height: Spacing.buttonHeight,
-    borderRadius: BorderRadius.sm,
-    borderWidth: 2,
+    borderRadius: BorderRadius.full,
+    borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -1321,7 +1332,7 @@ const styles = StyleSheet.create({
   poolBtnOutline: {
     flex: 1,
     height: Spacing.buttonHeight,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -1332,7 +1343,7 @@ const styles = StyleSheet.create({
   poolBtnFilled: {
     flex: 1,
     height: Spacing.buttonHeight,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.full,
     alignItems: "center",
     justifyContent: "center",
   },

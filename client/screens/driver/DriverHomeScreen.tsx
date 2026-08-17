@@ -81,7 +81,7 @@ interface Hub {
 }
 
 interface GoHereRecommendation {
-  kind: "hub" | "hotspot" | "zone";
+  kind: "hub" | "hotspot" | "zone" | "forecast";
   hubId: string | null;
   title: string;
   lat: number;
@@ -101,10 +101,27 @@ interface GoHereResponse {
   emptyReason?: string;
 }
 
+interface ForecastZone {
+  zoneId: string;
+  lat: number;
+  lng: number;
+  distanceKm: number;
+  etaMinutes: number;
+  reason: string;
+  confidence: number;
+  expectedRidesPerHour: number;
+  weeksSpan: number;
+}
+
+interface ForecastResponse {
+  zones: ForecastZone[];
+}
+
 function goHereIconName(kind: GoHereRecommendation["kind"]): keyof typeof Ionicons.glyphMap {
   switch (kind) {
     case "hotspot": return "flame";
     case "zone": return "trending-up";
+    case "forecast": return "sparkles";
     default: return "location";
   }
 }
@@ -356,6 +373,28 @@ function CountdownRing({ seconds, total, onGreenBg = false }: { seconds: number;
       ) : null}
     </View>
   );
+}
+
+function PulsingDot() {
+  const dotScale = useSharedValue(1);
+  const dotOpacity = useSharedValue(1);
+  useEffect(() => {
+    dotScale.value = withRepeat(
+      withSequence(withTiming(1.4, { duration: 700 }), withTiming(1, { duration: 700 })),
+      -1,
+      false
+    );
+    dotOpacity.value = withRepeat(
+      withSequence(withTiming(0.4, { duration: 700 }), withTiming(1, { duration: 700 })),
+      -1,
+      false
+    );
+  }, []);
+  const dotStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: dotScale.value }],
+    opacity: dotOpacity.value,
+  }));
+  return <Animated.View style={[styles.searchingDot, dotStyle]} />;
 }
 
 function AnimatedToggle({
@@ -669,6 +708,25 @@ export default function DriverHomeScreen() {
   const goHere = goHereData?.recommendation ?? null;
   const goHereKey = goHere ? `${goHere.kind}:${goHere.lat.toFixed(4)},${goHere.lng.toFixed(4)}` : null;
   const showGoHere = !!goHere && !incomingRequest && dismissedGoHereKey !== goHereKey;
+
+  // City Brain forecast — top demand zones near the driver, deterministic and
+  // honest (real ride history). Rounded coords in the key refetch as the driver
+  // moves; polled gently since demand shifts slowly. Only fetched while online
+  // and idle. Rendered nothing when there's no signal.
+  const { data: forecastData } = useQuery<ForecastResponse>({
+    queryKey: ["/api/driver/forecast", goHereLatKey, goHereLngKey],
+    queryFn: async () => {
+      if (!currentLocation) return { zones: [] };
+      return apiRequest(
+        `/api/driver/forecast?lat=${currentLocation.lat}&lng=${currentLocation.lng}`,
+      );
+    },
+    enabled: !!user && isOnline && !!currentLocation && !incomingRequest,
+    refetchInterval: litePollMs(60000, liteMode),
+  });
+
+  const forecastZones = forecastData?.zones ?? [];
+  const topForecast = forecastZones[0] ?? null;
 
   // Poll for rider go-live requests while online and no ride request is showing
   const { data: goLiveIncomingData } = useQuery<{
@@ -1246,7 +1304,16 @@ export default function DriverHomeScreen() {
       )}
 
       <View style={[styles.statusBar, { top: insets.top + Spacing.md }]}>
-        <View style={[styles.statusCard, { backgroundColor: theme.backgroundRoot }]}>
+        <View
+          style={[
+            styles.statusCard,
+            {
+              backgroundColor: theme.backgroundRoot,
+              borderWidth: 1,
+              borderColor: isOnline ? Colors.travonyGreen + "55" : theme.border,
+            },
+          ]}
+        >
           <View style={styles.statusContent}>
             <View style={{ flex: 1 }}>
               <View style={styles.earningsRow}>
@@ -1293,6 +1360,39 @@ export default function DriverHomeScreen() {
             </ThemedText>
           </View>
         ) : null}
+
+        {/* City Brain — where demand is heading near an idle online driver.
+            Deterministic reason lines from real ride history; renders nothing
+            when there's no signal (no empty card). */}
+        {isOnline && !incomingRequest && topForecast ? (
+          <View
+            style={[
+              styles.cityBrainCard,
+              { backgroundColor: theme.backgroundRoot, borderColor: Colors.travonyGreen + "40" },
+            ]}
+          >
+            <View style={styles.cityBrainHeader}>
+              <Ionicons name="sparkles" size={14} color={Colors.travonyGreen} />
+              <ThemedText style={[styles.cityBrainLabel, { color: Colors.travonyGreen }]}>
+                City Brain
+              </ThemedText>
+            </View>
+            <ThemedText style={[styles.cityBrainReason, { color: theme.textPrimary }]} numberOfLines={2}>
+              {topForecast.reason}
+            </ThemedText>
+            <ThemedText style={[styles.cityBrainHint, { color: theme.textMuted }]}>
+              Based on {topForecast.weeksSpan} week{topForecast.weeksSpan !== 1 ? "s" : ""} of rides
+            </ThemedText>
+            {forecastZones.slice(1, 3).map((z) => (
+              <View key={z.zoneId} style={styles.cityBrainRow}>
+                <Ionicons name="location-outline" size={12} color={theme.textMuted} />
+                <ThemedText style={[styles.cityBrainRowText, { color: theme.textSecondary }]} numberOfLines={1}>
+                  {z.reason}
+                </ThemedText>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <View style={[styles.quickActionsRow, { top: insets.top + Spacing.md + 106 }]}>
@@ -1306,7 +1406,15 @@ export default function DriverHomeScreen() {
                   </View>
                   <View style={{ flex: 1 }}>
                     <ThemedText style={[styles.goHereLabel, { color: theme.textMuted }]}>
-                      Go here next
+                      {goHere.kind === "forecast"
+                        ? `Go here next · Forecast${
+                            goHere.confidence >= 0.65
+                              ? " · high confidence"
+                              : goHere.confidence >= 0.4
+                                ? " · medium confidence"
+                                : " · early signal"
+                          }`
+                        : "Go here next"}
                     </ThemedText>
                     <ThemedText style={styles.hubCardTitle} numberOfLines={1}>
                       {goHere.title}
@@ -1422,7 +1530,7 @@ export default function DriverHomeScreen() {
             </Pressable>
           ) : null}
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
-            <View style={styles.searchingDot} />
+            <PulsingDot />
             <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
           </View>
         </View>
@@ -1451,6 +1559,7 @@ export default function DriverHomeScreen() {
 
       {incomingRequest ? (
         <View style={[styles.requestCard, { bottom: tabBarHeight + Spacing.lg, backgroundColor: theme.backgroundRoot }]}>
+          <View style={styles.requestAccent} />
           <View style={styles.requestHeader}>
             <View style={styles.requestTitleRow}>
               <ThemedText style={styles.requestTitle}>New Route Request</ThemedText>
@@ -1918,7 +2027,9 @@ const styles = StyleSheet.create({
     ...Typography.captionBold,
   },
   statusLabel: {
-    ...Typography.h4,
+    fontSize: 20,
+    fontWeight: "800" as const,
+    letterSpacing: -0.4,
   },
   liveBanner: {
     marginTop: Spacing.xs,
@@ -1941,21 +2052,57 @@ const styles = StyleSheet.create({
     flex: 1,
     ...Typography.smallBold,
   },
+  cityBrainCard: {
+    borderWidth: 1,
+    borderRadius: BorderRadius.md,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.sm,
+    marginTop: Spacing.sm,
+  },
+  cityBrainHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginBottom: 3,
+  },
+  cityBrainLabel: {
+    fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
+  },
+  cityBrainReason: {
+    ...Typography.smallBold,
+  },
+  cityBrainHint: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  cityBrainRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: 6,
+  },
+  cityBrainRowText: {
+    flex: 1,
+    fontSize: 12,
+  },
   liveBannerText: {
     ...Typography.bodyHeavy,
     color: Colors.light.textOnPrimary,
   },
   toggleTrack: {
-    height: 32,
-    borderRadius: 16,
+    height: 36,
+    borderRadius: 18,
     justifyContent: "center",
     paddingHorizontal: 4,
     minWidth: 76,
   },
   toggleThumb: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     backgroundColor: Colors.light.textOnPrimary,
     justifyContent: "center",
     alignItems: "center",
@@ -2128,7 +2275,9 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.travonyGreen,
   },
   searchingText: {
-    ...Typography.body,
+    fontSize: 14,
+    fontWeight: "600" as const,
+    letterSpacing: 0.2,
   },
   goLiveNudge: {
     flexDirection: "row",
@@ -2185,19 +2334,31 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: Spacing.lg,
     right: Spacing.lg,
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.lg,
     padding: Spacing.lg,
+    paddingTop: Spacing.lg + 3,
     zIndex: 100,
+    borderWidth: 1,
+    borderColor: Colors.travonyGreen + "35",
+    overflow: "hidden",
     ...Platform.select({
       ios: {
-        shadowColor: Colors.black,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.15,
-        shadowRadius: 12,
+        shadowColor: Colors.travonyGreen,
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.22,
+        shadowRadius: 18,
       },
-      android: { elevation: 8 },
-      web: { boxShadow: "0 4px 12px rgba(0,0,0,0.15)" },
+      android: { elevation: 10 },
+      web: { boxShadow: "0 8px 24px rgba(0,177,79,0.22)" },
     }),
+  },
+  requestAccent: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: Colors.travonyGreen,
   },
   requestHeader: {
     flexDirection: "row",
@@ -2206,7 +2367,11 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.md,
   },
   requestTitle: {
-    ...Typography.h3,
+    fontSize: 12,
+    fontWeight: "800" as const,
+    letterSpacing: 1.4,
+    textTransform: "uppercase" as const,
+    color: Colors.travonyGreen,
     marginBottom: Spacing.xs,
   },
   requestTitleRow: {
@@ -2259,7 +2424,9 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.lg,
   },
   fareText: {
-    ...Typography.h4,
+    fontSize: 18,
+    fontWeight: "800" as const,
+    letterSpacing: -0.3,
     color: Colors.light.textOnPrimary,
   },
   customerInfo: {
@@ -2355,7 +2522,9 @@ const styles = StyleSheet.create({
     ...Typography.h3Heavy,
   },
   acceptButtonText: {
-    ...Typography.button,
+    fontSize: 17,
+    fontWeight: "800" as const,
+    letterSpacing: 0.2,
     color: Colors.light.textOnPrimary,
     flex: 1,
     textAlign: "center",

@@ -563,6 +563,11 @@ export default function DriverVehicleDetailsScreen() {
             <TouchableOpacity onPress={startReScan} style={styles.skipButton} disabled={isBusy}>
               <ThemedText style={[styles.skipText, { color: theme.textSecondary }]}>Re-scan with a new photo</ThemedText>
             </TouchableOpacity>
+
+            {/* ====== CAR PERSONA (talking car) ====== */}
+            {existingVehicle?.id ? (
+              <CarPersonaSection vehicleId={existingVehicle.id} theme={theme} />
+            ) : null}
           </>
         ) : null}
 
@@ -646,6 +651,179 @@ export default function DriverVehicleDetailsScreen() {
         <ScanningOverlay photo={pendingPhoto} />
       ) : null}
     </ThemedView>
+  );
+}
+
+/* ---- Car persona editor — the car's public "talking AI" identity ----
+ * The blurb is AI-drafted from the car's REAL stats (trips, rating, tenure)
+ * and re-checked server-side: made-up numbers are rejected. Preview never
+ * saves; only "Save persona" does. */
+const PERSONA_TONES = [
+  { value: "warm", label: "Warm" },
+  { value: "playful", label: "Playful" },
+  { value: "professional", label: "Professional" },
+] as const;
+
+function CarPersonaSection({ vehicleId, theme }: { vehicleId: string; theme: any }) {
+  const queryClient = useQueryClient();
+  const [personaName, setPersonaName] = useState("");
+  const [tone, setTone] = useState("warm");
+  const [blurb, setBlurb] = useState("");
+  const seeded = useRef(false);
+
+  const { data: profile } = useQuery<{ personaName: string; blurb: string; tone: string }>({
+    queryKey: [`/api/cars/${vehicleId}/profile`],
+  });
+
+  useEffect(() => {
+    if (profile && !seeded.current) {
+      seeded.current = true;
+      setPersonaName(profile.personaName || "");
+      setTone(profile.tone || "warm");
+      setBlurb(profile.blurb || "");
+    }
+  }, [profile]);
+
+  const previewMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/cars/${vehicleId}/persona/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tone }),
+      }),
+    onSuccess: (data: any) => {
+      if (data?.blurb) setBlurb(data.blurb);
+    },
+    onError: (error: any) => {
+      notify("Could not draft an intro", error?.message || "Please try again.");
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/cars/${vehicleId}/persona`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personaName, personaBlurb: blurb, personaTone: tone }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [`/api/cars/${vehicleId}/profile`] });
+      notify("Saved", "Your car's public persona is live.");
+    },
+    onError: (error: any) => {
+      notify("Could not save", error?.message || "Please try again.");
+    },
+  });
+
+  const busy = previewMutation.isPending || saveMutation.isPending;
+
+  return (
+    <View style={[styles.section, { backgroundColor: theme.backgroundElevated, marginTop: Spacing.xl }]}>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <Feather name="message-circle" size={16} color={Colors.travonyGreen} />
+        <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary }]}>Car persona</ThemedText>
+      </View>
+      <ThemedText style={[styles.hint, { color: theme.textMuted, marginTop: 4 }]}>
+        Riders can talk to your car and book it directly. Give it a name and an intro — the AI
+        drafts one from your car's real stats, and you decide what goes public.
+      </ThemedText>
+
+      <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.lg }]}>Name</ThemedText>
+      <TextInput
+        style={[styles.input, { color: theme.text, borderColor: theme.border, backgroundColor: theme.backgroundDefault }]}
+        value={personaName}
+        onChangeText={setPersonaName}
+        placeholder="e.g., Silver Arrow"
+        placeholderTextColor={theme.textMuted}
+        maxLength={40}
+        editable={!busy}
+      />
+
+      <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.md }]}>Tone</ThemedText>
+      <View style={{ flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.xs }}>
+        {PERSONA_TONES.map((t) => (
+          <TouchableOpacity
+            key={t.value}
+            onPress={() => setTone(t.value)}
+            disabled={busy}
+            style={{
+              paddingHorizontal: Spacing.md,
+              paddingVertical: 8,
+              borderRadius: BorderRadius.md,
+              borderWidth: 1,
+              borderColor: tone === t.value ? Colors.travonyGreen : theme.border,
+              backgroundColor: tone === t.value ? Colors.travonyGreen + "18" : "transparent",
+            }}
+          >
+            <ThemedText style={{ fontSize: 13, color: tone === t.value ? Colors.travonyGreen : theme.textSecondary }}>
+              {t.label}
+            </ThemedText>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      <ThemedText style={[styles.sectionTitle, { color: theme.textSecondary, marginTop: Spacing.md }]}>Intro</ThemedText>
+      <TextInput
+        style={[
+          styles.input,
+          {
+            color: theme.text,
+            borderColor: theme.border,
+            backgroundColor: theme.backgroundDefault,
+            minHeight: 80,
+            textAlignVertical: "top",
+          },
+        ]}
+        value={blurb}
+        onChangeText={setBlurb}
+        placeholder="Tap Draft with AI, or write your own"
+        placeholderTextColor={theme.textMuted}
+        multiline
+        maxLength={280}
+        editable={!busy}
+      />
+
+      <View style={{ flexDirection: "row", gap: Spacing.sm, marginTop: Spacing.md }}>
+        <TouchableOpacity
+          onPress={() => previewMutation.mutate()}
+          disabled={busy}
+          style={{
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            paddingVertical: 12,
+            borderRadius: BorderRadius.md,
+            borderWidth: 1,
+            borderColor: Colors.travonyGreen,
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          <Feather name="cpu" size={15} color={Colors.travonyGreen} />
+          <ThemedText style={{ fontSize: 14, fontWeight: "600", color: Colors.travonyGreen }}>
+            {previewMutation.isPending ? "Drafting…" : blurb ? "Redraft with AI" : "Draft with AI"}
+          </ThemedText>
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => saveMutation.mutate()}
+          disabled={busy || !blurb.trim()}
+          style={{
+            flex: 1,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingVertical: 12,
+            borderRadius: BorderRadius.md,
+            backgroundColor: Colors.travonyGreen,
+            opacity: busy || !blurb.trim() ? 0.6 : 1,
+          }}
+        >
+          <ThemedText style={{ fontSize: 14, fontWeight: "700", color: "#fff" }}>
+            {saveMutation.isPending ? "Saving…" : "Save persona"}
+          </ThemedText>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 

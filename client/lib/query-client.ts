@@ -19,7 +19,7 @@ export function getApiUrl(): string {
   return url.href;
 }
 
-async function getAuthToken(): Promise<string | null> {
+export async function getAuthToken(): Promise<string | null> {
   try {
     return await AsyncStorage.getItem(AUTH_KEY);
   } catch {

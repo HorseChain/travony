@@ -14,6 +14,11 @@ import HubDetailScreen from "@/screens/HubDetailScreen";
 import CoffeeScreen from "@/screens/CoffeeScreen";
 import ScheduledArrivalsScreen from "@/screens/ScheduledArrivalsScreen";
 import PrayerRidesScreen from "@/screens/PrayerRidesScreen";
+import CarProfileScreen from "@/screens/CarProfileScreen";
+import StreamHighlightsScreen from "@/screens/StreamHighlightsScreen";
+import ClipPlayerScreen from "@/screens/ClipPlayerScreen";
+import CarChatScreen from "@/screens/CarChatScreen";
+import TravonyTVScreen from "@/screens/TravonyTVScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type HomeStackParamList = {
@@ -73,6 +78,14 @@ export type HomeStackParamList = {
   Coffee: undefined;
   ScheduledArrivals: undefined;
   PrayerRides: undefined;
+  // Talking-car persona: public car profile + talk-to-the-car chat
+  CarProfile: { vehicleId: string };
+  CarChat: { vehicleId: string; personaName?: string };
+  // Post-stream highlight clip review + playback
+  StreamHighlights: { postId: string };
+  ClipPlayer: { clipId?: string; feedPostId?: string; title?: string; previewToken?: string };
+  // Travony TV — full-screen WebView channel of live rides
+  TravonyTV: undefined;
 };
 
 const Stack = createNativeStackNavigator<HomeStackParamList>();
@@ -159,6 +172,31 @@ export default function HomeStackNavigator() {
         name="PrayerRides"
         component={PrayerRidesScreen}
         options={{ headerTitle: "Prayer Rides" }}
+      />
+      <Stack.Screen
+        name="StreamHighlights"
+        component={StreamHighlightsScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="ClipPlayer"
+        component={ClipPlayerScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CarProfile"
+        component={CarProfileScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="CarChat"
+        component={CarChatScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="TravonyTV"
+        component={TravonyTVScreen}
+        options={{ headerShown: false, presentation: "modal" }}
       />
     </Stack.Navigator>
   );

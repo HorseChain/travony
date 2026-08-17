@@ -577,6 +577,7 @@
   </a>
   <div class="nav-links">
     <a class="nav-link" href="#api-groups">Endpoints</a>
+    <a class="nav-link" href="#agent-gateway">Agent Gateway</a>
     <a class="nav-link" href="#onboarding">EV Onboarding</a>
     <a class="nav-link" href="#quickstart">Quickstart</a>
     <a class="btn btn-primary" href="/api/docs" target="_blank">Interactive Docs</a>
@@ -824,6 +825,128 @@
 });</pre>
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- AGENT GATEWAY -->
+<section id="agent-gateway" style="border-top: 1px solid var(--border)">
+  <div class="section-label">Agent Gateway</div>
+  <div class="section-title">Let your AI book real rides</div>
+  <div class="section-desc">
+    ChatGPT plugins, Alexa skills, in-car assistants — any agent can quote and book Travony rides with five tools:
+    <code>list_service_types</code>, <code>get_quote</code>, <code>book_ride</code>, <code>get_ride_status</code>, <code>cancel_ride</code>.
+    Available as REST (<a href="/api/partner/v1/agent/openapi.json" style="color:var(--accent)">OpenAPI manifest</a>) and as an
+    <strong>MCP server</strong> at <code>POST /mcp</code> — same API key, same tools.
+    Bookings are <strong>idempotent</strong> (an <code>Idempotency-Key</code> retried never double-books), every booking carries your agent's
+    identity (<code>X-Agent-Id</code>), fares are always server-computed, and per-key daily spend caps protect you from runaway agents.
+    Ride status changes hit your webhook signed HMAC-SHA256, and completed rides get an <strong>Ed25519-signed receipt</strong> anyone can
+    verify against <code>/api/partner/v1/agent/public-key</code>. Scopes: <code>pricing:read</code>, <code>rides:read</code>, <code>rides:write</code>.
+  </div>
+
+  <div class="code-section" style="margin-bottom:32px">
+    <div class="code-tabs">
+      <button class="code-tab active" onclick="switchTab(this,'agw1')">1. Quote</button>
+      <button class="code-tab" onclick="switchTab(this,'agw2')">2. Book</button>
+      <button class="code-tab" onclick="switchTab(this,'agw3')">3. MCP</button>
+      <button class="code-tab" onclick="switchTab(this,'agw4')">4. Webhooks</button>
+      <button class="code-tab" onclick="switchTab(this,'agw5')">5. Receipt</button>
+    </div>
+    <div class="code-block active" id="agw1">
+<pre><span class="cmt">// Live fares for a route — no booking created</span>
+<span class="kw">const</span> quote = <span class="kw">await</span> fetch(<span class="str">'/api/partner/v1/agent/quote'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: {
+    <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>,
+    <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span>,
+  },
+  body: <span class="fn">JSON.stringify</span>({
+    pickup:  { lat: <span class="num">25.2048</span>, lng: <span class="num">55.2708</span>, address: <span class="str">'Downtown Dubai'</span> },
+    dropoff: { lat: <span class="num">25.2532</span>, lng: <span class="num">55.3657</span>, address: <span class="str">'Dubai Airport T1'</span> },
+  })
+}).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>());
+
+<span class="cmt">// { currency: 'AED', distanceKm: 10.96,</span>
+<span class="cmt">//   options: [{ serviceTypeId, label, fare }, ...] }  // cheapest first</span></pre>
+    </div>
+    <div class="code-block" id="agw2">
+<pre><span class="cmt">// Book — idempotent. Retrying with the same key replays</span>
+<span class="cmt">// the original booking instead of creating a second ride.</span>
+<span class="kw">const</span> ride = <span class="kw">await</span> fetch(<span class="str">'/api/partner/v1/agent/rides'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: {
+    <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>,
+    <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span>,
+    <span class="str">'Idempotency-Key'</span>: crypto.<span class="fn">randomUUID</span>(),
+    <span class="str">'X-Agent-Id'</span>: <span class="str">'my-chatgpt-plugin'</span>,   <span class="cmt">// who is booking</span>
+  },
+  body: <span class="fn">JSON.stringify</span>({
+    pickup:  { lat: <span class="num">25.2048</span>, lng: <span class="num">55.2708</span>, address: <span class="str">'Downtown Dubai'</span> },
+    dropoff: { lat: <span class="num">25.2532</span>, lng: <span class="num">55.3657</span>, address: <span class="str">'Dubai Airport T1'</span> },
+    riderPhone: <span class="str">'+971501234567'</span>,   <span class="cmt">// the human — gets an SMS tracking link</span>
+    serviceTypeId: quote.options[<span class="num">0</span>].serviceTypeId,  <span class="cmt">// optional; defaults to cheapest</span>
+  })
+}).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>());
+
+<span class="cmt">// { rideId, status: 'pending', fare, currency,   // fare is SERVER-computed</span>
+<span class="cmt">//   pickupOtp, trackingUrl, driver: { name, car, plate, etaMin } }</span>
+
+<span class="cmt">// later:  GET  /api/partner/v1/agent/rides/:rideId</span>
+<span class="cmt">//         POST /api/partner/v1/agent/rides/:rideId/cancel</span></pre>
+    </div>
+    <div class="code-block" id="agw3">
+<pre><span class="cmt">// MCP — plug Travony into Claude, ChatGPT or any MCP client.</span>
+<span class="cmt">// Streamable HTTP endpoint, authenticated with your API key:</span>
+{
+  <span class="str">"mcpServers"</span>: {
+    <span class="str">"travony"</span>: {
+      <span class="str">"url"</span>: <span class="str">"https://travony.replit.app/mcp"</span>,
+      <span class="str">"headers"</span>: {
+        <span class="str">"X-API-Key"</span>: <span class="str">"tvny_live_xxxx"</span>,
+        <span class="str">"X-Agent-Id"</span>: <span class="str">"my-assistant"</span>
+      }
+    }
+  }
+}
+
+<span class="cmt">// Bearer auth also works: Authorization: Bearer tvny_live_xxxx</span>
+<span class="cmt">// tools/list → list_service_types, get_quote, book_ride,</span>
+<span class="cmt">//              get_ride_status, cancel_ride</span></pre>
+    </div>
+    <div class="code-block" id="agw4">
+<pre><span class="cmt">// Register a webhook — ride.accepted / ride.arriving / ride.started /</span>
+<span class="cmt">// ride.completed / ride.cancelled POST to your https URL with retries.</span>
+<span class="kw">const</span> { secret } = <span class="kw">await</span> fetch(<span class="str">'/api/partner/v1/agent/webhooks'</span>, {
+  method: <span class="str">'POST'</span>,
+  headers: { <span class="str">'Content-Type'</span>: <span class="str">'application/json'</span>, <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span> },
+  body: <span class="fn">JSON.stringify</span>({ url: <span class="str">'https://your-agent.example.com/travony-hook'</span> })
+}).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>());  <span class="cmt">// secret is shown ONCE — store it</span>
+
+<span class="cmt">// Verify deliveries (Express example):</span>
+app.<span class="fn">post</span>(<span class="str">'/travony-hook'</span>, express.<span class="fn">raw</span>({ type: <span class="str">'*/*'</span> }), (req, res) =&gt; {
+  <span class="kw">const</span> [t, v1] = req.headers[<span class="str">'x-travony-signature'</span>]
+    .<span class="fn">split</span>(<span class="str">','</span>).<span class="fn">map</span>(p =&gt; p.<span class="fn">split</span>(<span class="str">'='</span>)[<span class="num">1</span>]);
+  <span class="kw">const</span> expected = crypto.<span class="fn">createHmac</span>(<span class="str">'sha256'</span>, secret)
+    .<span class="fn">update</span>(<span class="str">`${t}.${req.body}`</span>).<span class="fn">digest</span>(<span class="str">'hex'</span>);
+  <span class="kw">if</span> (expected !== v1) <span class="kw">return</span> res.<span class="fn">status</span>(<span class="num">403</span>).<span class="fn">end</span>();
+  <span class="cmt">// JSON.parse(req.body) → { event, rideId, status, fare, ... }</span>
+  res.<span class="fn">status</span>(<span class="num">200</span>).<span class="fn">end</span>();
+});</pre>
+    </div>
+    <div class="code-block" id="agw5">
+<pre><span class="cmt">// Completed rides have a server-signed, independently verifiable receipt</span>
+<span class="kw">const</span> r = <span class="kw">await</span> fetch(<span class="str">`/api/partner/v1/agent/rides/${rideId}/receipt`</span>, {
+  headers: { <span class="str">'X-API-Key'</span>: <span class="str">'tvny_live_xxxx'</span> }
+}).<span class="fn">then</span>(r =&gt; r.<span class="fn">json</span>());
+
+<span class="cmt">// Verify with Node's crypto — no Travony call needed:</span>
+<span class="kw">const</span> valid = crypto.<span class="fn">verify</span>(
+  <span class="kw">null</span>,                                  <span class="cmt">// Ed25519</span>
+  Buffer.<span class="fn">from</span>(r.canonical, <span class="str">'utf8'</span>),
+  crypto.<span class="fn">createPublicKey</span>(r.publicKey),   <span class="cmt">// pin it from /agent/public-key</span>
+  Buffer.<span class="fn">from</span>(r.signature, <span class="str">'base64'</span>)
+);
+<span class="cmt">// r.payload → { rideId, agentId, fare, currency, route, completedAt, blockchainHash }</span></pre>
     </div>
   </div>
 </section>

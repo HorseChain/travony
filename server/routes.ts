@@ -23,7 +23,7 @@ import {
   createRideReceipt
 } from "./blockchain";
 import { sendWeeklyFeedbackEmail } from "./email";
-import { notifyOnlineDriversOfNewRide, sendRideCompletionEmails, sendRideStatusEmails } from "./rideNotifications";
+import { notifyOnlineDriversOfNewRide, notifyDriverOfNewRide, sendRideCompletionEmails, sendRideStatusEmails } from "./rideNotifications";
 import { getSystemHealth } from "./healthService";
 import { nowPaymentsService } from "./nowpayments";
 import { createRideInvoices, sendRideInvoiceEmails } from "./invoiceService";
@@ -138,15 +138,22 @@ import { socialRouter } from "./socialRoutes";
 import { matchRouter, startMatchAgent } from "./matchAgent";
 import { rewardsRouter, qualifyReferralsForRide } from "./rewardsRoutes";
 import { agoraRouter, startAgoraViewerLoop, endStreamsForRide } from "./agoraStreaming";
+import { rideSafetyRouter, scheduleSafetyReport, startSafetyReportReconciler } from "./rideSafety";
+import { streamHighlightsRouter } from "./streamHighlights";
 import { tgStreamRouter } from "./telegramStreaming";
 import { googleAuthRouter } from "./googleAuth";
 import { discoveryRouter, initDiscovery, logRouteActivity } from "./discoveryRoutes";
+import { carPersonaRouter } from "./carPersonaRoutes";
 import { streamShareRouter } from "./streamShareRoutes";
 import { streamAdRouter } from "./streamAdRoutes";
 import { agentRouter } from "./agentRoutes";
 import { goLiveRequestRouter } from "./goLiveRequestRoutes";
+import { notificationRouter } from "./notificationRoutes";
+import { startAutopilotEngine } from "./autopilot";
+import { demandForecastRouter, startDemandForecastEngine } from "./demandForecast";
+import { tvRouter, startTvDirector, redeemTvCreditsForRide } from "./travonyTv";
 import { db } from "./db";
-import { eq, and, gte, desc, count, like } from "drizzle-orm";
+import { eq, and, gte, desc, count, like, sql } from "drizzle-orm";
 
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
@@ -614,9 +621,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { sessionToken, name, role } = req.body;
       
-      if (!sessionToken || !name) {
-        return res.status(400).json({ message: "Session token and name are required" });
+      if (!sessionToken) {
+        return res.status(400).json({ message: "Session token is required" });
       }
+      // Zero-onboarding riders: no name, no profile step — the account
+      // materializes from the verified phone. A name can be set later.
+      const resolvedName = typeof name === "string" && name.trim() ? name.trim() : "Travony rider";
 
       const pending = pendingRegistrations.get(sessionToken);
       
@@ -639,7 +649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.createUser({
         id: userId,
         email,
-        name: name.trim(),
+        name: resolvedName,
         phone: pending.phone,
         role: validRole,
       });
@@ -868,6 +878,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
+      // Idempotency window: a voice "yes" and a card Confirm tap can race and
+      // POST the same quote twice. If this customer already has an active ride
+      // to the same dropoff created seconds ago, return THAT ride instead of
+      // creating a duplicate — both clients converge on the same rideId.
+      const DUP_WINDOW_MS = 15_000;
+      const DUP_ACTIVE = ["pending", "accepted", "arriving", "in_progress", "started"];
+      const recentRides = await storage.getRidesByCustomer(customerId);
+      const dup = recentRides.find(
+        (r) =>
+          DUP_ACTIVE.includes(r.status) &&
+          r.createdAt &&
+          Date.now() - new Date(r.createdAt).getTime() < DUP_WINDOW_MS &&
+          (r.dropoffAddress || "") === (req.body.dropoffAddress || ""),
+      );
+      if (dup) {
+        console.log(`POST /api/rides - duplicate booking within ${DUP_WINDOW_MS}ms, returning existing ride ${dup.id}`);
+        return res.status(200).json(dup);
+      }
+
       const paymentMethod = req.body.paymentMethod;
       const estimatedFareAmount = parseFloat(req.body.estimatedFare || "0");
       
@@ -983,6 +1012,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       req.body.isSafeDriver = isSafeDriverRide;
 
+      // Talk-to-the-car targeted dispatch: the rider asked a SPECIFIC driver's
+      // car (via car chat). Validate server-side — never trust the raw body:
+      // the target must be an approved, online driver. Invalid targets degrade
+      // silently to normal broadcast matching. targetExpiresAt is always
+      // server-set; a client-supplied value is stripped. Runs BEFORE the
+      // share/pool block so targeted rides are always solo — pooled cards have
+      // their own visibility path that would bypass the target reservation.
+      const CAR_TARGET_WINDOW_MS = 75 * 1000;
+      delete req.body.targetExpiresAt;
+      let targetDriver: any = null;
+      if (req.body.targetDriverId) {
+        const requestedTargetId = String(req.body.targetDriverId);
+        delete req.body.targetDriverId;
+        const td = await storage.getDriver(requestedTargetId);
+        if (td && td.status === "approved" && td.isOnline) targetDriver = td;
+      }
+
       // Shared / pooled three-wheeler handling (fare split). Backend-authoritative:
       // only enable for a genuine three-wheeler in a region whose vehicle type
       // seats >= 2, and derive the discounted upfront fare from the solo fare
@@ -993,7 +1039,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let shareVehicleType = "";
       const shareSoloFare = parseFloat(req.body.soloFare || req.body.estimatedFare || "0");
       const wantsShare = req.body.isShared === true || req.body.isShared === "true";
-      if (wantsShare && isThreeWheeler(originalServiceType)) {
+      // Targeted rides are mutually exclusive with pooling (targetDriver check).
+      if (wantsShare && !targetDriver && isThreeWheeler(originalServiceType)) {
         const vt = createRegion?.vehicleTypes?.find((v: any) => v.type === originalServiceType);
         const seats = vt?.maxPassengers ?? 0;
         if (seats >= 2) {
@@ -1065,8 +1112,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const evPreferred = req.body.isEvRide === true || req.body.isEvRide === "true";
       let intentData: any = {};
       let evFulfilled = false;
-      
-      if (req.body.pickupLat && req.body.pickupLng && req.body.dropoffLat && req.body.dropoffLng) {
+
+      if (targetDriver) {
+        // Rider chose this car explicitly — skip AI matching entirely.
+        intentData = {
+          driverId: targetDriver.id,
+          matchType: "rider_requested_car",
+          aiMatchScore: "0",
+        };
+      } else if (req.body.pickupLat && req.body.pickupLng && req.body.dropoffLat && req.body.dropoffLng) {
         const pickupLat = parseFloat(req.body.pickupLat);
         const pickupLng = parseFloat(req.body.pickupLng);
         const dropoffLat = parseFloat(req.body.dropoffLat);
@@ -1159,21 +1213,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         timestamp: new Date(),
       });
 
-      const ride = await storage.createRide({
-        ...req.body,
-        id: rideId,
-        customerId,
-        status: "pending",
-        blockchainHash,
-        platformFee: feeBreakdown.platformFee.toFixed(2),
-        driverEarnings: feeBreakdown.driverShare.toFixed(2),
-        riderPriority: priority,
-        // isEvRide captures rider intent (demand signal) — true whenever rider requested EV.
-        // Actual EV fulfillment is tracked via matchType: "ev_preferred" on intentData.
-        isEvRide: evPreferred,
-        isSafeDriver: isSafeDriverRide,
-        ...intentData,
+      // Atomic duplicate guard: the early read-only check above closes the
+      // common case, but two truly concurrent POSTs could both pass it. Take
+      // the SAME per-user advisory lock the booking brain uses
+      // (hashtext(customerId)) and re-check inside the critical section, so
+      // check + insert are mutually exclusive across requests AND across
+      // booking paths, even on multiple server instances.
+      const ride = await db.transaction(async (tx) => {
+        await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${customerId}))`);
+        const lockedRecent = await storage.getRidesByCustomer(customerId);
+        const lockedDup = lockedRecent.find(
+          (r) =>
+            DUP_ACTIVE.includes(r.status) &&
+            r.createdAt &&
+            Date.now() - new Date(r.createdAt).getTime() < DUP_WINDOW_MS &&
+            (r.dropoffAddress || "") === (req.body.dropoffAddress || ""),
+        );
+        if (lockedDup) return lockedDup;
+        return storage.createRide({
+          ...req.body,
+          id: rideId,
+          customerId,
+          status: "pending",
+          blockchainHash,
+          platformFee: feeBreakdown.platformFee.toFixed(2),
+          driverEarnings: feeBreakdown.driverShare.toFixed(2),
+          riderPriority: priority,
+          // isEvRide captures rider intent (demand signal) — true whenever rider requested EV.
+          // Actual EV fulfillment is tracked via matchType: "ev_preferred" on intentData.
+          isEvRide: evPreferred,
+          isSafeDriver: isSafeDriverRide,
+          ...intentData,
+          // Targeted window: reserved for the requested driver until expiry,
+          // then automatically visible/broadcast to the whole pool.
+          targetDriverId: targetDriver ? targetDriver.id : null,
+          targetExpiresAt: targetDriver ? new Date(Date.now() + CAR_TARGET_WINDOW_MS) : null,
+        });
       });
+
+      // Lost the race: an identical ride was created concurrently. Return it
+      // and skip every post-create side effect (events, broadcast, pooling) —
+      // they already ran for the winning request.
+      if (ride.id !== rideId) {
+        console.log(`POST /api/rides - concurrent duplicate, returning existing ride ${ride.id}`);
+        return res.status(200).json(ride);
+      }
 
       if (ride.isNamedFare) {
         recordRideEvent({
@@ -1225,6 +1309,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("Shared pool error, broadcasting as solo:", poolErr);
           notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
         }
+      } else if (targetDriver) {
+        // Targeted first: ping ONLY the requested driver now. If the ride is
+        // still pending when the window lapses, broadcast to everyone. The
+        // pending-rides feed enforces the same window via targetExpiresAt, so
+        // even if this in-process timer is lost (restart), other drivers see
+        // the ride on their next poll once the window has passed.
+        notifyDriverOfNewRide(ride.id).catch(console.error);
+        setTimeout(async () => {
+          try {
+            const fresh = await storage.getRide(ride.id);
+            if (fresh && fresh.status === "pending") {
+              notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
+            }
+          } catch (err) {
+            console.error("[car-target] broadcast fallback failed:", err);
+          }
+        }, CAR_TARGET_WINDOW_MS);
       } else {
         notifyOnlineDriversOfNewRide(ride.id).catch(console.error);
       }
@@ -1487,6 +1588,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (existingRide.isNamedFare && isOfferExpired(existingRide)) {
             return res.status(409).json({ message: "This fare offer has expired." });
           }
+          // Talk-to-the-car: while the target window is open, only the
+          // requested driver may claim the ride.
+          if (
+            existingRide.targetDriverId &&
+            existingRide.targetDriverId !== driverRecord.id &&
+            existingRide.targetExpiresAt &&
+            new Date(existingRide.targetExpiresAt).getTime() > Date.now()
+          ) {
+            return res.status(409).json({ message: "This ride is reserved for a requested driver right now." });
+          }
           const claimed = await storage.claimPendingRide(existingRide.id, driverRecord.id);
           if (!claimed) {
             return res.status(409).json({ message: "This ride was just accepted by another driver." });
@@ -1517,9 +1628,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
         (ride.status === "completed" || ride.status === "cancelled") &&
         existingRide.status !== ride.status
       ) {
-        endStreamsForRide(ride.id).catch((err) =>
-          console.error("[Agora] end streams on ride end failed:", err?.message || err),
-        );
+        endStreamsForRide(ride.id)
+          .catch((err) =>
+            console.error("[Agora] end streams on ride end failed:", err?.message || err),
+          )
+          .finally(() => {
+            // AI safety layer: completed streamed rides get a post-ride safety
+            // report (no-op for rides that never streamed). Chained after the
+            // stream teardown so the report never snapshots a live stream;
+            // generation itself also refuses to run while a stream is still
+            // being finalized (and the GET path lazily retries).
+            if (ride.status === "completed") {
+              scheduleSafetyReport(ride.id);
+            }
+          });
       }
 
       if (req.body.status === "cancelled" && existingRide.status !== "cancelled") {
@@ -1815,6 +1937,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           qualifyReferralsForRide(ride).catch((err) =>
             console.error("[Rewards] referral qualification hook error:", err),
           );
+
+          // Travony TV watch-to-earn: redeem TV credit as ride credit (wallet
+          // top-up), capped at a share of the fare. Fires only inside this
+          // authorized, persisted completed-transition gate; fare > 0 only,
+          // so free prayer rides never redeem.
+          redeemTvCreditsForRide(ride, fare).catch((err) =>
+            console.error("[tv] credit redemption hook error:", err),
+          );
         }
       }
 
@@ -1822,9 +1952,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         import("./telegramRiderBot")
           .then((m) => m.notifyRiderRideUpdate(ride.id))
           .catch((err) => console.error("[Telegram] rider notify error:", err));
+        import("./whatsappRiderBot")
+          .then((m) => m.notifyWhatsAppRiderRideUpdate(ride.id))
+          .catch((err) => console.error("[WhatsApp] rider notify error:", err));
         sendRideStatusEmails(ride.id).catch((err) =>
           console.error("[Email] ride status notify error:", err),
         );
+        import("./agentGateway")
+          .then((m) => m.notifyAgentRideUpdate(ride.id))
+          .catch((err) => console.error("[AgentGateway] notify error:", err));
       }
 
       res.json(ride);
@@ -3030,6 +3166,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Name Your Fare: expired offers disappear from the driver feed until
       // the rider raises their offer (which resets the expiry window).
       driverRides = driverRides.filter((r: any) => !(r.isNamedFare && isOfferExpired(r)));
+
+      // Talk-to-the-car: a targeted ride stays reserved for its requested
+      // driver until the window lapses — other drivers don't see it. After
+      // expiry it joins the normal broadcast pool automatically.
+      const targetNowMs = Date.now();
+      driverRides = driverRides.filter((r: any) =>
+        !r.targetDriverId ||
+        r.targetDriverId === driver.id ||
+        (r.targetExpiresAt && new Date(r.targetExpiresAt).getTime() <= targetNowMs)
+      );
       
       console.log(`[PENDING-RIDES] Filtered rides for this driver: ${driverRides.length} solo + ${sharedCards.length} shared`);
       
@@ -6750,6 +6896,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.sendFile("drive-with-us.html", { root: "./server/templates" });
   });
 
+  // Travony TV — the always-on public live channel. Zero-install browser page.
+  app.get("/tv", (req, res) => {
+    res.sendFile("tv.html", { root: "./server/templates" });
+  });
+
   app.get("/ontime", (req, res) => {
     res.redirect(301, "/");
   });
@@ -7213,10 +7364,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Telegram Bot Webhook
+  // Telegram Bot Webhook — secret-token gated (see telegramBot.getWebhookSecret)
   app.post("/api/webhook/telegram", async (req, res) => {
     try {
       const telegramBot = await import("./telegramBot");
+      const secret = telegramBot.getWebhookSecret();
+      if (secret && req.headers["x-telegram-bot-api-secret-token"] !== secret) {
+        telegramBot.scheduleWebhookSelfHeal();
+        return res.sendStatus(403);
+      }
       await telegramBot.processTelegramUpdate(req.body);
       res.sendStatus(200);
     } catch (error: any) {
@@ -7225,10 +7381,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // WhatsApp Bot Webhook (Twilio)
+  // WhatsApp Bot Webhook (Twilio) — signature-verified
   app.post("/api/webhook/whatsapp", async (req, res) => {
     try {
       const whatsappBot = await import("./whatsappBot");
+      if (!whatsappBot.validateTwilioSignature(req)) {
+        console.warn("[WhatsApp Webhook] rejected: invalid Twilio signature");
+        return res.sendStatus(403);
+      }
       const response = await whatsappBot.processWhatsAppWebhook(req.body);
       if (response) {
         res.set("Content-Type", "text/xml");
@@ -8237,6 +8397,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(openClawRouter);
   app.use(coffeeRouter);
   app.use(assistantRouter);
+  const { voiceRouter } = await import("./voiceAssistant");
+  app.use(voiceRouter);
   app.use(scheduledArrivalsRouter);
   startScheduledArrivalsEngine();
   app.use(prayerRidesRouter);
@@ -8246,6 +8408,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   startMatchAgent();
   app.use(rewardsRouter);
   app.use(agoraRouter);
+  app.use(rideSafetyRouter);
+  startSafetyReportReconciler();
+  app.use(streamHighlightsRouter);
   app.use(tgStreamRouter);
   startAgoraViewerLoop();
   startPrayerRidesEngine();
@@ -8253,11 +8418,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.use(fleetDashboardRouter);
   app.use(evRouter);
   app.use(discoveryRouter);
+  app.use(carPersonaRouter);
   app.use(streamShareRouter);
+  // Zero-install booking: /ride page, /track/:token live tracking, /api/ridelink/*
+  const { rideLinkRouter } = await import("./rideLinkRoutes");
+  app.use(rideLinkRouter);
+
+  // AI Onboarding Agent: secure WhatsApp ride-accept links (/go/a/:token) and
+  // the one-nudge sweep for stalled driver interviews + abandoned quotes.
+  const { registerRideAcceptRoutes } = await import("./rideAcceptRoutes");
+  registerRideAcceptRoutes(app);
+  const { startOnboardingNudgeSweep } = await import("./onboardingAgent");
+  startOnboardingNudgeSweep();
+
+  // Agent Gateway: external AIs book rides via REST + MCP (partner API keys).
+  const { agentGatewayRouter, startAgentWebhookWorker } = await import("./agentGateway");
+  app.use(agentGatewayRouter);
+  startAgentWebhookWorker();
+  const { setupMcpServer } = await import("./mcpServer");
+  setupMcpServer(app);
   app.use(streamAdRouter);
   initDiscovery();
   app.use(agentRouter);
   app.use(goLiveRequestRouter);
+  app.use(notificationRouter);
+  startAutopilotEngine();
+  app.use(tvRouter);
+  startTvDirector();
+  app.use(demandForecastRouter);
+  startDemandForecastEngine();
 
   const httpServer = createServer(app);
 

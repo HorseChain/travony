@@ -6,6 +6,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigation } from "@react-navigation/native";
+import { LinearGradient } from "expo-linear-gradient";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 
 import type { DriverEarningsStackParamList } from "@/navigation/driver/DriverEarningsStackNavigator";
@@ -300,7 +301,12 @@ export default function DriverEarningsScreen() {
         ]}
         ListHeaderComponent={
           <>
-            <View style={[styles.summaryCard, { backgroundColor: Colors.travonyGreen }]}>
+            <LinearGradient
+              colors={[Colors.travonyGreen, Colors.travonyDarkGreen]}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={styles.summaryCard}
+            >
               <View style={styles.balanceSection}>
                 <ThemedText style={styles.balanceLabel}>Asset Balance</ThemedText>
                 <ThemedText style={styles.balanceAmount}>AED {balance.toFixed(2)}</ThemedText>
@@ -333,7 +339,7 @@ export default function DriverEarningsScreen() {
                   <ThemedText style={styles.statLabel}>Total Yield</ThemedText>
                 </View>
               </View>
-            </View>
+            </LinearGradient>
 
             {/* USDT Crypto Earnings Card (long tail — hidden unless crypto flag on) */}
             {!FEATURES.crypto ? null : (
@@ -625,20 +631,26 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.xl,
   },
   balanceLabel: {
-    ...Typography.body,
-    color: "rgba(255,255,255,0.8)",
+    fontSize: 11,
+    fontWeight: "700" as const,
+    letterSpacing: 1.4,
+    textTransform: "uppercase" as const,
+    color: "rgba(255,255,255,0.75)",
     marginBottom: Spacing.xs,
   },
   balanceAmount: {
-    fontSize: 42,
-    fontWeight: "700" as const,
+    fontSize: 46,
+    fontWeight: "800" as const,
+    letterSpacing: -1.5,
     color: Colors.light.textOnPrimary,
     marginBottom: Spacing.md,
   },
   withdrawButton: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
     borderRadius: BorderRadius.full,
@@ -661,7 +673,9 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(255,255,255,0.2)",
   },
   statValue: {
-    ...Typography.h4Heavy,
+    fontSize: 17,
+    fontWeight: "800" as const,
+    letterSpacing: -0.3,
     color: Colors.light.textOnPrimary,
   },
   statLabel: {
@@ -669,7 +683,10 @@ const styles = StyleSheet.create({
     color: "rgba(255,255,255,0.8)",
   },
   sectionTitle: {
-    ...Typography.h3,
+    fontSize: 13,
+    fontWeight: "700" as const,
+    letterSpacing: 1.1,
+    textTransform: "uppercase" as const,
     marginBottom: Spacing.lg,
   },
   vehicleWalletCard: {
@@ -707,7 +724,7 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     padding: Spacing.lg,
-    borderRadius: BorderRadius.xl,
+    borderRadius: BorderRadius.lg,
   },
   earningDate: {
     flexDirection: "row",

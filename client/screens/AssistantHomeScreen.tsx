@@ -25,19 +25,22 @@ import { useNavigation, useRoute, RouteProp } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useBottomTabBarHeight } from "@react-navigation/bottom-tabs";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ThemedText } from "@/components/ThemedText";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
 import { useAuthGate } from "@/hooks/useAuthGate";
+import { useLiteMode } from "@/hooks/useLiteMode";
+import { useVoiceAssistant } from "@/hooks/useVoiceAssistant";
 import { apiRequest } from "@/lib/query-client";
-import { Spacing, BorderRadius, Typography, Colors } from "@/constants/theme";
+import { Spacing, BorderRadius, Typography, Colors, Shadows } from "@/constants/theme";
 import { FEATURES } from "@/constants/features";
 import type { HomeStackParamList } from "@/navigation/HomeStackNavigator";
 import {
   AssistantCard,
   AssistantCardData,
   AssistantPoint,
+  BookingCardData,
 } from "@/components/assistant/AssistantCards";
 
 type NavigationProp = NativeStackNavigationProp<HomeStackParamList, "Home">;
@@ -122,6 +125,18 @@ export default function AssistantHomeScreen() {
   const handledParamsKey = useRef<string | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
+  // Voice loop: record → server STT + same deterministic executor → TTS reply.
+  const { liteMode } = useLiteMode();
+  const queryClient = useQueryClient();
+  const voice = useVoiceAssistant();
+  // What a spoken "yes" refers to. The card payload for execution is the one
+  // the SERVER built (stored here when its card arrived) — a voice confirm
+  // replays it exactly like a tap on the card's Confirm button.
+  const voicePendingRef = useRef<{ type: string; rideId?: string } | null>(null);
+  const bookingInFlightRef = useRef(false);
+  const turnSeqRef = useRef(0);
+  const lastBookingRef = useRef<{ msgId: string; card: BookingCardData } | null>(null);
+
   // On iOS the keyboard covers the tab bar, so the input bar's tab-bar margin
   // would otherwise float it above the keyboard by a tab bar's height.
   useEffect(() => {
@@ -188,6 +203,8 @@ export default function AssistantHomeScreen() {
       const trimmed = text.trim();
       if (!trimmed || thinking) return;
 
+      turnSeqRef.current += 1; // typed turns supersede in-flight voice turns
+      const mySeq = turnSeqRef.current;
       // Snapshot history BEFORE appending the new user message, then append.
       const historySnapshot = messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
       appendMessages([{ id: nextId(), role: "user", text: trimmed }]);
@@ -205,9 +222,29 @@ export default function AssistantHomeScreen() {
             ...tp,
           }),
         });
-        appendMessages([
-          { id: nextId(), role: "assistant", text: res?.reply || "", card: res?.card || null },
-        ]);
+        const staleTyped = turnSeqRef.current !== mySeq;
+        const asstMsg: ChatMessage = {
+          id: nextId(),
+          role: "assistant",
+          text: res?.reply || "",
+          // Same rule as voice: a superseded turn's booking card must not
+          // render — its Confirm button would book a stale quote.
+          card: staleTyped && res?.card?.type === "booking" ? null : res?.card || null,
+        };
+        appendMessages([asstMsg]);
+        // Only the LATEST turn may own the pending/quote state: a stale typed
+        // response must not resurrect a superseded quote for a spoken "yes".
+        if (!staleTyped) {
+          if (res?.card?.type === "booking") {
+            lastBookingRef.current = { msgId: asstMsg.id, card: res.card };
+            voicePendingRef.current = { type: "booking" };
+          } else {
+            // A newer non-booking turn supersedes any old quote: a later spoken
+            // "yes" must never book a stale card.
+            lastBookingRef.current = null;
+            voicePendingRef.current = null;
+          }
+        }
       } catch (err: any) {
         appendMessages([
           {
@@ -270,9 +307,30 @@ export default function AssistantHomeScreen() {
       });
     },
     onBooked: (_rideId: string) => {
+      // The card's own Confirm was used — drop the voice-pending quote so a
+      // later spoken "yes" can't re-book it.
+      lastBookingRef.current = null;
+      voicePendingRef.current = null;
       scrollToEnd();
     },
-    onEvent: logEvent,
+    onEvent: (intent: string, accepted: boolean, destination?: AssistantPoint) => {
+      if (intent === "book_ride" && !accepted) {
+        // "Not now" tapped on the card — same supersede rule.
+        lastBookingRef.current = null;
+        voicePendingRef.current = null;
+      }
+      logEvent(intent, accepted, destination);
+    },
+    // One booking at a time, shared between the card's Confirm button and the
+    // voice-confirm path — whichever claims first wins; the loser is a no-op.
+    claimBooking: () => {
+      if (bookingInFlightRef.current) return false;
+      bookingInFlightRef.current = true;
+      return true;
+    },
+    releaseBooking: () => {
+      bookingInFlightRef.current = false;
+    },
   };
 
   const handleSend = () => {
@@ -280,6 +338,163 @@ export default function AssistantHomeScreen() {
     setInput("");
     sendToAssistant(text);
   };
+
+  // ---- Voice loop -----------------------------------------------------------
+  const replaceCard = useCallback((msgId: string, newCard: AssistantCardData) => {
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? { ...m, card: newCard } : m)));
+  }, []);
+
+  // A spoken "yes" executes EXACTLY what a card tap would: the server-built
+  // confirmPayload against the existing authenticated endpoints. The assistant
+  // itself never creates or cancels rides.
+  const executeVoiceAction = useCallback(
+    async (action: any) => {
+      if (action?.type === "confirm_booking") {
+        const pendingBooking = lastBookingRef.current;
+        if (!pendingBooking) {
+          appendMessages([
+            { id: nextId(), role: "assistant", text: "That quote is gone — ask me for a new one.", card: null },
+          ]);
+          return;
+        }
+        if (bookingInFlightRef.current) return; // one booking at a time
+        bookingInFlightRef.current = true;
+        // Claim the quote atomically: a concurrent tap or second "yes" now
+        // finds no pending card.
+        lastBookingRef.current = null;
+        voicePendingRef.current = null;
+        const card = pendingBooking.card;
+        let paymentMethod: "cash" | "wallet" = action.paymentMethod === "wallet" ? "wallet" : "cash";
+        if (paymentMethod === "wallet" && !(card.walletBalance >= card.fare)) paymentMethod = "cash";
+        try {
+          const ride = await apiRequest("/api/rides", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...card.confirmPayload, customerId: user?.id, paymentMethod }),
+          });
+          const rideId = ride?.id || ride?.ride?.id;
+          if (rideId) {
+            // Swap the quote card for the live ride so the on-card Confirm
+            // button can't double-book the same quote.
+            replaceCard(pendingBooking.msgId, { type: "live_ride", rideId });
+            queryClient.invalidateQueries({ queryKey: ["/api/rides?status=active"] });
+            logEvent("book_ride", true, card.dropoff);
+            scrollToEnd();
+          }
+        } catch (err: any) {
+          appendMessages([
+            {
+              id: nextId(),
+              role: "assistant",
+              text: err?.message || "Booking didn't go through — try the Confirm button on the card.",
+              card: null,
+            },
+          ]);
+        } finally {
+          bookingInFlightRef.current = false;
+        }
+      } else if (action?.type === "decline_booking") {
+        const card = lastBookingRef.current?.card;
+        lastBookingRef.current = null;
+        voicePendingRef.current = null;
+        if (card) logEvent("book_ride", false, card.dropoff);
+      } else if (action?.type === "cancel_ride" && action.rideId) {
+        try {
+          await apiRequest(`/api/rides/${action.rideId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "cancelled" }),
+          });
+          queryClient.invalidateQueries({ queryKey: [`/api/rides/${action.rideId}`] });
+          queryClient.invalidateQueries({ queryKey: ["/api/rides?status=active"] });
+          logEvent("cancel_ride", true);
+        } catch (err: any) {
+          appendMessages([
+            {
+              id: nextId(),
+              role: "assistant",
+              text: err?.message || "I couldn't cancel from here — open the ride card to cancel.",
+              card: null,
+            },
+          ]);
+        }
+        voicePendingRef.current = null;
+      }
+    },
+    [appendMessages, logEvent, queryClient, replaceCard, scrollToEnd, user?.id]
+  );
+
+  const sendVoiceTurn = useCallback(
+    async (rec: { base64: string; mime: string }) => {
+      turnSeqRef.current += 1;
+      const mySeq = turnSeqRef.current;
+      const historySnapshot = messages.slice(-10).map((m) => ({ role: m.role, text: m.text }));
+      try {
+        const tp = timeParams();
+        const res = await apiRequest("/api/voice/turn", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            audio: rec.base64,
+            pickup,
+            history: historySnapshot,
+            pending: voicePendingRef.current,
+            wantAudio: !liteMode, // Lite Mode: text-only replies, no TTS download
+            ...tp,
+          }),
+        });
+        const stale = turnSeqRef.current !== mySeq; // a newer turn superseded this one
+        const newMsgs: ChatMessage[] = [];
+        if (res?.transcript) newMsgs.push({ id: nextId(), role: "user", text: res.transcript });
+        const asstMsg: ChatMessage = {
+          id: nextId(),
+          role: "assistant",
+          text: res?.reply || "",
+          // A stale booking card must not be rendered: its Confirm button is a
+          // live POST and the quote was superseded by a newer turn.
+          card: stale && res?.card?.type === "booking" ? null : res?.card || null,
+        };
+        newMsgs.push(asstMsg);
+        appendMessages(newMsgs);
+        if (!stale) {
+          voicePendingRef.current = res?.pending || null;
+          if (res?.card?.type === "booking") {
+            lastBookingRef.current = { msgId: asstMsg.id, card: res.card };
+            voicePendingRef.current = { type: "booking" };
+          }
+          if (res?.action) await executeVoiceAction(res.action);
+        }
+        if (!stale && res?.audio) {
+          await voice.playReply(res.audio, res.audioMime || "audio/mpeg");
+        } else {
+          voice.finishTurn();
+        }
+      } catch (err: any) {
+        appendMessages([
+          {
+            id: nextId(),
+            role: "assistant",
+            text: err?.message || "Voice hit a snag — please try again, or type instead.",
+            card: null,
+          },
+        ]);
+        voice.finishTurn();
+      }
+    },
+    [appendMessages, executeVoiceAction, liteMode, messages, pickup, voice]
+  );
+
+  const onMicPress = useCallback(async () => {
+    if (!requireAuth()) return;
+    if (voice.state === "recording") {
+      const rec = await voice.stopRecording();
+      if (rec) sendVoiceTurn(rec);
+      return;
+    }
+    if (voice.state === "processing") return;
+    // idle → start; speaking → barge-in (stop playback, start listening)
+    await voice.startRecording();
+  }, [requireAuth, sendVoiceTurn, voice]);
 
   const handleChip = (chip: { id: string; message: string }) => {
     if (!requireAuth()) return;
@@ -350,22 +565,43 @@ export default function AssistantHomeScreen() {
         >
           {!conversationStarted ? (
             <View style={styles.emptyState}>
-              <Animated.View entering={FadeInDown.duration(400)}>
-                <View style={[styles.heroOrb, { backgroundColor: theme.primary + "18" }]}>
-                  <View style={[styles.heroOrbInner, { backgroundColor: theme.primary }]} />
-                </View>
+              <Animated.View entering={FadeInDown.springify().damping(15)}>
+                <Pressable
+                  onPress={voice.supported ? onMicPress : undefined}
+                  style={({ pressed }) => [
+                    styles.heroOrb,
+                    {
+                      backgroundColor:
+                        voice.state === "recording" ? "#E5484D22" : theme.primary + "18",
+                      borderColor:
+                        voice.state === "recording" ? "#E5484D55" : theme.primary + "40",
+                      opacity: pressed ? 0.85 : 1,
+                      transform: [{ scale: pressed ? 0.94 : 1 }],
+                    },
+                  ]}
+                >
+                  {voice.supported ? (
+                    <Ionicons
+                      name={voice.state === "recording" ? "stop" : "mic"}
+                      size={34}
+                      color={voice.state === "recording" ? "#E5484D" : theme.primary}
+                    />
+                  ) : (
+                    <View style={[styles.heroOrbInner, { backgroundColor: theme.primary }]} />
+                  )}
+                </Pressable>
               </Animated.View>
-              <Animated.View entering={FadeInDown.duration(400).delay(80)}>
+              <Animated.View entering={FadeInDown.springify().damping(15).delay(80)}>
                 <ThemedText style={styles.greeting}>{greeting}</ThemedText>
               </Animated.View>
-              <Animated.View entering={FadeInDown.duration(400).delay(160)}>
+              <Animated.View entering={FadeInDown.springify().damping(15).delay(160)}>
                 <ThemedText style={[styles.subline, { color: theme.textSecondary }]}>
                   {subline}
                 </ThemedText>
               </Animated.View>
               {chips.length > 0 ? (
                 <Animated.View
-                  entering={FadeInDown.duration(400).delay(240)}
+                  entering={FadeInDown.springify().damping(15).delay(240)}
                   style={styles.starterGrid}
                 >
                   {chips.slice(0, 4).map((chip) => (
@@ -377,7 +613,8 @@ export default function AssistantHomeScreen() {
                         styles.starterCard,
                         {
                           backgroundColor: theme.backgroundDefault,
-                          opacity: pressed || thinking ? 0.7 : 1,
+                          opacity: thinking ? 0.7 : 1,
+                          transform: [{ scale: pressed ? 0.96 : 1 }],
                         },
                       ]}
                     >
@@ -395,7 +632,7 @@ export default function AssistantHomeScreen() {
               m.role === "user" ? (
                 <Animated.View
                   key={m.id}
-                  entering={FadeInDown.duration(250)}
+                  entering={FadeInDown.springify().damping(16).mass(0.7)}
                   style={[styles.userBubble, { backgroundColor: theme.primary }]}
                 >
                   <ThemedText style={styles.userBubbleText}>{m.text}</ThemedText>
@@ -403,7 +640,7 @@ export default function AssistantHomeScreen() {
               ) : (
                 <Animated.View
                   key={m.id}
-                  entering={FadeInUp.duration(250)}
+                  entering={FadeInUp.springify().damping(16).mass(0.7)}
                   style={styles.assistantBlock}
                 >
                   <View style={styles.assistantRow}>
@@ -418,10 +655,32 @@ export default function AssistantHomeScreen() {
               )
             )
           )}
-          {thinking ? (
+          {thinking || voice.state === "processing" ? (
             <TypingIndicator background={theme.backgroundDefault} color={theme.textMuted} />
           ) : null}
         </ScrollView>
+
+        {/* Voice status strip */}
+        {voice.state === "recording" || voice.state === "speaking" || voice.micDenied ? (
+          <View style={styles.voiceStatusRow}>
+            {voice.state === "recording" ? (
+              <>
+                <View style={styles.recordingDot} />
+                <ThemedText style={[styles.voiceStatusText, { color: theme.textSecondary }]}>
+                  Listening — speak any language, tap ■ to send
+                </ThemedText>
+              </>
+            ) : voice.state === "speaking" ? (
+              <ThemedText style={[styles.voiceStatusText, { color: theme.textSecondary }]}>
+                Speaking — tap the mic to interrupt
+              </ThemedText>
+            ) : (
+              <ThemedText style={[styles.voiceStatusText, { color: theme.textMuted }]}>
+                Microphone unavailable — you can type instead
+              </ThemedText>
+            )}
+          </View>
+        ) : null}
 
         {/* Adaptive chips */}
         {conversationStarted && chips.length > 0 ? (
@@ -442,7 +701,8 @@ export default function AssistantHomeScreen() {
                   {
                     backgroundColor: theme.backgroundDefault,
                     borderColor: theme.border,
-                    opacity: pressed || thinking ? 0.8 : 1,
+                    opacity: thinking ? 0.8 : 1,
+                    transform: [{ scale: pressed ? 0.95 : 1 }],
                   },
                 ]}
               >
@@ -475,6 +735,40 @@ export default function AssistantHomeScreen() {
             editable={!thinking}
             keyboardAppearance={isDark ? "dark" : "light"}
           />
+          {voice.supported ? (
+            <Pressable
+              onPress={onMicPress}
+              disabled={voice.state === "processing"}
+              style={({ pressed }) => [
+                styles.sendButton,
+                {
+                  backgroundColor:
+                    voice.state === "recording"
+                      ? "#E5484D"
+                      : voice.state === "speaking"
+                        ? theme.primary
+                        : theme.backgroundSecondary,
+                  opacity: pressed || voice.state === "processing" ? 0.7 : 1,
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  voice.state === "recording"
+                    ? "stop"
+                    : voice.state === "speaking"
+                      ? "mic"
+                      : "mic-outline"
+                }
+                size={18}
+                color={
+                  voice.state === "recording" || voice.state === "speaking"
+                    ? Colors.light.textOnPrimary
+                    : theme.text
+                }
+              />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={handleSend}
             disabled={!input.trim() || thinking}
@@ -516,7 +810,8 @@ const styles = StyleSheet.create({
     borderRadius: 5,
   },
   brandText: {
-    ...Typography.h3,
+    ...Typography.h3Heavy,
+    letterSpacing: -0.4,
   },
   mapButton: {
     flexDirection: "row",
@@ -544,25 +839,29 @@ const styles = StyleSheet.create({
     paddingBottom: Spacing["4xl"],
   },
   heroOrb: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 92,
+    height: 92,
+    borderRadius: 46,
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: Spacing.md,
+    marginBottom: Spacing.lg,
+    borderWidth: 1.5,
   },
   heroOrbInner: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
   },
   greeting: {
-    ...Typography.h1,
+    fontSize: 32,
+    fontWeight: "800" as const,
+    letterSpacing: -0.8,
     textAlign: "center",
   },
   subline: {
-    ...Typography.body,
+    ...Typography.bodyLarge,
     textAlign: "center",
+    marginTop: 2,
   },
   starterGrid: {
     flexDirection: "row",
@@ -577,12 +876,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: Spacing.sm,
     borderRadius: BorderRadius.lg,
-    paddingHorizontal: Spacing.md,
-    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+    paddingVertical: Spacing.lg,
     width: "47%",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(128,128,128,0.25)",
   },
   starterCardText: {
-    ...Typography.smallMedium,
+    ...Typography.labelBold,
     flex: 1,
   },
   userBubble: {
@@ -591,7 +892,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.lg,
-    borderBottomRightRadius: BorderRadius.xs,
+    borderBottomRightRadius: 6,
+    ...Shadows.card,
   },
   userBubbleText: {
     ...Typography.body,
@@ -655,16 +957,34 @@ const styles = StyleSheet.create({
   chipText: {
     ...Typography.smallMedium,
   },
+  voiceStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    paddingHorizontal: Spacing.lg,
+    paddingTop: Spacing.xs,
+  },
+  recordingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#E5484D",
+  },
+  voiceStatusText: {
+    ...Typography.caption,
+  },
   inputBar: {
     flexDirection: "row",
     alignItems: "center",
     marginHorizontal: Spacing.lg,
     marginTop: Spacing.xs,
     borderRadius: BorderRadius.xl,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
     paddingLeft: Spacing.lg,
-    paddingRight: Spacing.xs,
-    paddingVertical: Spacing.xs,
+    paddingRight: 6,
+    paddingVertical: 6,
+    ...Shadows.card,
   },
   input: {
     flex: 1,
@@ -672,9 +992,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.sm,
   },
   sendButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
     marginLeft: Spacing.sm,

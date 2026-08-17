@@ -161,6 +161,12 @@ export default function DriverProfileScreen() {
     ],
     [
       {
+        icon: "notifications-outline",
+        label: "Notifications",
+        subtitle: "Updates from Travony",
+        onPress: () => navigation.navigate("DriverNotifications" as any),
+      },
+      {
         icon: "chatbubbles-outline",
         label: "Messages",
         subtitle: "Chat with your rider",

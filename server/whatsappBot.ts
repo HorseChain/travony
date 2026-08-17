@@ -1,6 +1,8 @@
 import { db } from "./db";
 import { users, drivers, rides } from "@shared/schema";
 import { eq, desc } from "drizzle-orm";
+import crypto from "crypto";
+import { getDemandTipsText } from "./channelFeatures";
 
 // Read env vars dynamically so secret hot-reload works, and trim stray whitespace
 function getAccountSid() { return (process.env.TWILIO_ACCOUNT_SID || "").trim(); }
@@ -61,6 +63,92 @@ export async function sendWhatsAppMessage(to: string, body: string): Promise<boo
   }
 }
 
+/**
+ * Verify Twilio's X-Twilio-Signature on an incoming webhook so forged POSTs
+ * can't spoof a phone number and drive the booking state machine. Twilio signs
+ * HMAC-SHA1(webhookUrl + sortedParamsConcat, authToken), base64. We try the
+ * proxy-forwarded https/http URL variants since the app sits behind a proxy.
+ * When Twilio isn't configured at all (local dev without secrets), requests
+ * are allowed so the console-fallback flow still works.
+ */
+export function validateTwilioSignature(req: any): boolean {
+  const authToken = getAuthToken();
+  if (!authToken) return true;
+  const signature = req.headers?.["x-twilio-signature"];
+  if (!signature || typeof signature !== "string") return false;
+
+  const host = String(req.headers["x-forwarded-host"] || req.headers.host || "");
+  const proto = String(req.headers["x-forwarded-proto"] || "https").split(",")[0].trim();
+  const params = req.body && typeof req.body === "object" ? req.body : {};
+  const data = Object.keys(params)
+    .sort()
+    .reduce((acc, key) => acc + key + String(params[key]), "");
+
+  const urls = new Set<string>([
+    `${proto}://${host}${req.originalUrl}`,
+    `https://${host}${req.originalUrl}`,
+    `http://${host}${req.originalUrl}`,
+  ]);
+  const sigBuf = Buffer.from(signature);
+  for (const url of urls) {
+    const expected = Buffer.from(
+      crypto.createHmac("sha1", authToken).update(url + data).digest("base64"),
+    );
+    if (expected.length === sigBuf.length && crypto.timingSafeEqual(expected, sigBuf)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Send a WhatsApp message with an attached media file (e.g. a TTS voice note). */
+export async function sendWhatsAppMedia(to: string, body: string, mediaUrl: string): Promise<boolean> {
+  const TWILIO_ACCOUNT_SID = getAccountSid();
+  const TWILIO_AUTH_TOKEN = getAuthToken();
+  const TWILIO_WHATSAPP_NUMBER = getWhatsappNumber();
+
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN || !TWILIO_WHATSAPP_NUMBER) {
+    console.log("[WhatsApp] Twilio not configured. Media message:", body);
+    return false;
+  }
+
+  const fromNumber = TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:")
+    ? TWILIO_WHATSAPP_NUMBER
+    : `whatsapp:${TWILIO_WHATSAPP_NUMBER}`;
+  const cleanTo = to.trim().replace(/\s+/g, "");
+  const toNumber = cleanTo.startsWith("whatsapp:") ? cleanTo : `whatsapp:${cleanTo}`;
+
+  try {
+    const auth = Buffer.from(`${TWILIO_ACCOUNT_SID}:${TWILIO_AUTH_TOKEN}`).toString("base64");
+    const response = await fetch(
+      `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Messages.json`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Basic ${auth}`,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          From: fromNumber,
+          To: toNumber,
+          Body: body,
+          MediaUrl: mediaUrl,
+        }),
+      }
+    );
+    const result = await response.json();
+    if (result.sid) {
+      console.log(`[WhatsApp] Media message sent: ${result.sid}`);
+      return true;
+    }
+    console.error("[WhatsApp] Media error:", result);
+    return false;
+  } catch (error) {
+    console.error("[WhatsApp] Error sending media message:", error);
+    return false;
+  }
+}
+
 async function getDriverByPhone(phone: string): Promise<any> {
   const normalizedPhone = phone.replace("whatsapp:", "").replace(/\s/g, "");
   const [driver] = await db.select()
@@ -85,6 +173,7 @@ Comandos / Commands:
 - "rides" - Viajes recientes / Recent rides
 - "online" - Conectarse / Go online
 - "offline" - Desconectarse / Go offline
+- "demand" - Dónde hay demanda / Where the demand is
 - "help" - Ayuda / Help
 
 Responde con un comando / Reply with a command`;
@@ -153,6 +242,23 @@ Platform fee: 10%`;
     return "Estás DESCONECTADO.\n\nYou are OFFLINE.";
   }
 
+  if (text === "demand" || text === "demanda") {
+    if (!driver) {
+      return "Cuenta no encontrada / Account not found";
+    }
+    const d = driver.drivers;
+    const lat = d.currentLat != null ? parseFloat(d.currentLat) : NaN;
+    const lng = d.currentLng != null ? parseFloat(d.currentLng) : NaN;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      return "Abre la app una vez para que sepamos dónde estás, luego escribe DEMANDA.\n\nOpen the app once so we know where you are, then reply DEMAND.";
+    }
+    const tips = await getDemandTipsText(lat, lng);
+    if (!tips) {
+      return "Aún no hay suficiente historial de viajes cerca de ti.\n\nNot enough ride history near you yet — check back soon.";
+    }
+    return tips;
+  }
+
   if (text === "help" || text === "ayuda") {
     return `*Ayuda de Travony / Travony Help*
 
@@ -172,20 +278,88 @@ For urgent issues:
 Common questions:
 - Payments: Processed daily
 - Ratings: Protected for first 20 rides
-- Commission: 10% per ride`;
+- Commission: 10% per ride
+
+Escribe "demanda"/"demand" para ver dónde hay más viajes cerca de ti.
+Type "demand" to see where the rides are near you.`;
   }
 
   return `No entendí tu mensaje. Escribe "hola" para ver los comandos.\n\nI didn't understand. Type "hello" to see commands.`;
 }
 
+// Exact driver command vocabulary (kept small on purpose): when the sender is
+// a registered driver AND the text is one of these, the legacy driver handler
+// answers. Everything else — location pins, voice notes, free text — goes to
+// the rider booking flow.
+const DRIVER_COMMANDS = new Set([
+  "hola", "hi", "hello", "start",
+  "status", "estado", "earnings", "ganancias", "rides", "viajes",
+  "online", "conectar", "offline", "desconectar", "demand", "demanda", "help", "ayuda",
+]);
+
 export async function processWhatsAppWebhook(body: any): Promise<string | null> {
   const from = body.From;
-  const messageBody = body.Body;
+  const messageBody = typeof body.Body === "string" ? body.Body : "";
+  if (!from) return null;
 
-  if (!from || !messageBody) {
-    return null;
+  const latitude = body.Latitude !== undefined ? parseFloat(body.Latitude) : undefined;
+  const longitude = body.Longitude !== undefined ? parseFloat(body.Longitude) : undefined;
+  const hasLocation = Number.isFinite(latitude) && Number.isFinite(longitude);
+  const mediaUrl = body.MediaUrl0 as string | undefined;
+  const mediaContentType = body.MediaContentType0 as string | undefined;
+
+  // Driver keeps their existing command UX for the exact command words.
+  const text = messageBody.trim().toLowerCase();
+  if (text && DRIVER_COMMANDS.has(text) && !hasLocation && !mediaUrl) {
+    const phone = from.replace("whatsapp:", "");
+    const driver = await getDriverByPhone(phone);
+    if (driver) {
+      return handleWhatsAppCommand(from, messageBody);
+    }
   }
 
+  // Driver chat onboarding: an active interview consumes the message (photos
+  // included); "I want to drive" starts one. Runs before the rider flow so a
+  // mid-interview photo or answer is never misread as a booking — but never
+  // while the rider is mid-booking, where free text is a booking answer, not
+  // drive intent. (An active interview and an active booking step can't
+  // coexist: the interview consumes every message first.)
+  try {
+    const { hasActiveWaBookingStep } = await import("./whatsappRiderBot");
+    const midBooking = await hasActiveWaBookingStep(from.replace("whatsapp:", ""));
+    if (!midBooking) {
+      const { tryHandleWhatsAppOnboarding } = await import("./onboardingAgent");
+      const onboarded = await tryHandleWhatsAppOnboarding({
+        from,
+        body: messageBody,
+        mediaUrl,
+        mediaContentType,
+        profileName: typeof body.ProfileName === "string" ? body.ProfileName : undefined,
+      });
+      if (onboarded) return null;
+    }
+  } catch (error) {
+    console.error("[WhatsApp] onboarding handler error:", error);
+  }
+
+  // Rider booking flow (sends its own messages via the REST API).
+  try {
+    const { tryHandleWhatsAppRider } = await import("./whatsappRiderBot");
+    const handled = await tryHandleWhatsAppRider({
+      from,
+      body: messageBody,
+      latitude: hasLocation ? (latitude as number) : undefined,
+      longitude: hasLocation ? (longitude as number) : undefined,
+      mediaUrl,
+      mediaContentType,
+      profileName: typeof body.ProfileName === "string" ? body.ProfileName : undefined,
+    });
+    if (handled) return null;
+  } catch (error) {
+    console.error("[WhatsApp] rider handler error:", error);
+  }
+
+  if (!messageBody) return null;
   const response = await handleWhatsAppCommand(from, messageBody);
   return response;
 }
@@ -266,6 +440,7 @@ Escribe cualquiera de estos comandos:
 - "estado" - Ver tu estado
 - "ganancias" - Ver tus ganancias
 - "viajes" - Ver viajes recientes
+- "demanda" - Ver dónde hay más viajes
 - "ayuda" - Obtener ayuda
 
 Siguiente: Abre la app para completar tu registro.`;

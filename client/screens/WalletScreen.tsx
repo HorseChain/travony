@@ -77,6 +77,12 @@ export default function WalletScreen() {
     enabled: !!user?.id,
   });
 
+  // TV watch-to-earn credits (authenticated; 401 returns null via query client)
+  const { data: tvCreditsData } = useQuery<{ balance: number } | null>({
+    queryKey: ["/api/tv/credits"],
+    enabled: !!user?.id,
+  });
+
   const [isCreatingInvoice, setIsCreatingInvoice] = useState(false);
 
   const handleUsdtTopup = async () => {
@@ -171,6 +177,7 @@ export default function WalletScreen() {
   const balance = walletData?.balance || "0.00";
   const hrsBalance = hrsData?.balanceFormatted || "0.00";
   const hrsLinked = hrsData?.linked === true;
+  const tvCredits = tvCreditsData?.balance ?? 0;
 
   return (
     <ScrollView
@@ -196,6 +203,24 @@ export default function WalletScreen() {
         </View>
         ) : null}
       </View>
+
+      {/* TV watch-to-earn credits */}
+      <Card style={styles.tvCreditsCard}>
+        <View style={styles.tvCreditsRow}>
+          <View style={[styles.cardIconContainer, { backgroundColor: theme.primary + "20" }]}>
+            <Ionicons name="tv-outline" size={24} color={theme.primary} />
+          </View>
+          <View style={styles.tvCreditsInfo}>
+            <ThemedText style={styles.tvCreditsTitle}>TV credits</ThemedText>
+            <ThemedText style={[styles.tvCreditsNote, { color: theme.textSecondary }]}>
+              Earned by watching Travony TV — applied to your fares automatically.
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.tvCreditsAmount, { color: theme.primary }]}>
+            AED {tvCredits.toFixed(2)}
+          </ThemedText>
+        </View>
+      </Card>
 
       {/* HRS Token Card (crypto-gated) */}
       {!FEATURES.crypto ? null : (
@@ -529,6 +554,12 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.full,
   },
   balanceActionText: { ...Typography.bodyBold, color: Colors.light.textOnPrimary, marginLeft: Spacing.sm },
+  tvCreditsCard: { marginBottom: Spacing.lg, padding: Spacing.lg },
+  tvCreditsRow: { flexDirection: "row", alignItems: "center" },
+  tvCreditsInfo: { flex: 1, marginRight: Spacing.md },
+  tvCreditsTitle: { ...Typography.h4 },
+  tvCreditsNote: { ...Typography.small, marginTop: Spacing.xs },
+  tvCreditsAmount: { ...Typography.h4Heavy },
   hrsCard: {
     flexDirection: "row",
     alignItems: "center",

@@ -59,6 +59,10 @@ export const users = pgTable("users", {
   preferredLanguage: text("preferred_language").default("en"),
   telegramChatId: text("telegram_chat_id"),
   whatsappOptIn: boolean("whatsapp_opt_in").default(false),
+  // Talk-to-the-car personalization: when true, a car the rider chats with may
+  // greet them using their OWN coarse ride history (ride count with that car,
+  // frequent-destination labels). Toggleable from the car chat screen.
+  carChatPersonalization: boolean("car_chat_personalization").default(true),
   // Legacy column from the removed Twitch integration; unused.
   twitchChannel: text("twitch_channel"),
   // Short public bio shown on the TikTok-style profile (max 80 chars, enforced server-side).
@@ -93,6 +97,9 @@ export const drivers = pgTable("drivers", {
   evReadyAt: timestamp("ev_ready_at"),
   prayerPauseEnabled: boolean("prayer_pause_enabled").default(false),
   prayerPausePrayers: text("prayer_pause_prayers"),
+  // Travony TV — driver has opted in to having their live streams featured
+  // on the public /tv channel. Off by default (explicit opt-in per task spec).
+  tvOptIn: boolean("tv_opt_in").default(false).notNull(),
   fleetOwnerId: varchar("fleet_owner_id").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -113,6 +120,14 @@ export const vehicles = pgTable("vehicles", {
   photoInterior: text("photo_interior"),
   publicHandle: text("public_handle").unique(),
   nickname: text("nickname"),
+  // Car persona — public "talking car" identity. personaBlurb is AI-drafted
+  // from REAL stats only and must pass the server-side honesty guard (no
+  // invented numbers, no crypto vocab); the driver previews/regenerates and
+  // explicitly saves. personaTone: warm | playful | professional.
+  personaName: text("persona_name"),
+  personaBlurb: text("persona_blurb"),
+  personaTone: text("persona_tone").default("warm"),
+  personaUpdatedAt: timestamp("persona_updated_at"),
   walletBalance: decimal("wallet_balance", { precision: 12, scale: 2 }).default("0.00"),
   totalEarnings: decimal("total_earnings", { precision: 12, scale: 2 }).default("0.00"),
   totalTrips: integer("total_trips").default(0),
@@ -236,6 +251,12 @@ export const rides = pgTable("rides", {
   // Surge-capped server estimate frozen at booking — the immutable upper bound
   // for offers/counters so repeated raises can't compound the ceiling upward.
   offerCeiling: decimal("offer_ceiling", { precision: 10, scale: 2 }),
+  // Talk-to-the-car targeted dispatch: the rider asked THIS driver's car.
+  // Until targetExpiresAt the pending ride is reserved for targetDriverId
+  // (invisible to other drivers, accepts by others rejected); after the
+  // window it falls back to the normal broadcast pool automatically.
+  targetDriverId: varchar("target_driver_id").references(() => drivers.id),
+  targetExpiresAt: timestamp("target_expires_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -1571,6 +1592,9 @@ export const apiKeys = pgTable("api_keys", {
   planTier: varchar("plan_tier", { length: 24 }).notNull().default("free"),
   stripeCustomerId: text("stripe_customer_id"),
   stripeSubscriptionId: text("stripe_subscription_id"),
+  // Agent Gateway: optional per-key override of the plan-tier daily spend cap
+  // (approximate USD) for agent bookings. Null = use the tier default.
+  agentDailySpendCapUsd: decimal("agent_daily_spend_cap_usd", { precision: 12, scale: 2 }),
   lastUsedAt: timestamp("last_used_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -1637,6 +1661,114 @@ export type TelegramBookingSession = typeof telegramBookingSessions.$inferSelect
 export type InsertTelegramBookingSession = typeof telegramBookingSessions.$inferInsert;
 
 // ---------------------------------------------------------------------------
+// AI Onboarding Agent — durable conversational sessions.
+// kind="driver": the chat driver interview (state machine + collected photos).
+// kind="rider_quote": a priced-but-unbooked rider quote, tracked so exactly one
+// well-timed nudge can be sent (nudgeSentAt claim + optOut respected).
+// One row per (channel, channelKey, kind); data is a JSON string.
+// ---------------------------------------------------------------------------
+export const onboardingSessions = pgTable(
+  "onboarding_sessions",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    channel: text("channel").notNull(), // "whatsapp" | "telegram"
+    channelKey: text("channel_key").notNull(), // phone (+digits) or telegram chat id
+    kind: text("kind").default("driver").notNull(), // "driver" | "rider_quote"
+    state: text("state").default("started").notNull(),
+    data: text("data").default("{}").notNull(),
+    userId: varchar("user_id").references(() => users.id),
+    driverId: varchar("driver_id").references(() => drivers.id),
+    nudgeSentAt: timestamp("nudge_sent_at"),
+    optOut: boolean("opt_out").default(false).notNull(),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (t) => [unique("onboarding_sessions_channel_key_kind").on(t.channel, t.channelKey, t.kind)],
+);
+
+export type OnboardingSession = typeof onboardingSessions.$inferSelect;
+export type InsertOnboardingSession = typeof onboardingSessions.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Agent Gateway — external AIs (ChatGPT, Alexa, in-car assistants) booking
+// rides through the partner API. One row per agent booking attempt keyed by
+// the client-supplied idempotency key, so a retried tool call can never create
+// a second ride. `responseJson` is the exact response snapshot replayed on an
+// idempotent retry. `spendUsd` is an approximate USD-equivalent used ONLY for
+// spend-cap enforcement (real money fields live on the ride, server-derived).
+// ---------------------------------------------------------------------------
+
+export const agentBookings = pgTable("agent_bookings", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  keyId: varchar("key_id").references(() => apiKeys.id).notNull(),
+  ownerId: varchar("owner_id").notNull(),
+  agentId: text("agent_id").notNull().default("unknown"),
+  idempotencyKey: varchar("idempotency_key", { length: 128 }).notNull(),
+  // Two-phase: an intent row (status=pending) carrying a PRE-GENERATED rideId
+  // is committed BEFORE the ride is created (hence no FK — the ride does not
+  // exist yet), then flipped to booked once createBrainRide inserts that exact
+  // id. Recovery is bound to this id: a retry adopts the ride ONLY if a ride
+  // with intent.rideId exists — never inferred from rider + time.
+  status: varchar("status", { length: 16 }).notNull().default("pending"), // pending | booked
+  rideId: varchar("ride_id"),
+  riderUserId: varchar("rider_user_id").notNull(),
+  fare: decimal("fare", { precision: 12, scale: 2 }).notNull(),
+  currency: varchar("currency", { length: 8 }).notNull(),
+  spendUsd: decimal("spend_usd", { precision: 12, scale: 2 }).notNull(),
+  responseJson: jsonb("response_json"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  idemUnique: unique("agent_bookings_key_idem_unique").on(t.keyId, t.idempotencyKey),
+  rideIdx: index("agent_bookings_ride_idx").on(t.rideId),
+  spendIdx: index("agent_bookings_spend_idx").on(t.keyId, t.createdAt),
+}));
+
+export type AgentBooking = typeof agentBookings.$inferSelect;
+export type InsertAgentBooking = typeof agentBookings.$inferInsert;
+
+// Webhook endpoint registered per API key for ride status callbacks. `secret`
+// signs every delivery (HMAC-SHA256, Stripe-style t=..,v1=.. header) and is
+// returned exactly once at registration.
+export const agentWebhooks = pgTable("agent_webhooks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  keyId: varchar("key_id").references(() => apiKeys.id).notNull(),
+  url: text("url").notNull(),
+  secret: text("secret").notNull(),
+  isActive: boolean("is_active").default(true).notNull(),
+  failCount: integer("fail_count").default(0).notNull(),
+  lastDeliveryAt: timestamp("last_delivery_at"),
+  lastError: text("last_error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  keyIdx: index("agent_webhooks_key_idx").on(t.keyId),
+}));
+
+export type AgentWebhook = typeof agentWebhooks.$inferSelect;
+export type InsertAgentWebhook = typeof agentWebhooks.$inferInsert;
+
+// Durable delivery queue for webhook callbacks — survives restarts so a ride
+// status transition is never silently dropped. Retried with backoff until
+// delivered or attempts are exhausted.
+export const agentWebhookDeliveries = pgTable("agent_webhook_deliveries", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  webhookId: varchar("webhook_id").references(() => agentWebhooks.id).notNull(),
+  rideId: varchar("ride_id").notNull(),
+  event: varchar("event", { length: 48 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  status: varchar("status", { length: 16 }).notNull().default("pending"), // pending | delivered | failed
+  attempts: integer("attempts").default(0).notNull(),
+  nextAttemptAt: timestamp("next_attempt_at").defaultNow().notNull(),
+  deliveredAt: timestamp("delivered_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => ({
+  dueIdx: index("agent_webhook_deliveries_due_idx").on(t.status, t.nextAttemptAt),
+}));
+
+export type AgentWebhookDelivery = typeof agentWebhookDeliveries.$inferSelect;
+export type InsertAgentWebhookDelivery = typeof agentWebhookDeliveries.$inferInsert;
+
+// ---------------------------------------------------------------------------
 // Social layer: follows between users + published / Twitch-streamed rides.
 // ---------------------------------------------------------------------------
 
@@ -1653,7 +1785,7 @@ export const userFollows = pgTable("user_follows", {
 export type UserFollow = typeof userFollows.$inferSelect;
 export type InsertUserFollow = typeof userFollows.$inferInsert;
 
-export const ridePostTypeEnum = pgEnum("ride_post_type", ["published", "stream"]);
+export const ridePostTypeEnum = pgEnum("ride_post_type", ["published", "stream", "clip"]);
 
 // A ride shared to the social feed. type="published" is an after-ride card;
 // type="stream" is a live in-app (Agora) broadcast of an in-progress ride.
@@ -1687,6 +1819,61 @@ export const ridePosts = pgTable("ride_posts", {
 
 export type RidePost = typeof ridePosts.$inferSelect;
 export type InsertRidePost = typeof ridePosts.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// AI highlight clips — engagement signal timeline captured during Agora live
+// streams, and the auto-generated candidate clips a driver reviews after the
+// stream ends. Signals are display/scoring data only (no money). Clips store
+// the rendered vertical video inline (base64 mp4) so they survive restarts
+// and deploys like every other media blob in this project.
+// ---------------------------------------------------------------------------
+
+export const streamSignals = pgTable("stream_signals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id).notNull(),
+  // "viewer" (value = viewer count at ts), "gift" (value = coin amount),
+  // "clip_mark" (a viewer tapped "clip that"; value = 1).
+  kind: text("kind").notNull(),
+  value: integer("value").notNull().default(0),
+  userId: varchar("user_id"),
+  ts: timestamp("ts").defaultNow().notNull(),
+}, (t) => [index("stream_signals_post_idx").on(t.postId)]);
+
+export type StreamSignal = typeof streamSignals.$inferSelect;
+
+export const streamClips = pgTable("stream_clips", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id).notNull(),
+  rideId: varchar("ride_id"),
+  hostUserId: varchar("host_user_id").notNull(),
+  vehicleId: varchar("vehicle_id"),
+  // Public car handle stamped into the watermark (never driver identity).
+  handle: text("handle"),
+  // Window inside the stream, seconds from stream start.
+  startOffsetSec: integer("start_offset_sec").notNull(),
+  durationSec: integer("duration_sec").notNull(),
+  score: decimal("score", { precision: 10, scale: 2 }).default("0").notNull(),
+  // Deterministic scoring breakdown, e.g. {clipMarks:2, giftCoins:600, viewerPeak:5}
+  reasons: jsonb("reasons"),
+  title: text("title"),
+  caption: text("caption"),
+  cityName: text("city_name"),
+  // rendering -> ready -> approved | discarded; failed on render error.
+  // NOTHING is public until the driver explicitly approves.
+  status: text("status").notNull().default("rendering"),
+  videoData: text("video_data"),
+  thumbnailData: text("thumbnail_data"),
+  frameCount: integer("frame_count").default(0).notNull(),
+  peakViewers: integer("peak_viewers").default(0).notNull(),
+  giftCoins: integer("gift_coins").default(0).notNull(),
+  clipMarks: integer("clip_marks").default(0).notNull(),
+  // Feed post created when the driver approves (type="clip").
+  feedPostId: varchar("feed_post_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  approvedAt: timestamp("approved_at"),
+}, (t) => [index("stream_clips_post_idx").on(t.postId), index("stream_clips_vehicle_idx").on(t.vehicleId)]);
+
+export type StreamClip = typeof streamClips.$inferSelect;
 
 // ---------------------------------------------------------------------------
 // Hyper-local geo stream ads — businesses registered by admins (or via the
@@ -1731,6 +1918,11 @@ export const streamProducts = pgTable("stream_products", {
   priceLabel: text("price_label").notNull(),
   ttlSeconds: integer("ttl_seconds").default(45).notNull(),
   tapCount: integer("tap_count").default(0).notNull(),
+  // Travony TV sponsor metrics — how many /tv viewers saw / tapped this card
+  // while its stream was featured on the public channel. Separate from the
+  // in-app tapCount so businesses can see TV reach distinctly.
+  tvImpressions: integer("tv_impressions").default(0).notNull(),
+  tvTaps: integer("tv_taps").default(0).notNull(),
   // Nullable FK — set only when this card was auto-pinned by the geo-ad engine.
   // ON DELETE SET NULL: allows admins to hard-delete a business without
   // violating the constraint when old pinned cards still reference it.
@@ -2144,3 +2336,231 @@ export const goLiveRequests = pgTable("go_live_requests", {
 
 export type GoLiveRequest = typeof goLiveRequests.$inferSelect;
 export type InsertGoLiveRequest = typeof goLiveRequests.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Notifications — unified in-app inbox + delivery record for external channels
+// ---------------------------------------------------------------------------
+
+export const notifications = pgTable("notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  kind: text("kind").notNull(), // autopilot_position, autopilot_onboarding, autopilot_reengage, ride_update, autopilot_report, system
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  data: jsonb("data"),
+  urgency: text("urgency").default("normal").notNull(), // low | normal | high
+  channels: jsonb("channels"), // delivery record per channel: sent | skipped:<reason> | failed
+  dedupeKey: text("dedupe_key"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("notifications_user_idx").on(table.userId, table.createdAt),
+  index("notifications_user_unread_idx").on(table.userId, table.readAt),
+  index("notifications_dedupe_idx").on(table.userId, table.dedupeKey, table.createdAt),
+]);
+
+export type Notification = typeof notifications.$inferSelect;
+export type InsertNotification = typeof notifications.$inferInsert;
+
+export const notificationPrefs = pgTable("notification_prefs", {
+  userId: varchar("user_id").references(() => users.id).primaryKey(),
+  muteAll: boolean("mute_all").default(false).notNull(),
+  telegramEnabled: boolean("telegram_enabled").default(true).notNull(),
+  smsEnabled: boolean("sms_enabled").default(true).notNull(),
+  emailEnabled: boolean("email_enabled").default(true).notNull(),
+  quietHoursStart: integer("quiet_hours_start").default(22).notNull(), // local hour 0-23
+  quietHoursEnd: integer("quiet_hours_end").default(8).notNull(),
+  timezoneOffsetMinutes: integer("timezone_offset_minutes"), // client-reported; falls back to region default
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type NotificationPrefs = typeof notificationPrefs.$inferSelect;
+export type InsertNotificationPrefs = typeof notificationPrefs.$inferInsert;
+
+// ---------------------------------------------------------------------------
+// Autopilot — autonomous operator agent: bounded actions + outcome learning
+// ---------------------------------------------------------------------------
+
+export const autopilotActions = pgTable("autopilot_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  play: text("play").notNull(), // idle_driver_position, driver_onboarding_nudge, quiet_rider_reengage, rider_pending_reassure, daily_report
+  targetUserId: varchar("target_user_id").references(() => users.id),
+  publicSummary: text("public_summary").notNull(), // sanitized for the public feed — never PII
+  detail: jsonb("detail"),
+  notificationId: varchar("notification_id"),
+  outcome: text("outcome"), // null = pending, then hit | miss | n/a
+  outcomeAt: timestamp("outcome_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("autopilot_actions_play_idx").on(table.play, table.createdAt),
+  index("autopilot_actions_target_idx").on(table.targetUserId, table.play, table.createdAt),
+  index("autopilot_actions_outcome_idx").on(table.outcome, table.createdAt),
+]);
+
+export type AutopilotAction = typeof autopilotActions.$inferSelect;
+export type InsertAutopilotAction = typeof autopilotActions.$inferInsert;
+
+export const autopilotPlayStats = pgTable("autopilot_play_stats", {
+  play: text("play").primaryKey(),
+  attempts: integer("attempts").default(0).notNull(),
+  hits: integer("hits").default(0).notNull(),
+  misses: integer("misses").default(0).notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  lastRunAt: timestamp("last_run_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type AutopilotPlayStats = typeof autopilotPlayStats.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// Travony TV — one always-on public channel (/tv). A deterministic director
+// cycles the best live Agora stream into the featured slot; viewers earn
+// small ride credits for signed-in watch time; sponsors get TV reach metrics.
+// ---------------------------------------------------------------------------
+
+// Featured-slot history: exactly one open row (endedAt IS NULL) at a time is
+// the currently featured stream. Closed rows feed the weekly leaderboard.
+export const tvFeatureEvents = pgTable("tv_feature_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "cascade" }).notNull(),
+  hostUserId: varchar("host_user_id").references(() => users.id).notNull(),
+  driverId: varchar("driver_id").references(() => drivers.id),
+  // Deterministic director score at selection time (integer points).
+  score: integer("score").default(0).notNull(),
+  // Viewer count snapshot at selection; peak while featured.
+  viewerCount: integer("viewer_count").default(0).notNull(),
+  peakViewers: integer("peak_viewers").default(0).notNull(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  endedAt: timestamp("ended_at"),
+}, (table) => [
+  index("tv_feature_events_open_idx").on(table.endedAt, table.startedAt),
+  index("tv_feature_events_post_idx").on(table.postId, table.startedAt),
+  index("tv_feature_events_host_idx").on(table.hostUserId, table.startedAt),
+]);
+
+export type TvFeatureEvent = typeof tvFeatureEvents.$inferSelect;
+export type InsertTvFeatureEvent = typeof tvFeatureEvents.$inferInsert;
+
+// Watch-to-earn balance per user. TV credit is NON-withdrawable: it is only
+// ever redeemed into ride credit (wallet top-up) at ride completion.
+export const tvWatchBalances = pgTable("tv_watch_balances", {
+  userId: varchar("user_id").references(() => users.id).primaryKey(),
+  balance: decimal("balance", { precision: 12, scale: 2 }).default("0.00").notNull(),
+  earnedTotal: decimal("earned_total", { precision: 12, scale: 2 }).default("0.00").notNull(),
+  redeemedTotal: decimal("redeemed_total", { precision: 12, scale: 2 }).default("0.00").notNull(),
+  // Daily cap accounting (UTC date string YYYY-MM-DD).
+  earnedToday: decimal("earned_today", { precision: 12, scale: 2 }).default("0.00").notNull(),
+  earnedTodayDate: text("earned_today_date"),
+  lastHeartbeatAt: timestamp("last_heartbeat_at"),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export type TvWatchBalance = typeof tvWatchBalances.$inferSelect;
+
+export const tvWatchLedger = pgTable("tv_watch_ledger", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id).notNull(),
+  kind: text("kind").notNull(), // earn | redeem
+  amount: decimal("amount", { precision: 12, scale: 2 }).notNull(),
+  postId: varchar("post_id").references(() => ridePosts.id, { onDelete: "set null" }),
+  rideId: varchar("ride_id").references(() => rides.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  index("tv_watch_ledger_user_idx").on(table.userId, table.createdAt),
+]);
+
+export type TvWatchLedgerEntry = typeof tvWatchLedger.$inferSelect;
+
+// ============ City Brain demand forecast ============
+// Zone x hour-of-week rollup of real ride history. Refreshed on a schedule by
+// the demand forecast engine; the forecast is deterministic math over these
+// counts (the LLM only ever writes the human explanation sentence).
+export const zoneDemandHistory = pgTable("zone_demand_history", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  zoneId: varchar("zone_id").notNull(),
+  // 0-167: dayOfWeek * 24 + hourOfDay (UTC — consistent per zone, since a zone
+  // sits at a fixed longitude its UTC hour maps to a fixed local hour).
+  hourOfWeek: integer("hour_of_week").notNull(),
+  rideCount: integer("ride_count").notNull().default(0),
+  // How many weeks the lookback window actually covered when this row was
+  // built (young projects have < 8 weeks of data; used for honest confidence).
+  weeksSpan: integer("weeks_span").notNull().default(1),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => [
+  unique("zone_demand_hist_zone_hour_uq").on(table.zoneId, table.hourOfWeek),
+]);
+
+export type ZoneDemandHistoryRow = typeof zoneDemandHistory.$inferSelect;
+
+// Every forecast-backed "go here next" card served to a driver, so we can
+// later check whether a ride actually materialized in that zone within the
+// window (simple hit-rate metric). Deduped per driver+zone+hour window.
+export const forecastRecommendations = pgTable("forecast_recommendations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  driverId: varchar("driver_id").references(() => drivers.id).notNull(),
+  zoneId: varchar("zone_id").notNull(),
+  // ISO hour bucket (e.g. 2026-08-17T09) used only for dedupe.
+  windowKey: varchar("window_key").notNull(),
+  kind: text("kind").notNull(), // hub | hotspot | forecast | zone
+  lat: decimal("lat", { precision: 10, scale: 8 }).notNull(),
+  lng: decimal("lng", { precision: 11, scale: 8 }).notNull(),
+  score: decimal("score", { precision: 8, scale: 3 }).notNull(),
+  confidence: decimal("confidence", { precision: 4, scale: 3 }).notNull(),
+  reason: text("reason"),
+  windowStart: timestamp("window_start").notNull(),
+  windowEnd: timestamp("window_end").notNull(),
+  // Outcome: set exactly once by the atomic checker after windowEnd.
+  materialized: boolean("materialized"),
+  materializedRides: integer("materialized_rides"),
+  checkedAt: timestamp("checked_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => [
+  unique("forecast_rec_dedupe_uq").on(table.driverId, table.zoneId, table.windowKey),
+  index("forecast_rec_unchecked_idx").on(table.checkedAt, table.windowEnd),
+]);
+
+export type ForecastRecommendationRow = typeof forecastRecommendations.$inferSelect;
+
+// ---------------------------------------------------------------------------
+// AI safety layer — every streamed ride gets a post-ride safety report.
+// Events are the deterministic raw signals (harsh speed changes, stream drops
+// while moving, control lockouts, participant bookmarks). No raw video, no
+// exact coordinates — stream offsets + coarse labels only.
+// ---------------------------------------------------------------------------
+export const rideSafetyEvents = pgTable("ride_safety_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rideId: varchar("ride_id").references(() => rides.id).notNull(),
+  // The live stream this event happened during (nullable: bookmarks can land
+  // on rides whose stream hasn't started yet).
+  postId: varchar("post_id").references(() => ridePosts.id),
+  // harsh_brake | harsh_accel | stream_drop_moving | control_lockout | bookmark
+  kind: text("kind").notNull(),
+  // flag (counts toward "flagged" status) | notice (bookmark) | info (context)
+  severity: text("severity").notNull().default("info"),
+  // Seconds into the linked stream — lets fleet owners jump to the moment.
+  streamOffsetSec: integer("stream_offset_sec"),
+  speedKmh: decimal("speed_kmh", { precision: 6, scale: 2 }),
+  deltaKmh: decimal("delta_kmh", { precision: 6, scale: 2 }),
+  // Who pinned it (bookmarks only).
+  createdBy: varchar("created_by").references(() => users.id),
+  note: text("note"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [index("ride_safety_events_ride_idx").on(t.rideId)]);
+
+export type RideSafetyEvent = typeof rideSafetyEvents.$inferSelect;
+
+export const rideSafetyReports = pgTable("ride_safety_reports", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  rideId: varchar("ride_id").references(() => rides.id).notNull().unique(),
+  status: text("status").notNull(), // calm | flagged
+  flagCount: integer("flag_count").notNull().default(0),
+  bookmarkCount: integer("bookmark_count").notNull().default(0),
+  // Deterministic facts the summary was written from (counts only).
+  facts: jsonb("facts").notNull(),
+  summary: text("summary").notNull(),
+  summarySource: text("summary_source").notNull().default("template"), // ai | template
+  generatedAt: timestamp("generated_at").defaultNow().notNull(),
+});
+
+export type RideSafetyReport = typeof rideSafetyReports.$inferSelect;

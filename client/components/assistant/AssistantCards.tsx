@@ -9,7 +9,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useLiteMode, litePollMs } from "@/hooks/useLiteMode";
 import { apiRequest } from "@/lib/query-client";
 import { FEATURES } from "@/constants/features";
-import { Colors, Spacing, BorderRadius, Typography } from "@/constants/theme";
+import { Colors, Spacing, BorderRadius, Typography, Shadows } from "@/constants/theme";
 
 // ============================================================================
 // Assistant cards — the interactive layer of the AI home. Every number shown
@@ -63,6 +63,14 @@ export interface AssistantCardHandlers {
   onPickPlace: (place: AssistantPoint & { label?: string }) => void;
   onBooked: (rideId: string) => void;
   onEvent: (intent: string, accepted: boolean, destination?: AssistantPoint) => void;
+  /**
+   * Shared booking claim between the card's Confirm button and the parent's
+   * voice-confirm path. Returns false when another booking attempt is already
+   * in flight — the caller must NOT start its own request. Call releaseBooking
+   * only after a claimed attempt fails (success keeps the claim consumed).
+   */
+  claimBooking?: () => boolean;
+  releaseBooking?: () => void;
 }
 
 function CardShell({ children }: { children: React.ReactNode }) {
@@ -141,7 +149,17 @@ function BookingCard({ card, handlers }: { card: BookingCardData; handlers: Assi
       handlers.onEvent("book_ride", true, card.dropoff);
       if (rideId) handlers.onBooked(rideId);
     },
+    onError: () => {
+      handlers.releaseBooking?.();
+    },
   });
+
+  const confirmBooking = () => {
+    if (bookMutation.isPending) return;
+    // Refuse to start when a voice "yes" already claimed this quote.
+    if (handlers.claimBooking && !handlers.claimBooking()) return;
+    bookMutation.mutate();
+  };
 
   if (bookedRideId) {
     return <LiveRideCard card={{ type: "live_ride", rideId: bookedRideId }} />;
@@ -239,11 +257,15 @@ function BookingCard({ card, handlers }: { card: BookingCardData; handlers: Assi
             <ThemedText style={[styles.secondaryButtonText, { color: theme.textSecondary }]}>Not now</ThemedText>
           </Pressable>
           <Pressable
-            onPress={() => bookMutation.mutate()}
+            onPress={confirmBooking}
             disabled={bookMutation.isPending}
             style={({ pressed }) => [
               styles.confirmButton,
-              { backgroundColor: theme.primary, opacity: pressed || bookMutation.isPending ? 0.8 : 1 },
+              {
+                backgroundColor: theme.primary,
+                opacity: bookMutation.isPending ? 0.8 : 1,
+                transform: [{ scale: pressed ? 0.96 : 1 }],
+              },
             ]}
           >
             {bookMutation.isPending ? (
@@ -880,11 +902,12 @@ export function AssistantCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
     borderWidth: StyleSheet.hairlineWidth,
     padding: Spacing.lg,
-    marginTop: Spacing.sm,
+    marginTop: Spacing.md,
     gap: Spacing.sm,
+    ...Shadows.card,
   },
   bookingHeader: {
     flexDirection: "row",
@@ -892,21 +915,23 @@ const styles = StyleSheet.create({
     gap: Spacing.md,
   },
   iconBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
   },
   bookingFare: {
-    ...Typography.h3,
+    ...Typography.xlHeavy,
+    letterSpacing: -0.5,
   },
   bookingMeta: {
     ...Typography.small,
     marginTop: 2,
   },
   cardTitle: {
-    ...Typography.bodyMedium,
+    ...Typography.bodyBold,
+    letterSpacing: -0.2,
   },
   routeRow: {
     flexDirection: "row",
@@ -968,15 +993,17 @@ const styles = StyleSheet.create({
     ...Typography.smallBold,
   },
   confirmButton: {
-    paddingHorizontal: Spacing.lg,
-    paddingVertical: Spacing.sm + 2,
+    paddingHorizontal: Spacing.xl,
+    paddingVertical: Spacing.md,
     borderRadius: BorderRadius.full,
-    minWidth: 120,
+    minWidth: 132,
     alignItems: "center",
+    ...Shadows.card,
   },
   confirmButtonText: {
-    ...Typography.smallHeavy,
+    ...Typography.labelHeavy,
     color: Colors.light.textOnPrimary,
+    letterSpacing: 0.1,
   },
   declinedText: {
     ...Typography.small,
@@ -1005,12 +1032,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: Spacing.sm,
     paddingVertical: Spacing.md,
-    borderRadius: BorderRadius.sm,
+    borderRadius: BorderRadius.full,
     borderWidth: StyleSheet.hairlineWidth,
     marginTop: Spacing.xs,
   },
   rowButtonText: {
-    ...Typography.smallBold,
+    ...Typography.labelBold,
   },
   txRow: {
     flexDirection: "row",
@@ -1031,13 +1058,13 @@ const styles = StyleSheet.create({
     ...Typography.caption,
   },
   progressTrack: {
-    height: 6,
-    borderRadius: 3,
+    height: 8,
+    borderRadius: 4,
     overflow: "hidden",
     marginTop: Spacing.sm,
   },
   progressFill: {
-    height: 6,
-    borderRadius: 3,
+    height: 8,
+    borderRadius: 4,
   },
 });

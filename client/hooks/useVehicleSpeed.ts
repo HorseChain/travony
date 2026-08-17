@@ -75,9 +75,16 @@ export function nextMovingState(
 
 // ---------------------------------------------------------------------------
 
-export function useVehicleSpeed(): { movingState: MovingState } {
+export function useVehicleSpeed(): {
+  movingState: MovingState;
+  /** Latest valid GPS speed in km/h (null until the first valid reading).
+   * A ref, not state — reading it never causes re-renders; consumers sample
+   * it on their own cadence (e.g. the broadcast heartbeat). */
+  speedKmhRef: React.MutableRefObject<number | null>;
+} {
   // Start in "unknown" — controls are locked until the first valid GPS reading.
   const [movingState, setMovingState] = useState<MovingState>("unknown");
+  const speedKmhRef = useRef<number | null>(null);
   const belowSinceRef = useRef<number | null>(null);
   // Keep a ref-copy of movingState for use inside the watchPosition callback
   // without re-subscribing on every state change.
@@ -114,6 +121,7 @@ export function useVehicleSpeed(): { movingState: MovingState } {
             if (rawSpeed === null || rawSpeed === undefined || rawSpeed < 0) return;
 
             const speedKmh = rawSpeed * 3.6;
+            speedKmhRef.current = speedKmh;
             const { nextState, nextBelowSince } = nextMovingState(
               movingStateRef.current,
               speedKmh,
@@ -140,5 +148,5 @@ export function useVehicleSpeed(): { movingState: MovingState } {
     };
   }, []);
 
-  return { movingState };
+  return { movingState, speedKmhRef };
 }

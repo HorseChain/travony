@@ -53,11 +53,43 @@ export default function DriverAppSettingsScreen() {
     "isha",
   ]);
 
+  // Travony TV opt-in
+  const [tvOptIn, setTvOptIn] = useState(false);
+
   // Fetch current driver settings
   const { data: driverData } = useQuery<any>({
     queryKey: ["/api/drivers/me"],
     enabled: !!user,
   });
+
+  const { data: tvOptInData } = useQuery<any>({
+    queryKey: ["/api/tv/opt-in"],
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    if (tvOptInData && typeof tvOptInData.optIn === "boolean") {
+      setTvOptIn(tvOptInData.optIn);
+    }
+  }, [tvOptInData]);
+
+  const updateTvOptIn = useMutation({
+    mutationFn: async (optIn: boolean) =>
+      apiRequest("/api/tv/opt-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optIn }),
+      }),
+    onError: (error: any) => {
+      setTvOptIn((v) => !v);
+      Alert.alert("Error", error.message || "Failed to update Travony TV setting");
+    },
+  });
+
+  const handleTvOptInToggle = (optIn: boolean) => {
+    setTvOptIn(optIn);
+    updateTvOptIn.mutate(optIn);
+  };
 
   useEffect(() => {
     if (driverData) {
@@ -412,6 +444,31 @@ export default function DriverAppSettingsScreen() {
           </View>
         </View>
         ) : null}
+
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
+            TRAVONY TV
+          </ThemedText>
+          <View style={[styles.settingsCard, { backgroundColor: theme.backgroundElevated }]}>
+            <View style={styles.settingItem}>
+              <View style={[styles.settingIcon, { backgroundColor: Colors.travonyGreen + "20" }]}>
+                <Ionicons name="tv-outline" size={20} color={Colors.travonyGreen} />
+              </View>
+              <View style={styles.settingContent}>
+                <ThemedText style={styles.settingLabel}>Feature me on Travony TV</ThemedText>
+                <ThemedText style={[styles.settingSubtitle, { color: theme.textSecondary }]}>
+                  Your live streams can be featured on the public TV channel
+                </ThemedText>
+              </View>
+              <Switch
+                value={tvOptIn}
+                onValueChange={handleTvOptInToggle}
+                trackColor={{ false: theme.border, true: Colors.travonyGreen + "80" }}
+                thumbColor={tvOptIn ? Colors.travonyGreen : theme.textMuted}
+              />
+            </View>
+          </View>
+        </View>
 
         <View style={styles.section}>
           <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>

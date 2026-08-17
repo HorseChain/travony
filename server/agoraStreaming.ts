@@ -2,10 +2,12 @@ import { Router } from "express";
 import { randomBytes } from "crypto";
 import { db } from "./db";
 import { storage } from "./storage";
-import { ridePosts, streamProducts, streamAdBusinesses, rides, users, drivers } from "@shared/schema";
+import { ridePosts, streamProducts, streamAdBusinesses, rides, users, drivers, tvFeatureEvents } from "@shared/schema";
 import type { StreamAdBusiness } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import agoraToken from "agora-token";
+import { recordStreamSignal, scheduleHighlightGeneration } from "./streamHighlights";
+import { recordSafetyPulse, recordStreamDropIfMoving, clearSafetyMotionState } from "./rideSafety";
 
 const { RtcTokenBuilder, RtcRole, RtmTokenBuilder } = agoraToken;
 
@@ -172,6 +174,8 @@ export function broadcastGiftIfLiveStream(postId: string, gift: {
       .from(ridePosts)
       .where(eq(ridePosts.id, postId));
     if (!post || post.type !== "stream" || post.provider !== "agora" || post.endedAt) return;
+    // Feed the highlight scorer — gift bursts are a strong "great moment" signal.
+    recordStreamSignal(postId, "gift", gift.coins, gift.senderId);
     const sender = await storage.getUser(gift.senderId);
     publishStreamEvent(postId, "gift.sent", {
       giftId: gift.giftId,
@@ -461,7 +465,7 @@ agoraRouter.post("/api/agora/streams/:postId/heartbeat", async (req, res) => {
     const user = await getWriteUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const [post] = await db
-      .select({ id: ridePosts.id, userId: ridePosts.userId, type: ridePosts.type, provider: ridePosts.streamProvider, endedAt: ridePosts.endedAt })
+      .select({ id: ridePosts.id, userId: ridePosts.userId, type: ridePosts.type, provider: ridePosts.streamProvider, endedAt: ridePosts.endedAt, rideId: ridePosts.rideId, createdAt: ridePosts.createdAt })
       .from(ridePosts)
       .where(eq(ridePosts.id, req.params.postId));
     if (!post || post.type !== "stream" || post.provider !== "agora") {
@@ -470,12 +474,28 @@ agoraRouter.post("/api/agora/streams/:postId/heartbeat", async (req, res) => {
     if (post.userId !== user.id) return res.status(403).json({ error: "Not your stream" });
     if (post.endedAt) return res.json({ live: false });
     hostLastSeen.set(post.id, Date.now());
+    // Safety layer: the broadcaster reports its GPS speed with each heartbeat;
+    // the server derives deltas + motion state. Fire-and-forget.
+    if (req.body?.speedKmh !== undefined) {
+      recordSafetyPulse(post, req.body.speedKmh).catch(() => {});
+    }
     // Durable liveness — survives server restarts and works across replicas.
     await db
       .update(ridePosts)
       .set({ hostLastSeenAt: new Date() })
       .where(and(eq(ridePosts.id, post.id), isNull(ridePosts.endedAt)));
-    res.json({ live: true, viewerCount: getAgoraViewerCount(post.id) });
+    // Travony TV — is this stream currently the featured one on /tv?
+    // (Direct table query, not an import from travonyTv, to avoid a module cycle.)
+    let onTv = false;
+    try {
+      const [featured] = await db
+        .select({ id: tvFeatureEvents.id })
+        .from(tvFeatureEvents)
+        .where(and(eq(tvFeatureEvents.postId, post.id), isNull(tvFeatureEvents.endedAt)))
+        .limit(1);
+      onTv = !!featured;
+    } catch {}
+    res.json({ live: true, viewerCount: getAgoraViewerCount(post.id), onTv });
   } catch (error: any) {
     console.error("[Agora] heartbeat error:", error?.message || error);
     res.status(500).json({ error: "Heartbeat failed" });
@@ -521,11 +541,24 @@ export async function endAgoraStream(
     .update(ridePosts)
     .set({ endedAt: new Date(), isLive: false })
     .where(and(...conditions))
-    .returning({ id: ridePosts.id });
+    .returning({ id: ridePosts.id, rideId: ridePosts.rideId, createdAt: ridePosts.createdAt });
   // Only clean up in-memory state when the stream actually ended — a
   // host_lost attempt beaten by a concurrent heartbeat must not erase the
   // fresh liveness data.
   if (!updated) return false;
+  // Safety layer: a host that vanished mid-motion is a flagged moment; a
+  // normal stop just clears the in-memory motion state. Awaited (with its own
+  // error guard) so "stream ended" implies its safety events are persisted —
+  // report generation gates on all streams being ended.
+  if (reason === "host_lost") {
+    try {
+      await recordStreamDropIfMoving(updated);
+    } catch (err: any) {
+      console.error("[safety] stream-drop check failed:", err?.message || err);
+    }
+  } else {
+    clearSafetyMotionState(postId);
+  }
   hostLastSeen.delete(postId);
   lastViewerPublish.delete(postId);
   lastViewerCount.delete(postId);
@@ -542,6 +575,9 @@ export async function endAgoraStream(
   }
   publishStreamEvent(postId, "product.clear", {});
   publishStreamEvent(postId, "stream.state", { state: "ended", reason });
+  // Post-end, fire-and-forget: turn the stream's buffered frames + engagement
+  // signals into up to 3 highlight clips for the driver to review.
+  scheduleHighlightGeneration(postId);
   return true;
 }
 
@@ -952,6 +988,11 @@ async function viewerLoopTick() {
           publishStreamEvent(post.id, "viewer.count", { count });
         }
       }
+
+      // Highlight scorer timeline — works with or without REST presence
+      // (getAgoraViewerCount falls back to snapshot-poll presence). Throttled
+      // and deduped inside recordStreamSignal.
+      recordStreamSignal(post.id, "viewer", getAgoraViewerCount(post.id));
 
       // Grace timeout. Liveness = freshest of (in-memory sighting, durable
       // DB heartbeat). Brand-new streams and post-restart streams get a full

@@ -8,6 +8,7 @@ import {
 } from "@shared/schema";
 import { eq, and, gte, desc, sql, isNull, count } from "drizzle-orm";
 import { getAgoraViewerCount } from "./agoraStreaming";
+import { fleetSafetyReports, reconcileSafetyReports } from "./rideSafety";
 
 const router = Router();
 
@@ -371,6 +372,72 @@ router.get("/api/fleet/dashboard/live-streams", async (req: Request, res: Respon
     res.json({ streams, total: streams.length });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Failed to fetch live streams";
+    res.status(500).json({ error: message });
+  }
+});
+
+// GET /api/fleet/dashboard/safety-reports — post-ride safety reports for this
+// fleet's streamed rides. Flagged/bookmarked moments carry the stream postId
+// and the offset in seconds so owners can review them against the timeline.
+// Admins see all fleets.
+router.get("/api/fleet/dashboard/safety-reports", async (req: Request, res: Response) => {
+  try {
+    const session = await getSessionUser(req);
+    if (denyAccess(session, res)) return;
+    const fleetSession = session as SessionUser;
+
+    // Fleet review must never miss a report because the in-process retry
+    // chain died with a restart — reconcile (bounded, template-only) first.
+    await reconcileSafetyReports().catch(() => {});
+
+    let driverIds: string[] | null = null;
+    const driverNames = new Map<string, string>();
+    if (fleetSession.role !== "admin") {
+      const fleetDrivers = await db
+        .select({ id: drivers.id, name: users.name })
+        .from(drivers)
+        .innerJoin(users, eq(users.id, drivers.userId))
+        .where(eq(drivers.fleetOwnerId, fleetSession.userId));
+      driverIds = fleetDrivers.map((d) => d.id);
+      for (const d of fleetDrivers) driverNames.set(d.id, d.name ?? "Driver");
+    }
+
+    const rows = await fleetSafetyReports(driverIds, 20);
+
+    // Admins: resolve names for whichever drivers actually appear.
+    if (fleetSession.role === "admin" && rows.length) {
+      const ids = Array.from(new Set(rows.map((r) => r.driverId).filter(Boolean))) as string[];
+      if (ids.length) {
+        const rowsN = await db
+          .select({ id: drivers.id, name: users.name })
+          .from(drivers)
+          .innerJoin(users, eq(users.id, drivers.userId))
+          .where(sql`${drivers.id} IN (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})`);
+        for (const d of rowsN) driverNames.set(d.id, d.name ?? "Driver");
+      }
+    }
+
+    res.json({
+      reports: rows.map((r) => ({
+        rideId: r.rideId,
+        driverName: (r.driverId && driverNames.get(r.driverId)) || "Driver",
+        status: r.report.status,
+        flagCount: r.report.flagCount,
+        bookmarkCount: r.report.bookmarkCount,
+        summary: r.report.summary,
+        generatedAt: r.report.generatedAt,
+        completedAt: r.completedAt,
+        moments: r.moments.map((m) => ({
+          kind: m.kind,
+          severity: m.severity,
+          postId: m.postId,
+          streamOffsetSec: m.streamOffsetSec,
+          note: m.note,
+        })),
+      })),
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Failed to fetch safety reports";
     res.status(500).json({ error: message });
   }
 });

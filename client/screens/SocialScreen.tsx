@@ -72,7 +72,7 @@ const REACTIONS: {
 
 interface SocialPost {
   id: string;
-  type: "published" | "stream";
+  type: "published" | "stream" | "clip";
   streamProvider: string | null;
   viewerCount?: number;
   caption: string | null;
@@ -503,6 +503,7 @@ function FeedCard({
 }) {
   const { theme } = useTheme();
   const isStream = post.type === "stream";
+  const isClip = post.type === "clip";
   const streamOver = isStream && (!!post.endedAt || !post.isLive);
   const distance = post.distanceKm ? parseFloat(post.distanceKm) : null;
   const isAuthor = !!currentUserId && currentUserId === post.authorId;
@@ -539,7 +540,7 @@ function FeedCard({
         <View style={styles.feedBody}>
           <View style={[styles.feedIconWrap, { backgroundColor: theme.backgroundSecondary }]}>
             <Ionicons
-              name={isStream ? "videocam-outline" : "car-outline"}
+              name={isStream ? "videocam-outline" : isClip ? "film-outline" : "car-outline"}
               size={18}
               color={theme.primary}
             />
@@ -550,7 +551,9 @@ function FeedCard({
                 ? streamOver
                   ? "Streamed a ride"
                   : "Streaming a ride live"
-                : "Completed a ride"}
+                : isClip
+                  ? "Shared a ride highlight"
+                  : "Completed a ride"}
             </ThemedText>
             <ThemedText style={[styles.feedMeta, { color: theme.textSecondary }]}>
               {[post.cityName, distance ? `${distance.toFixed(1)} km` : null]
@@ -568,6 +571,19 @@ function FeedCard({
           <Image source={{ uri: post.photoUrl }} style={styles.feedPhoto} resizeMode="cover" />
         ) : null}
       </Pressable>
+
+      {isClip ? (
+        <Pressable
+          style={({ pressed }) => [
+            styles.watchButton,
+            { backgroundColor: theme.primary, opacity: pressed ? 0.8 : 1 },
+          ]}
+          onPress={onWatch}
+        >
+          <Ionicons name="play" size={14} color="#fff" />
+          <ThemedText style={[styles.watchButtonText, { color: "#fff" }]}>Watch highlight</ThemedText>
+        </Pressable>
+      ) : null}
 
       {isStream && post.isLive ? (
         <Pressable
@@ -1192,6 +1208,11 @@ export default function SocialScreen() {
   const creators = suggestedQuery.data?.creators || [];
 
   const openStream = (post: SocialPost) => {
+    if (post.type === "clip") {
+      // Highlight clip — resolve + play via the clip player (WebView).
+      navigation.navigate("ClipPlayer", { feedPostId: post.id });
+      return;
+    }
     navigation.navigate("AgoraStreamViewer", {
       postId: post.id,
       name: post.authorName,

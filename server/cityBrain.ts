@@ -24,13 +24,13 @@ export interface CityDensityType {
 
 const ZONE_RADIUS_KM = 3;
 
-function getZoneId(lat: number, lng: number): string {
+export function getZoneId(lat: number, lng: number): string {
   const latZone = Math.floor(lat / 0.027);
   const lngZone = Math.floor(lng / 0.027);
   return `${latZone}_${lngZone}`;
 }
 
-function getZoneCenter(zoneId: string): { lat: number; lng: number } {
+export function getZoneCenter(zoneId: string): { lat: number; lng: number } {
   const [latZone, lngZone] = zoneId.split("_").map(Number);
   return {
     lat: (latZone + 0.5) * 0.027,

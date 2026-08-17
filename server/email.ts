@@ -64,7 +64,7 @@ async function processEmailQueue(): Promise<void> {
   isProcessingQueue = false;
 }
 
-function queueEmail(to: string, subject: string, html: string, text: string, maxAttempts: number = 3): string {
+export function queueEmail(to: string, subject: string, html: string, text: string, maxAttempts: number = 3): string {
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
   emailQueue.push({ id, to, subject, html, text, attempts: 0, maxAttempts, createdAt: new Date() });
   processEmailQueue().catch(console.error);

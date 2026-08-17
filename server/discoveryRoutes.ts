@@ -763,6 +763,10 @@ export type DiscoveryDriver = {
     photo: string | null;
     type: string | null;
   } | null;
+  /** Active vehicle id — entry point to the public car persona profile/chat */
+  vehicleId: string | null;
+  /** Public car persona name (falls back to nickname; null when unset) */
+  personaName: string | null;
   distanceKm: number;
   etaMinutes: number;
   upfrontFare: number;
@@ -793,6 +797,9 @@ type RawDriverRow = {
   vehiclePlate: string | null;
   vehiclePhoto: string | null;
   vehicleType: string | null;
+  vehicleId: string | null;
+  vehicleNickname: string | null;
+  vehiclePersonaName: string | null;
   postId: string | null;
   postIsLive: boolean | null;
   streamProvider: string | null;
@@ -813,6 +820,9 @@ const DRIVER_COLUMNS = {
   vehiclePlate: vehicles.plateNumber,
   vehiclePhoto: vehicles.photo,
   vehicleType: vehicles.type,
+  vehicleId: vehicles.id,
+  vehicleNickname: vehicles.nickname,
+  vehiclePersonaName: vehicles.personaName,
   postId: ridePosts.id,
   postIsLive: ridePosts.isLive,
   streamProvider: ridePosts.streamProvider,
@@ -927,6 +937,11 @@ function buildDiscoveryDrivers(
       upfrontFare: fareEst.fare,
       currency: fareEst.currency,
       currencySymbol: fareEst.symbol,
+      vehicleId: row.vehicleId ?? null,
+      personaName:
+        row.vehiclePersonaName?.trim() ||
+        row.vehicleNickname?.trim() ||
+        (row.vehicleMake ? `${row.vehicleMake} ${row.vehicleModel ?? ""}`.trim() : null),
       isLive: !!(row.postIsLive && row.postId),
       postId: row.postId ?? null,
       streamProvider: row.streamProvider === "agora" ? "agora" : null,

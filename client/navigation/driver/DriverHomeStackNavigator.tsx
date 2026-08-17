@@ -4,6 +4,8 @@ import { useScreenOptions } from "@/hooks/useScreenOptions";
 import DriverHomeScreen from "@/screens/driver/DriverHomeScreen";
 import DriverActiveRideScreen from "@/screens/driver/DriverActiveRideScreen";
 import GoLiveScreen from "@/screens/GoLiveScreen";
+import StreamHighlightsScreen from "@/screens/StreamHighlightsScreen";
+import ClipPlayerScreen from "@/screens/ClipPlayerScreen";
 import OpenClawScreen from "@/screens/OpenClawScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
 import DriverCoffeeOrdersScreen from "@/screens/driver/DriverCoffeeOrdersScreen";
@@ -13,6 +15,8 @@ export type DriverHomeStackParamList = {
   DriverHome: undefined;
   DriverActiveRide: { rideId: string };
   GoLive: { rideId?: string; postId?: string };
+  StreamHighlights: { postId: string };
+  ClipPlayer: { clipId?: string; feedPostId?: string; title?: string; previewToken?: string };
   OpenClaw: { variant: "driver" };
   HubDetail: { hubId: string; hubName: string };
   DriverCoffeeOrders: undefined;
@@ -40,6 +44,16 @@ export default function DriverHomeStackNavigator() {
         name="GoLive"
         component={GoLiveScreen}
         options={{ headerShown: false, presentation: "fullScreenModal" }}
+      />
+      <Stack.Screen
+        name="StreamHighlights"
+        component={StreamHighlightsScreen}
+        options={{ headerShown: false, gestureEnabled: false }}
+      />
+      <Stack.Screen
+        name="ClipPlayer"
+        component={ClipPlayerScreen}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="OpenClaw"

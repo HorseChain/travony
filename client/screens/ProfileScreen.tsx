@@ -21,6 +21,7 @@ import ProfileSidebar from "@/components/profile/ProfileSidebar";
 import QRCodeSheet from "@/components/profile/QRCodeSheet";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { useNotificationInbox } from "@/hooks/useNotifications";
 import { getApiUrl } from "@/lib/query-client";
 import { Spacing, BorderRadius, Typography } from "@/constants/theme";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
@@ -63,6 +64,7 @@ export default function ProfileScreen() {
   const { user } = useAuth();
   const navigation = useNavigation<NavigationProp>();
   const { width } = useWindowDimensions();
+  const { unreadCount } = useNotificationInbox();
 
   const [activeTab, setActiveTab] = useState<"posts" | "liked">("posts");
   const [sidebarVisible, setSidebarVisible] = useState(false);
@@ -151,6 +153,24 @@ export default function ProfileScreen() {
           <Ionicons name="person-add-outline" size={24} color={theme.text} />
         </Pressable>
         <View style={styles.topBarRight}>
+          <Pressable hitSlop={8} onPress={() => navigation.navigate("Notifications")}>
+            <View>
+              <Ionicons name="notifications-outline" size={24} color={theme.text} />
+              {unreadCount > 0 ? (
+                <View
+                  style={{
+                    position: "absolute",
+                    top: -2,
+                    right: -2,
+                    width: 10,
+                    height: 10,
+                    borderRadius: 5,
+                    backgroundColor: theme.primary,
+                  }}
+                />
+              ) : null}
+            </View>
+          </Pressable>
           <Pressable hitSlop={8} onPress={handleShareProfile}>
             <Ionicons name="arrow-redo-outline" size={24} color={theme.text} />
           </Pressable>

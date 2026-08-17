@@ -23,6 +23,15 @@ import {
 import { randomUUID } from "crypto";
 import { getRegionByCode, detectRegionFromCoordinates } from "./regionService";
 import { getLiveTelegramStreams, getTravonyBaseUrl } from "./telegramStreaming";
+import * as brain from "./bookingBrain";
+import {
+  channelBaseUrl,
+  buildTvCardText,
+  getFeaturedCarIntro,
+  getLatestApprovedClips,
+  getSafetyReportText,
+} from "./channelFeatures";
+import { detectDriveIntent, startDriverOnboarding } from "./onboardingAgent";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_URL = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}`;
@@ -106,12 +115,18 @@ interface RiderSession {
   pendingHubId?: string;
   // Ride the rider asked to have emailed (awaiting an email address)
   receiptRideId?: string;
+  // Last ride this rider completed — lets /safety fetch its report on demand
+  // even after the booking session has otherwise been cleared.
+  lastCompletedRideId?: string;
   // Region detected from the pickup coordinates — drives currency labels, the
   // vehicle line-up shown, and the platform fee %, so budget markets (e.g. BD)
   // get their cheap fares in local currency rather than the AE/AED default.
   regionCode?: string;
   currency?: string;
   feePercent?: number;
+  // Group chat that referred this rider via a t.me deep link (start=g_<id>).
+  // Compact ride status lines are posted there until the trip ends.
+  notifyGroupChatId?: number;
 }
 
 // In-memory per-chat state, backed by the telegram_booking_sessions table so
@@ -189,21 +204,9 @@ async function persistSession(chatId: number): Promise<void> {
   }
 }
 
-function calculateDistanceKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLng = ((lng2 - lng1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-  return R * c;
-}
-
-function etaFromDistanceKm(distanceKm: number): number {
-  // City-speed estimate (~25 km/h), floored at 2 minutes.
-  return Math.max(2, Math.round((distanceKm / 25) * 60));
-}
+// Shared math lives in the booking brain so every channel computes identically.
+const calculateDistanceKm = brain.calculateDistanceKm;
+const etaFromDistanceKm = brain.etaFromDistanceKm;
 
 function formatDateTime(d: Date | string): string {
   try {
@@ -236,84 +239,8 @@ async function emailRideReceipt(rideId: string, toEmail: string, fallbackName: s
   return buildAndSendRiderReceipt(rideId, toEmail, fallbackName);
 }
 
-interface DriverMatch {
-  driverId: string;
-  matchType: string;
-  aiMatchScore: string;
-  intentAlignmentScore?: string;
-  distanceKm: number;
-}
-
-// Match a driver exactly the way the main app's POST /api/rides does, so a
-// Telegram booking is assigned identically to an in-app booking — and only to
-// an online, approved driver whose T Driver app is actively polling the
-// database for assigned ride requests.
-async function matchDriverLikeApp(
-  userId: string,
-  pickupLat: number,
-  pickupLng: number,
-  dropoffLat: number,
-  dropoffLng: number,
-  priority: "fastest" | "cheapest" | "reliable" = "reliable",
-): Promise<DriverMatch | null> {
-  // 1) Intent-based matching (same engine the app uses). The intent engine
-  // filters on isOnline but not approval status, so we re-check approval here:
-  // an unapproved driver would be rejected by GET /api/drivers/pending-rides
-  // and the request would strand. If it isn't approved, fall through to the
-  // approved-only proximity fallback below.
-  try {
-    const best = await intentEngine.getBestAlignedDriver(
-      userId, pickupLat, pickupLng, dropoffLat, dropoffLng, priority,
-    );
-    if (best) {
-      const matchedDriver = await storage.getDriver(best.driverId);
-      if (matchedDriver?.status === "approved") {
-        return {
-          driverId: best.driverId,
-          matchType: best.alignment.matchType,
-          aiMatchScore: (best.alignment.confidence * 100).toFixed(2),
-          intentAlignmentScore: best.alignment.score.toFixed(2),
-          distanceKm: best.distance,
-        };
-      }
-      console.log(`[TelegramRider] intent match ${best.driverId} not approved — using proximity fallback`);
-    }
-  } catch (error) {
-    console.error("[TelegramRider] intent match error:", error);
-  }
-
-  // 2) Proximity fallback: nearest online + approved driver within 50km.
-  try {
-    const onlineDrivers = await db
-      .select()
-      .from(drivers)
-      .where(and(eq(drivers.isOnline, true), eq(drivers.status, "approved")));
-    let nearest: { id: string } | null = null;
-    let nearestDistance = 50;
-    for (const driver of onlineDrivers) {
-      const dLat = parseFloat(driver.currentLat || "0");
-      const dLng = parseFloat(driver.currentLng || "0");
-      if (dLat === 0 && dLng === 0) continue;
-      const distance = calculateDistanceKm(pickupLat, pickupLng, dLat, dLng);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearest = driver;
-      }
-    }
-    if (nearest) {
-      return {
-        driverId: nearest.id,
-        matchType: "proximity_fallback",
-        aiMatchScore: "0",
-        distanceKm: nearestDistance,
-      };
-    }
-  } catch (error) {
-    console.error("[TelegramRider] proximity match error:", error);
-  }
-
-  return null;
-}
+// Driver matching is shared brain logic — identical to the app's POST /api/rides.
+const matchDriverLikeApp = brain.matchDriverLikeApp;
 
 async function answerCallbackQuery(callbackQueryId: string, text?: string): Promise<void> {
   if (!TELEGRAM_BOT_TOKEN) return;
@@ -434,6 +361,7 @@ const driverMenuKeyboard = {
       { text: "Recent rides", callback_data: "/rides" },
       { text: "Referral code", callback_data: "/referral" },
     ],
+    [{ text: "Apply here in chat — 2 minutes", callback_data: "ob:apply" }],
     [
       { text: "Go online", callback_data: "/online" },
       { text: "Go offline", callback_data: "/offline" },
@@ -478,10 +406,9 @@ This is your operator hub.
 • 100% of tips are yours
 • Instant USDT payouts, AI-fair dispute resolution
 
-<b>New here?</b>
-1. Download <b>T Driver</b>: https://play.google.com/store/apps/details?id=com.travony.driver
-2. Register as a vehicle operator
-3. Link your account with /link [your phone]
+<b>New here?</b> Apply right here in this chat — send 4 photos (car front, car side, license, registration) and you can be approved in minutes. No app needed to start earning.
+
+Prefer the full app? Download <b>T Driver</b>: https://play.google.com/store/apps/details?id=com.travony.driver and link with /link [your phone]
 
 Choose an option below:`;
 }
@@ -500,12 +427,98 @@ function riderHelp(): string {
 
 <b>Live Streams</b>
 /live — watch drivers who are streaming live right now, right here in Telegram.
+/tv — Travony TV, the city's best rides on one channel.
+/clips — recent highlight clips from the road.
+
+<b>Cars</b>
+/car — meet one of our AI-powered cars and book it with a tap.
 
 <b>Anytime</b>
 /mytrip — your current ride · /myorders — your coffee orders
+/safety — the safety report for your last trip
 /cancelride — cancel a ride · /menu — back to the main menu
 
 Tip: you can tap the menu button next to the message box to see every command.`;
+}
+
+// ── Shared channel features (Travony TV, car personas, clips, safety) ──
+// All copy/data comes from ./channelFeatures so every surface stays honest and
+// consistent; the bot only wraps it with Telegram buttons.
+
+async function sendTvCard(chatId: number): Promise<void> {
+  const text = await buildTvCardText();
+  await sendTelegramMessage(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [[{ text: "📺 Watch Travony TV", url: `${channelBaseUrl()}/tv` }]],
+    },
+  } as any);
+}
+
+async function sendFeaturedCar(chatId: number): Promise<void> {
+  const featured = await getFeaturedCarIntro();
+  if (!featured) {
+    await sendTelegramMessage(
+      chatId,
+      "No cars are available to say hello right now — try /book to hit the road.",
+    );
+    return;
+  }
+  await sendTelegramMessage(chatId, `<b>${featured.personaName}:</b>\n${featured.intro}`, {
+    reply_markup: {
+      inline_keyboard: [[{ text: "🚕 Book a ride", callback_data: "r:book" }]],
+    },
+  } as any);
+}
+
+async function sendLatestClips(chatId: number): Promise<void> {
+  const clips = await getLatestApprovedClips(3);
+  if (clips.length === 0) {
+    await sendTelegramMessage(
+      chatId,
+      "No highlights yet — drivers are out filming the city. Check back soon!",
+    );
+    return;
+  }
+  await sendTelegramMessage(chatId, "<b>🎬 Latest highlights from the road</b>");
+  for (const clip of clips) {
+    const caption = clip.title || clip.caption || "Travony highlight";
+    const place = clip.cityName ? ` · ${clip.cityName}` : "";
+    await sendTelegramMessage(chatId, `${caption}${place}\n${clip.videoUrl}`);
+  }
+}
+
+// Send the last completed ride's safety report on demand.
+async function sendSafetyReport(chatId: number, session: RiderSession): Promise<void> {
+  let rideId = session.lastCompletedRideId;
+  if (!rideId) {
+    const user = session.userId ? { id: session.userId } : await getUserByChatId(chatId);
+    if (user) {
+      session.userId = user.id;
+      const [lastCompleted] = await db
+        .select({ id: rides.id })
+        .from(rides)
+        .where(and(eq(rides.customerId, user.id), eq(rides.status, "completed")))
+        .orderBy(desc(rides.completedAt))
+        .limit(1);
+      if (lastCompleted) rideId = lastCompleted.id;
+    }
+  }
+  if (!rideId) {
+    await sendTelegramMessage(
+      chatId,
+      "I don't have a completed trip to report on yet. Safety reports appear shortly after streamed rides.",
+    );
+    return;
+  }
+  const report = await getSafetyReportText(rideId);
+  if (!report) {
+    await sendTelegramMessage(
+      chatId,
+      "Your safety report isn't ready yet — it appears shortly after streamed rides.",
+    );
+    return;
+  }
+  await sendTelegramMessage(chatId, report);
 }
 
 async function startBooking(chatId: number, session: RiderSession): Promise<void> {
@@ -551,26 +564,12 @@ function serviceTypeIdForVehicle(type: string): string {
 async function computeEstimates(
   pickup: { lat: number; lng: number },
   destination: { lat: number; lng: number },
-  regionCode: string,
+  _regionCode: string,
 ): Promise<{ id: string; type: string; label: string; fare: number }[]> {
-  const region = await getRegionByCode(regionCode).catch(() => null);
-  // Use the region's own vehicle line-up (e.g. Bangladesh's Easy Bike / CNG Auto)
-  // so budget markets see their cheap three-wheelers, not the default car tiers.
-  const lineup = region?.vehicleTypes?.length
-    ? region.vehicleTypes.map((v) => ({ id: serviceTypeIdForVehicle(v.type), type: v.type, label: v.localName }))
-    : CAR_TYPES;
-  const estimates: { id: string; type: string; label: string; fare: number }[] = [];
-  for (const car of lineup) {
-    try {
-      const pricing = await calculateOptimalPrice(pickup.lat, pickup.lng, destination.lat, destination.lng, car.type, regionCode);
-      estimates.push({ id: car.id, type: car.type, label: car.label, fare: pricing.total });
-    } catch (error) {
-      console.error(`[TelegramRider] Price error for ${car.type}:`, error);
-    }
-  }
-  // Cheapest-first so low-income riders see the most affordable option at the top.
-  estimates.sort((a, b) => a.fare - b.fare);
-  return estimates;
+  // Shared brain quote: region vehicle line-up, engine pricing, cheapest-first.
+  // The brain re-derives the region from pickup coords exactly like the caller.
+  const quote = await brain.getQuote(pickup, destination);
+  return quote.estimates;
 }
 
 async function showCarTypes(chatId: number, session: RiderSession): Promise<void> {
@@ -606,6 +605,20 @@ async function showCarTypes(chatId: number, session: RiderSession): Promise<void
     `<b>Step 3 of 3</b>\nChoose your car${dist}. Fares are estimates — you'll pick how to pay next.`,
     { reply_markup: { inline_keyboard: buttons } } as any,
   );
+
+  // Abandoned-quote nudge tracking: a priced trip that never books earns
+  // exactly one follow-up (opt-out respected).
+  try {
+    const { trackRiderQuote } = await import("./onboardingAgent");
+    const cheapest = estimates[0];
+    await trackRiderQuote("telegram", String(chatId), {
+      from: session.pickup.address,
+      to: session.destination.address,
+      fareText: cheapest ? `${cur} ${cheapest.fare.toFixed(2)}` : undefined,
+    });
+  } catch (e) {
+    console.error("[TelegramRider] quote tracking error:", e);
+  }
 }
 
 async function showPaymentChoice(chatId: number, session: RiderSession): Promise<void> {
@@ -673,18 +686,50 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
   if (session.confirming) return;
   session.confirming = true;
 
+  const fare = session.chosen.fare;
+
+  // Book through the shared booking brain: stale-ride expiry, engaged-ride
+  // guard, leftover-pending cleanup, fee breakdown, app-identical driver
+  // matching, blockchain hash, insert, and (for cash) the all-online-drivers
+  // broadcast. Telegram owns only the messaging around it.
+  let ride;
+  let matchedEtaMin: number | undefined;
+  let brainDriverInfo: { name: string; carDesc: string; plate?: string } | undefined;
   try {
-    // Auto-close abandoned rides (stale pending + long-inactive engaged) so a
-    // rider is never permanently locked out by leftover records from old tests.
-    await storage.expireStaleRides().catch(() => {});
-    // Only an engaged ride (driver accepted, en route) should block a new
-    // booking. Leftover unmatched "pending" rides are cleared so a previously
-    // abandoned search can't permanently lock the rider out.
-    const engaged = await getEngagedRideForUser(session.userId);
-    if (engaged) {
+    const result = await brain.createBrainRide({
+      userId: session.userId,
+      pickup: session.pickup,
+      dropoff: session.destination,
+      choice: {
+        id: session.chosen.id,
+        type: session.chosen.type,
+        label: session.chosen.label,
+        fare,
+      },
+      quote: {
+        regionCode: session.regionCode || "AE",
+        currency: session.currency || "AED",
+        feePercent: session.feePercent ?? 10,
+        distanceKm: session.distanceKm ?? calculateDistanceKm(
+          session.pickup.lat, session.pickup.lng, session.destination.lat, session.destination.lng,
+        ),
+        durationMin: Math.round(
+          (session.distanceKm ?? calculateDistanceKm(
+            session.pickup.lat, session.pickup.lng, session.destination.lat, session.destination.lng,
+          )) * 3 + 5,
+        ),
+      },
+      paymentMethod: session.paymentMethod === "usdt" ? "usdt" : "cash",
+      channel: "telegram",
+    });
+    ride = result.ride;
+    matchedEtaMin = result.matchedEtaMin;
+    brainDriverInfo = result.driverInfo;
+  } catch (error: any) {
+    if (error instanceof brain.EngagedRideError) {
       session.confirming = false;
       session.step = undefined;
-      session.activeRideId = engaged.id;
+      session.activeRideId = error.ride.id;
       await sendTelegramMessage(
         chatId,
         "You already have an active trip. Use /mytrip to view it, or /cancelride before booking again.",
@@ -692,80 +737,6 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
       );
       return;
     }
-    await cancelPendingRidesForUser(session.userId);
-  } catch (error) {
-    console.error("[TelegramRider] active-ride check error:", error);
-  }
-
-  const fare = session.chosen.fare;
-  const fees = calculateFeeBreakdown(fare, session.feePercent ?? 10);
-  const distanceKm = session.distanceKm ?? calculateDistanceKm(
-    session.pickup.lat, session.pickup.lng, session.destination.lat, session.destination.lng,
-  );
-  const durationMin = Math.round(distanceKm * 3 + 5);
-
-  // Match a driver the same way the app does, so the assigned driver receives
-  // the request in their T Driver app (which polls the DB for assigned rides).
-  let intentData: Record<string, any> = {};
-  let matchedEtaMin: number | undefined;
-  const match = await matchDriverLikeApp(
-    session.userId,
-    session.pickup.lat, session.pickup.lng,
-    session.destination.lat, session.destination.lng,
-    "reliable",
-  );
-  if (match) {
-    intentData = {
-      driverId: match.driverId,
-      matchType: match.matchType,
-      aiMatchScore: match.aiMatchScore,
-      ...(match.intentAlignmentScore ? { intentAlignmentScore: match.intentAlignmentScore } : {}),
-    };
-    matchedEtaMin = etaFromDistanceKm(match.distanceKm);
-  }
-
-  // Pre-generate the ride id so the blockchain hash matches the stored row,
-  // exactly like the app's POST /api/rides flow.
-  const rideId = randomUUID();
-  const blockchainHash = generateRideHash({
-    rideId,
-    customerId: session.userId,
-    driverId: intentData.driverId || "pending",
-    pickupAddress: session.pickup.address,
-    dropoffAddress: session.destination.address,
-    fare,
-    platformFee: fees.platformFee,
-    driverShare: fees.driverShare,
-    timestamp: new Date(),
-  } as any);
-
-  let ride;
-  try {
-    ride = await storage.createRide({
-      id: rideId,
-      customerId: session.userId,
-      serviceTypeId: session.chosen.id,
-      pickupAddress: session.pickup.address,
-      pickupLat: session.pickup.lat.toString(),
-      pickupLng: session.pickup.lng.toString(),
-      dropoffAddress: session.destination.address,
-      dropoffLat: session.destination.lat.toString(),
-      dropoffLng: session.destination.lng.toString(),
-      status: "pending",
-      estimatedFare: fare.toFixed(2),
-      distance: distanceKm.toFixed(2),
-      duration: durationMin,
-      paymentMethod: session.paymentMethod || "cash",
-      paymentStatus: session.paymentMethod === "usdt" ? "awaiting_payment" : "pending",
-      platformFee: fees.platformFee.toFixed(2),
-      driverEarnings: fees.driverShare.toFixed(2),
-      blockchainHash,
-      currency: session.currency || "AED",
-      regionCode: session.regionCode || "AE",
-      riderPriority: "reliable",
-      ...intentData,
-    } as any);
-  } catch (error: any) {
     console.error("[TelegramRider] Create ride error:", error);
     await sendTelegramMessage(chatId, "We couldn't create your ride right now. Please try /book again.");
     session.step = undefined;
@@ -776,6 +747,10 @@ async function createAndConfirmRide(chatId: number, session: RiderSession): Prom
   session.step = undefined;
   session.confirming = false;
   session.activeRideId = ride.id;
+  // Quote converted into a booking — cancel the abandoned-quote nudge.
+  import("./onboardingAgent")
+    .then(({ resolveRiderQuote }) => resolveRiderQuote("telegram", String(chatId)))
+    .catch(() => {});
 
   // Crypto (USDT): the rider pays up front. The ride is held out of the driver
   // pool (paymentStatus "awaiting_payment" — see storage.getPendingRides) until
@@ -825,53 +800,29 @@ Message your driver any time — just type here.
     { reply_markup: removeKeyboard } as any,
   );
 
-  // Look up the matched driver + their vehicle once, then tell the rider who is coming
-  // and notify the driver (if linked). The driver accepts in the app.
-  if (intentData.driverId) {
-    try {
-      const driver = await storage.getDriver(intentData.driverId);
-      if (driver) {
-        const driverUser = await storage.getUser(driver.userId);
-        const vehicles = await storage.getVehiclesByDriver(driver.id);
-        const vehicle = vehicles?.[0];
-        const driverName = driverUser?.name || "Your driver";
-        const carDesc = vehicle
-          ? `${vehicle.color ? vehicle.color + " " : ""}${vehicle.make} ${vehicle.model}`.trim()
-          : session.chosen.label;
-        const plate = vehicle?.plateNumber;
-        const etaLine = matchedEtaMin
-          ? `ETA: about ${matchedEtaMin} min away`
-          : "ETA appears once the driver accepts";
+  // Tell the rider who is coming (the brain already looked up the matched
+  // driver + vehicle, and already broadcast the request to every approved +
+  // online driver). The driver accepts in the app.
+  if (brainDriverInfo) {
+    const etaLine = matchedEtaMin
+      ? `ETA: about ${matchedEtaMin} min away`
+      : "ETA appears once the driver accepts";
+    await sendTelegramMessage(
+      chatId,
+      `<b>Driver found</b>
 
-        await sendTelegramMessage(
-          chatId,
-          `<b>Driver found</b>
-
-Driver: ${driverName}
-Car: ${carDesc}${plate ? `\nPlate: <code>${plate}</code>` : ""}
+Driver: ${brainDriverInfo.name}
+Car: ${brainDriverInfo.carDesc}${brainDriverInfo.plate ? `\nPlate: <code>${brainDriverInfo.plate}</code>` : ""}
 ${etaLine}
 
 Request sent to their app. You'll get a note here the moment they accept.`,
-        );
-      }
-    } catch (error) {
-      console.error("[TelegramRider] Driver notify error:", error);
-    }
+    );
   } else {
     await sendTelegramMessage(
       chatId,
       `No drivers are free this second, but we're still looking. We'll message you here the moment one accepts.`,
     );
   }
-
-  // Broadcast the new request to EVERY approved + online driver (Telegram, SMS,
-  // WhatsApp, email). pending-rides is a broadcast model — any approved online
-  // driver can claim it — so we ping them all, not just the proximity-matched one.
-  // This is what actually surfaces the request to drivers; without it an
-  // unmatched (or location-less) driver would never hear about a new ride.
-  await notifyOnlineDriversOfNewRide(ride.id).catch((error) =>
-    console.error("[TelegramRider] broadcast notify error:", error),
-  );
 }
 
 // Commit a chosen destination and move the rider to car selection.
@@ -1778,6 +1729,26 @@ Type a message to chat with your driver, or /cancelride to cancel.`,
     return true;
   }
 
+  if (command === "/tv") {
+    await sendTvCard(chatId);
+    return true;
+  }
+
+  if (command === "/car") {
+    await sendFeaturedCar(chatId);
+    return true;
+  }
+
+  if (command === "/clips") {
+    await sendLatestClips(chatId);
+    return true;
+  }
+
+  if (command === "/safety") {
+    await sendSafetyReport(chatId, session);
+    return true;
+  }
+
   if (command === "/live") {
     const liveStreams = await getLiveTelegramStreams();
     if (liveStreams.length === 0) {
@@ -1874,6 +1845,26 @@ async function handleRiderCallback(chatId: number, data: string, firstName: stri
       session.userId = user.id;
       await startBooking(chatId, session);
     }
+    return true;
+  }
+
+  // "Book this route" on a price card: the session already holds the exact
+  // pickup/destination the oracle quoted — jump straight to car selection.
+  if (data === "r:pbk") {
+    if (!session.pickup || !session.destination) {
+      await sendTelegramMessage(chatId, "That price card expired — ask me again, e.g. <i>how much from Dubai Mall to DXB</i>.");
+      return true;
+    }
+    const user = await getUserByChatId(chatId);
+    if (!user) {
+      await promptLink(chatId, session, "book");
+      return true;
+    }
+    session.userId = user.id;
+    session.distanceKm = session.distanceKm ?? calculateDistanceKm(
+      session.pickup.lat, session.pickup.lng, session.destination.lat, session.destination.lng,
+    );
+    await showCarTypes(chatId, session);
     return true;
   }
 
@@ -2058,145 +2049,270 @@ async function geocodeAddress(
   return results[0] ?? null;
 }
 
-/**
- * Google Places Text Search — Google-Maps-quality lookup of POIs, malls,
- * landmarks, and addresses. Returns matches with coordinates so the rider picks
- * the exact spot. Requires GOOGLE_API_KEY with the Places API enabled; biased
- * toward the rider's pickup area when provided.
- */
-async function searchAddressesGoogle(
-  query: string,
-  key: string,
-  near?: { lat: number; lng: number },
-  limit = 5,
-): Promise<{ lat: number; lng: number; address: string }[]> {
+// Place search + reverse geocoding are shared brain logic (Google-first,
+// Nominatim fallback) so every channel resolves addresses identically.
+const searchAddresses = brain.searchPlaces;
+const reverseGeocode = brain.reverseGeocodePoint;
+
+// ---------------------------------------------------------------------------
+// Price Oracle, group mode & voice notes
+// ---------------------------------------------------------------------------
+
+function escapeHtmlLite(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+let cachedBotUsername: string | null = null;
+async function getBotUsername(): Promise<string | null> {
+  if (cachedBotUsername) return cachedBotUsername;
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return null;
   try {
-    const params = new URLSearchParams({ query, key, language: "en" });
-    if (near) {
-      params.set("location", `${near.lat},${near.lng}`);
-      params.set("radius", "60000"); // ~60km bias around pickup
+    const res = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    const data = await res.json();
+    if (data?.ok && data.result?.username) cachedBotUsername = data.result.username;
+  } catch {}
+  return cachedBotUsername;
+}
+
+function ridePageUrlFor(pickup: { lat: number; lng: number; address: string }, dest: { lat: number; lng: number; address: string }): string {
+  const enc = (p: { lat: number; lng: number; address: string }) =>
+    `${p.lat.toFixed(6)},${p.lng.toFixed(6)},${encodeURIComponent(p.address)}`;
+  return `${publicBaseUrl()}/ride?pa=${enc(pickup)}&pb=${enc(dest)}`;
+}
+
+/**
+ * Free Price Oracle in a DM: resolve the route, quote it with the pricing
+ * engine, send a shareable price card, and seed the session so "Book this
+ * route" continues straight into car selection. Returns the card text (for
+ * voice replies) or null when it couldn't answer.
+ */
+async function handlePriceIntent(
+  chatId: number,
+  session: RiderSession,
+  from: string | undefined,
+  to: string,
+): Promise<string | null> {
+  let pickup: { lat: number; lng: number; address: string } | null = null;
+  if (from) {
+    pickup = (await brain.searchPlaces(from, session.pickup, 1))[0] || null;
+    if (!pickup) {
+      await sendTelegramMessage(chatId, `I couldn't find "${escapeHtmlLite(from)}" on the map. Try a landmark or a fuller address.`);
+      return null;
     }
-    const res = await fetch(
-      `https://maps.googleapis.com/maps/api/place/textsearch/json?${params.toString()}`,
+  } else if (session.pickup) {
+    pickup = session.pickup;
+  } else {
+    await sendTelegramMessage(
+      chatId,
+      `Where from? Ask like: <i>How much from Dubai Mall to ${escapeHtmlLite(to)}</i> — or type /book and share your location.`,
     );
-    if (!res.ok) return [];
-    const data: any = await res.json();
-    if (!Array.isArray(data?.results)) return [];
-    const out: { lat: number; lng: number; address: string }[] = [];
-    for (const item of data.results) {
-      const lat = item?.geometry?.location?.lat;
-      const lng = item?.geometry?.location?.lng;
-      if (typeof lat !== "number" || typeof lng !== "number") continue;
-      const name = typeof item.name === "string" ? item.name : "";
-      const formatted = typeof item.formatted_address === "string" ? item.formatted_address : "";
-      const address = name
-        ? formatted && !formatted.startsWith(name)
-          ? `${name}, ${formatted}`
-          : name
-        : formatted || query;
-      out.push({ lat, lng, address });
-      if (out.length >= limit) break;
-    }
-    return out;
-  } catch (error) {
-    console.error("[TelegramRider] Google search error:", error);
-    return [];
+    return null;
   }
+  const dest = (await brain.searchPlaces(to, pickup, 1))[0];
+  if (!dest) {
+    await sendTelegramMessage(chatId, `I couldn't find "${escapeHtmlLite(to)}" on the map. Try a landmark or a fuller address.`);
+    return null;
+  }
+  const quote = await brain.getQuote(pickup, dest);
+  if (quote.estimates.length === 0) {
+    await sendTelegramMessage(chatId, "I couldn't price that route right now — please try again in a minute.");
+    return null;
+  }
+  const shareUrl = ridePageUrlFor(pickup, dest);
+  const card = brain.buildPriceCardText(quote, pickup.address, dest.address, shareUrl);
+  // Seed the session so booking continues seamlessly from this exact route.
+  session.pickup = pickup;
+  session.destination = dest;
+  session.distanceKm = quote.distanceKm;
+  session.regionCode = quote.regionCode;
+  session.currency = quote.currency;
+  session.feePercent = quote.feePercent;
+  await sendTelegramMessage(chatId, escapeHtmlLite(card), {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: "Book this route", callback_data: "r:pbk" }],
+        [{ text: "Open shareable price link", url: shareUrl }],
+      ],
+    },
+  } as any);
+  return card;
+}
+
+/** Price card posted into a group chat, with a "book privately" deep link. */
+async function handleGroupPrice(gid: number, from: string, to: string): Promise<void> {
+  const pickup = (await brain.searchPlaces(from, undefined, 1))[0];
+  if (!pickup) {
+    await sendTelegramMessage(gid, `I couldn't find "${escapeHtmlLite(from)}" on the map.`);
+    return;
+  }
+  const dest = (await brain.searchPlaces(to, pickup, 1))[0];
+  if (!dest) {
+    await sendTelegramMessage(gid, `I couldn't find "${escapeHtmlLite(to)}" on the map.`);
+    return;
+  }
+  const quote = await brain.getQuote(pickup, dest);
+  if (quote.estimates.length === 0) {
+    await sendTelegramMessage(gid, "Couldn't price that route right now — try again in a minute.");
+    return;
+  }
+  const shareUrl = ridePageUrlFor(pickup, dest);
+  const card = brain.buildPriceCardText(quote, pickup.address, dest.address, shareUrl);
+  const username = await getBotUsername();
+  const buttons: any[][] = [];
+  if (username) buttons.push([{ text: "Book privately with me", url: `https://t.me/${username}?start=g_${gid}` }]);
+  buttons.push([{ text: "Book in browser (no install)", url: shareUrl }]);
+  await sendTelegramMessage(gid, escapeHtmlLite(card), { reply_markup: { inline_keyboard: buttons } } as any);
+}
+
+/** Group booking handoff: booking is a private conversation, never group spam. */
+async function sendGroupBookHandoff(gid: number): Promise<void> {
+  const username = await getBotUsername();
+  const buttons: any[][] = username
+    ? [[{ text: "Book privately with me", url: `https://t.me/${username}?start=g_${gid}` }]]
+    : [];
+  await sendTelegramMessage(
+    gid,
+    "Booking happens in a private chat (your pickup location stays private). Tap below — I'll post short ride status updates back here.",
+    { reply_markup: { inline_keyboard: buttons } } as any,
+  );
 }
 
 /**
- * Search a typed place name and return up to `limit` matching map locations so
- * the rider can pick the exact one — an autocomplete-style experience instead of
- * silently guessing the first hit. Biased toward the rider's area when provided.
+ * Group chats: answer /price (or free-text fare questions) with a price card
+ * and hand bookings off to a private conversation. Everything else in a group
+ * is ignored silently — a booking bot must never spam group chatter.
  */
-async function searchAddresses(
-  query: string,
-  near?: { lat: number; lng: number },
-  limit = 5,
-): Promise<{ lat: number; lng: number; address: string }[]> {
-  // Prefer Google Places (Google-Maps-quality POI/landmark/address search) when a
-  // key is configured; fall back to OpenStreetMap Nominatim otherwise.
-  const googleKey = process.env.GOOGLE_API_KEY;
-  if (googleKey) {
-    const google = await searchAddressesGoogle(query, googleKey, near, limit);
-    if (google.length > 0) return google;
+async function handleGroupMessage(message: any): Promise<boolean> {
+  const gid: number = message.chat.id;
+  const text: string = (message.text || "").trim();
+  if (!text) return true;
+  let cmd = "";
+  let payload = text;
+  if (text.startsWith("/")) {
+    const parts = text.split(" ");
+    cmd = parts[0].toLowerCase().split("@")[0];
+    payload = parts.slice(1).join(" ").trim();
   }
-  try {
-    const params = new URLSearchParams({
-      format: "json",
-      q: query,
-      limit: String(limit),
-      addressdetails: "0",
-    });
-    if (near) {
-      const d = 0.6; // ~60km box around pickup to prefer nearby results
-      params.set("viewbox", `${near.lng - d},${near.lat - d},${near.lng + d},${near.lat + d}`);
-    }
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?${params.toString()}`, {
-      headers: { "User-Agent": "Travony/1.0 (ride booking)", "Accept-Language": "en" },
-    });
-    if (!res.ok) return [];
-    const data: any = await res.json();
-    if (!Array.isArray(data)) return [];
-    const out: { lat: number; lng: number; address: string }[] = [];
-    for (const item of data) {
-      const lat = parseFloat(item.lat);
-      const lng = parseFloat(item.lon);
-      if (Number.isNaN(lat) || Number.isNaN(lng)) continue;
-      const address = typeof item.display_name === "string"
-        ? item.display_name.split(",").slice(0, 3).join(",").trim()
-        : query;
-      out.push({ lat, lng, address });
-    }
-    return out;
-  } catch (error) {
-    console.error("[TelegramRider] search error:", error);
-    return [];
-  }
-}
+  const intent = cmd ? null : brain.parseRiderText(text);
 
-/**
- * Turn raw GPS coordinates (e.g. a pinned map location) into a human-readable
- * street address so the driver sees a real place name, not just "Pinned location".
- */
-async function reverseGeocode(lat: number, lng: number): Promise<string | null> {
-  // Prefer Google reverse geocoding when a key is set, for cleaner place names.
-  const googleKey = process.env.GOOGLE_API_KEY;
-  if (googleKey) {
-    try {
-      const gp = new URLSearchParams({ latlng: `${lat},${lng}`, key: googleKey, language: "en" });
-      const gr = await fetch(
-        `https://maps.googleapis.com/maps/api/geocode/json?${gp.toString()}`,
-      );
-      if (gr.ok) {
-        const gd: any = await gr.json();
-        const first = Array.isArray(gd?.results) ? gd.results[0] : undefined;
-        if (first?.formatted_address) return first.formatted_address as string;
+  if (cmd === "/price" || (intent && intent.kind === "price")) {
+    let from: string | undefined;
+    let to: string | undefined;
+    if (cmd === "/price") {
+      const m = payload.match(/^(?:from\s+)?(.+?)\s+to\s+(.+)$/i);
+      if (m) {
+        from = m[1].trim();
+        to = m[2].trim();
       }
-    } catch (error) {
-      console.error("[TelegramRider] Google reverse geocode error:", error);
+    } else if (intent && intent.kind === "price") {
+      from = intent.from;
+      to = intent.to;
     }
+    if (!from || !to) {
+      await sendTelegramMessage(gid, "Ask like: <code>/price Dubai Mall to DXB Airport</code> — I'll answer with live fares.");
+      return true;
+    }
+    await handleGroupPrice(gid, from, to);
+    return true;
   }
+
+  if (cmd === "/book" || cmd === "/ride" || cmd === "/start" || cmd === "/help" || (intent && intent.kind === "book")) {
+    await sendGroupBookHandoff(gid);
+    return true;
+  }
+
+  // Other slash commands may belong to the main bot; plain chatter is ignored.
+  if (cmd) return false;
+  return true;
+}
+
+/**
+ * Voice note from a rider: transcribe, act on the intent, and reply with BOTH
+ * text and a voice note in the rider's own language. All numbers in replies
+ * come from the pricing engine templates — translation is digit-guarded.
+ */
+async function handleRiderVoice(chatId: number, message: any, firstName: string): Promise<boolean> {
+  const token = process.env.TELEGRAM_BOT_TOKEN;
+  if (!token) return false;
+  const session = getSession(chatId);
   try {
-    const params = new URLSearchParams({
-      format: "json",
-      lat: String(lat),
-      lon: String(lng),
-      zoom: "18",
-      addressdetails: "0",
-    });
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?${params.toString()}`, {
-      headers: { "User-Agent": "Travony/1.0 (ride booking)", "Accept-Language": "en" },
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    if (typeof data?.display_name === "string") {
-      return data.display_name.split(",").slice(0, 3).join(",").trim();
+    const fileRes = await fetch(`https://api.telegram.org/bot${token}/getFile?file_id=${encodeURIComponent(message.voice.file_id)}`);
+    const fileData = await fileRes.json();
+    const filePath = fileData?.result?.file_path;
+    if (!filePath) throw new Error("getFile returned no path");
+    const audioRes = await fetch(`https://api.telegram.org/file/bot${token}/${filePath}`);
+    if (!audioRes.ok) throw new Error(`file download ${audioRes.status}`);
+    const buf = Buffer.from(await audioRes.arrayBuffer());
+    const { ensureCompatibleFormat, speechToText } = await import("./replit_integrations/audio/client");
+    const compat = await ensureCompatibleFormat(buf);
+    const transcript = (await speechToText(compat.buffer, compat.format)).trim();
+    if (!transcript) throw new Error("empty transcript");
+
+    await sendTelegramMessage(chatId, `You said: “${escapeHtmlLite(transcript)}”`);
+    const intent = brain.parseRiderText(transcript);
+    let spokenReply: string | null = null;
+
+    if (intent.kind === "price") {
+      spokenReply = await handlePriceIntent(chatId, session, intent.from, intent.to);
+    } else if (intent.kind === "status") {
+      const user = await getUserByChatId(chatId);
+      const ride = user ? await brain.getActiveRideForUser(user.id) : null;
+      spokenReply = ride ? await brain.describeRideStatusText(ride) : "You have no active ride right now.";
+      await sendTelegramMessage(chatId, escapeHtmlLite(spokenReply));
+    } else if (intent.kind === "cancel") {
+      const user = await getUserByChatId(chatId);
+      const n = user ? await brain.cancelActiveRidesForUser(user.id) : 0;
+      spokenReply = n > 0 ? "Your ride is cancelled." : "You have no active ride to cancel.";
+      await sendTelegramMessage(chatId, spokenReply);
+    } else if (intent.kind === "book") {
+      spokenReply = "Let's book your ride — I've started the booking below.";
+      await sendTelegramMessage(chatId, spokenReply);
+      const user = await getUserByChatId(chatId);
+      if (!user) {
+        await promptLink(chatId, session, "book");
+      } else {
+        session.userId = user.id;
+        await startBooking(chatId, session);
+      }
+    } else {
+      spokenReply = "I can help with prices, bookings, ride status and cancelling. Try: how much from Dubai Mall to the airport.";
+      await sendTelegramMessage(chatId, spokenReply);
     }
-    return null;
+
+    if (spokenReply) await sendVoiceReply(chatId, spokenReply, transcript);
+    return true;
   } catch (error) {
-    console.error("[TelegramRider] reverse geocode error:", error);
-    return null;
+    console.error("[TelegramRider] voice note error:", error);
+    await sendTelegramMessage(chatId, "I couldn't hear that voice note — mind typing it instead?");
+    return true;
+  }
+}
+
+/** TTS the (digit-guard-translated) reply and send it as a Telegram voice note. */
+async function sendVoiceReply(chatId: number, englishText: string, langSample: string): Promise<void> {
+  try {
+    const { translateKeepingDigits } = await import("./whatsappRiderBot");
+    const { textToSpeech } = await import("./replit_integrations/audio/client");
+    const translated = await translateKeepingDigits(englishText, langSample);
+    const spoken = translated
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/\n{2,}/g, ". ")
+      .replace(/\n/g, ". ")
+      .trim()
+      .slice(0, 900);
+    if (spoken.length < 3) return;
+    const ogg = await textToSpeech(spoken, "alloy", "opus");
+    if (!ogg || ogg.length < 1000) return;
+    const token = process.env.TELEGRAM_BOT_TOKEN;
+    if (!token) return;
+    const form = new FormData();
+    form.append("chat_id", String(chatId));
+    form.append("voice", new Blob([new Uint8Array(ogg)], { type: "audio/ogg" }), "reply.ogg");
+    await fetch(`https://api.telegram.org/bot${token}/sendVoice`, { method: "POST", body: form });
+  } catch (error) {
+    console.error("[TelegramRider] voice reply error:", error);
   }
 }
 
@@ -2231,6 +2347,17 @@ async function handleRiderUpdateInner(update: any): Promise<boolean> {
   const chatId = message.chat.id;
   const firstName = message.from?.first_name || "there";
 
+  // Group chats get the Price Oracle + private-booking handoff, nothing else.
+  const chatType = message.chat?.type;
+  if (chatType === "group" || chatType === "supergroup") {
+    return handleGroupMessage(message);
+  }
+
+  // Voice note → transcribe and answer (text + voice, same language).
+  if (message.voice && !message.text) {
+    return handleRiderVoice(chatId, message, firstName);
+  }
+
   // Shared phone number
   if (message.contact) {
     await handleContact(chatId, message, firstName);
@@ -2249,12 +2376,65 @@ async function handleRiderUpdateInner(update: any): Promise<boolean> {
 
   // Rider-specific commands (and /start choice screen)
   if (text.startsWith("/")) {
-    const command = text.split(" ")[0].toLowerCase().split("@")[0];
+    const parts = text.split(" ");
+    const command = parts[0].toLowerCase().split("@")[0];
+    const payload = parts.slice(1).join(" ").trim();
+    // Deep link from a group ("Book privately with me"): remember the group so
+    // compact ride status lines get posted back there.
+    if (command === "/start" && payload.startsWith("g_")) {
+      const gid = parseInt(payload.slice(2), 10);
+      if (Number.isFinite(gid)) getSession(chatId).notifyGroupChatId = gid;
+    }
+    if (command === "/price") {
+      const m = payload.match(/^(?:from\s+)?(.+?)\s+to\s+(.+)$/i);
+      if (m) {
+        await handlePriceIntent(chatId, getSession(chatId), m[1].trim(), m[2].trim());
+      } else if (payload) {
+        await handlePriceIntent(chatId, getSession(chatId), undefined, payload);
+      } else {
+        await sendTelegramMessage(chatId, "Ask like: <code>/price Dubai Mall to DXB Airport</code> — live fares, free, no booking needed.");
+      }
+      return true;
+    }
     return handleRiderCommand(chatId, command, firstName);
   }
 
   // Mid-booking text guidance
   const session = getSession(chatId);
+
+  // Shared-feature free-text intents + driver onboarding. These only fire when
+  // the rider is NOT mid-flow (no active booking/coffee/hub step and no coffee
+  // draft), so they never hijack a booking or coffee conversation in progress.
+  if (!session.step && !session.coffee) {
+    const lower = text.toLowerCase();
+    // Travony TV: "tv", "watch", "travony tv"
+    if (/\btravony tv\b|\btv\b|\bwatch\b/.test(lower)) {
+      await sendTvCard(chatId);
+      return true;
+    }
+    // Car personas: "talk to a car", "meet a car"
+    if (/\b(talk to|meet)\b.*\bcar\b/.test(lower)) {
+      await sendFeaturedCar(chatId);
+      return true;
+    }
+    // Highlight clips: "clips", "highlights"
+    if (/\bclips?\b|\bhighlights?\b/.test(lower)) {
+      await sendLatestClips(chatId);
+      return true;
+    }
+    // Driver onboarding funnel: a clear "I want to drive" intent, checked BEFORE
+    // we treat the text as a destination. The onboarding agent sends its own
+    // messages, so we hand off and stop.
+    if (detectDriveIntent(text)) {
+      await startDriverOnboarding({
+        channel: "telegram",
+        channelKey: String(chatId),
+        name: firstName,
+        text,
+      });
+      return true;
+    }
+  }
 
   // Coffee: typed delivery address
   if (session.step === "awaiting_coffee_delivery") {
@@ -2403,6 +2583,14 @@ async function handleRiderUpdateInner(update: any): Promise<boolean> {
     return true;
   }
 
+  // Price Oracle: free-text fare questions are answered instantly, no account
+  // needed. ("How much from Dubai Mall to the airport?")
+  const freeIntent = brain.parseRiderText(text);
+  if (freeIntent.kind === "price") {
+    await handlePriceIntent(chatId, session, freeIntent.from, freeIntent.to);
+    return true;
+  }
+
   // Plain text from a rider with an active trip -> chat to driver
   if (!session.userId) {
     const user = await getUserByChatId(chatId);
@@ -2411,6 +2599,19 @@ async function handleRiderUpdateInner(update: any): Promise<boolean> {
   if (session.userId) {
     const bridged = await bridgeRiderMessageToDriver(chatId, session, text);
     if (bridged) return true;
+  }
+
+  // Free-text booking ("take me to the airport") with no active trip: start
+  // the normal guided booking flow.
+  if (freeIntent.kind === "book") {
+    const user = await getUserByChatId(chatId);
+    if (!user) {
+      await promptLink(chatId, session, "book");
+      return true;
+    }
+    session.userId = user.id;
+    await startBooking(chatId, session);
+    return true;
   }
 
   return false;
@@ -2597,6 +2798,20 @@ We hope you enjoyed the ride. Type /book to ride again.`;
         await sendTelegramMessage(rider.telegramChatId, text, {
           reply_markup: { inline_keyboard: completedButtons },
         } as any);
+        await postGroupRideStatus(rider, ride.status);
+
+        // Remember this ride so /safety can pull its report later, and push the
+        // safety report now if it already exists (streamed rides only).
+        const completedChatId = Number(rider.telegramChatId);
+        if (Number.isFinite(completedChatId)) {
+          await ensureHydrated();
+          getSession(completedChatId).lastCompletedRideId = ride.id;
+          await persistSession(completedChatId).catch(() => {});
+        }
+        const safetyText = await getSafetyReportText(ride.id);
+        if (safetyText) {
+          await sendTelegramMessage(rider.telegramChatId, safetyText);
+        }
         return;
       }
       case "cancelled":
@@ -2605,9 +2820,55 @@ We hope you enjoyed the ride. Type /book to ride again.`;
     }
     if (text) {
       await sendTelegramMessage(rider.telegramChatId, text);
+      await postGroupRideStatus(rider, ride.status);
     }
   } catch (error) {
     console.error("[TelegramRider] notifyRiderRideUpdate error:", error);
+  }
+}
+
+/**
+ * Group-referred riders (t.me deep link start=g_<id>) get a compact status
+ * line posted back to the group. No addresses or coordinates ever — group
+ * members only see coarse trip state (location privacy).
+ */
+async function postGroupRideStatus(
+  rider: { telegramChatId?: string | null; name?: string | null },
+  status: string,
+): Promise<void> {
+  try {
+    await ensureHydrated();
+    const chatId = Number(rider.telegramChatId);
+    if (!Number.isFinite(chatId)) return;
+    const session = sessions.get(chatId);
+    if (!session?.notifyGroupChatId) return;
+    const who = (rider.name || "A rider").split(" ")[0];
+    let line: string | null = null;
+    switch (status) {
+      case "accepted":
+        line = `${who}'s Travony driver is confirmed and on the way.`;
+        break;
+      case "arriving":
+        line = `${who}'s Travony driver is almost at the pickup.`;
+        break;
+      case "started":
+      case "in_progress":
+        line = `${who}'s Travony trip has started.`;
+        break;
+      case "completed":
+        line = `${who}'s Travony trip is complete.`;
+        break;
+      case "cancelled":
+        line = `${who}'s Travony ride was cancelled.`;
+        break;
+    }
+    if (line) await sendTelegramMessage(session.notifyGroupChatId, escapeHtmlLite(line));
+    if (status === "completed" || status === "cancelled") {
+      session.notifyGroupChatId = undefined;
+      await persistSession(chatId);
+    }
+  } catch (error) {
+    console.error("[TelegramRider] group status post error:", error);
   }
 }
 

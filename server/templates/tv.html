@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<title>Travony TV — Live</title>
+<meta name="description" content="Travony TV: one always-on live channel. Watch real rides live, earn ride credits for watching." />
+<style>
+  :root {
+    --bg: #07080c;
+    --panel: rgba(16, 18, 26, 0.82);
+    --line: rgba(255, 255, 255, 0.09);
+    --text: #f2f4f8;
+    --dim: #9aa3b2;
+    --accent: #22c55e;
+    --live: #ef4444;
+    --gold: #fbbf24;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #stage { position: fixed; inset: 0; background: #000; }
+  #video { position: absolute; inset: 0; }
+  #video div { width: 100% !important; height: 100% !important; }
+  #video video { object-fit: contain !important; }
+
+  /* Off-air / connecting state */
+  #offair {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px; text-align: center;
+    background:
+      radial-gradient(ellipse at 30% 20%, rgba(34,197,94,.08), transparent 55%),
+      radial-gradient(ellipse at 70% 80%, rgba(59,130,246,.07), transparent 55%),
+      var(--bg);
+    padding: 24px;
+  }
+  #offair .tv-logo { font-size: 34px; font-weight: 800; letter-spacing: 2px; }
+  #offair .tv-logo span { color: var(--accent); }
+  #offair .sub { color: var(--dim); font-size: 15px; max-width: 420px; line-height: 1.5; }
+  .pulse {
+    width: 10px; height: 10px; border-radius: 50%; background: var(--accent);
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100% { opacity: .35; transform: scale(.85); } 50% { opacity: 1; transform: scale(1.15); } }
+
+  /* Top bar */
+  #topbar {
+    position: absolute; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; align-items: center; gap: 10px;
+    padding: calc(10px + env(safe-area-inset-top)) 14px 26px;
+    background: linear-gradient(rgba(0,0,0,.65), transparent);
+  }
+  .brand { font-weight: 800; letter-spacing: 1.5px; font-size: 16px; }
+  .brand span { color: var(--accent); }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .8px;
+    padding: 3px 9px; border-radius: 999px;
+  }
+  .badge.live { background: var(--live); color: #fff; }
+  .badge.live::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: pulse 1.4s infinite; }
+  .badge.viewers { background: rgba(0,0,0,.5); border: 1px solid var(--line); color: var(--text); }
+  #earnPill {
+    margin-left: auto; cursor: pointer; user-select: none;
+    background: rgba(0,0,0,.55); border: 1px solid var(--line);
+    border-radius: 999px; padding: 7px 13px; font-size: 12.5px; font-weight: 600;
+    color: var(--text); display: flex; align-items: center; gap: 7px;
+  }
+  #earnPill .coin { color: var(--gold); }
+  #earnPill.earning { border-color: rgba(34,197,94,.55); }
+
+  /* Lower third */
+  #lowerthird {
+    position: absolute; left: 14px; right: 14px; bottom: calc(16px + env(safe-area-inset-bottom));
+    z-index: 20; display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap;
+  }
+  #driverCard {
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 12px 16px; max-width: 420px; min-width: 240px;
+  }
+  #driverCard .who { font-size: 16px; font-weight: 700; }
+  #driverCard .meta { font-size: 12.5px; color: var(--dim); margin-top: 3px; }
+  #driverCard .caption { font-size: 12.5px; color: var(--text); margin-top: 6px; opacity: .85; }
+  #driverCard .cta {
+    display: inline-block; margin-top: 10px; text-decoration: none;
+    background: var(--accent); color: #04240f; font-weight: 700; font-size: 13px;
+    padding: 7px 14px; border-radius: 999px;
+  }
+  #sponsorCard {
+    margin-left: auto; cursor: pointer;
+    background: var(--panel); backdrop-filter: blur(10px);
+    border: 1px solid var(--line); border-radius: 14px;
+    padding: 10px 14px; max-width: 260px; display: none;
+  }
+  #sponsorCard .tag { font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--gold); text-transform: uppercase; }
+  #sponsorCard .row { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  #sponsorCard img { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; background: #1c1f2a; }
+  #sponsorCard .t { font-size: 13.5px; font-weight: 700; }
+  #sponsorCard .p { font-size: 12px; color: var(--accent); margin-top: 2px; }
+
+  /* Sound + leaderboard buttons */
+  #controls {
+    position: absolute; right: 14px; top: 50%; transform: translateY(-50%);
+    z-index: 20; display: flex; flex-direction: column; gap: 10px;
+  }
+  .ctl {
+    width: 44px; height: 44px; border-radius: 50%; border: 1px solid var(--line);
+    background: rgba(0,0,0,.55); color: var(--text); font-size: 18px;
+    display: flex; align-items: center; justify-content: center; cursor: pointer;
+  }
+  #soundBtn.big {
+    position: absolute; inset: 0; margin: auto; width: auto; height: auto;
+    background: transparent; border: none; z-index: 15; border-radius: 0;
+  }
+  #soundBtn.big::after {
+    content: "Tap for sound"; position: absolute; bottom: 32%;
+    left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.65); border: 1px solid var(--line);
+    padding: 9px 18px; border-radius: 999px; font-size: 14px; font-weight: 600;
+  }
+
+  /* Leaderboard drawer */
+  #board {
+    position: absolute; right: 0; top: 0; bottom: 0; width: min(340px, 88vw);
+    background: rgba(10, 12, 18, .96); border-left: 1px solid var(--line);
+    z-index: 30; transform: translateX(100%); transition: transform .25s ease;
+    padding: calc(18px + env(safe-area-inset-top)) 18px 18px; overflow-y: auto;
+  }
+  #board.open { transform: translateX(0); }
+  #board h3 { font-size: 15px; letter-spacing: .5px; margin-bottom: 4px; }
+  #board .sub { font-size: 12px; color: var(--dim); margin-bottom: 14px; }
+  .brow { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .brow .rank { width: 22px; font-weight: 800; color: var(--dim); font-size: 13px; }
+  .brow .rank.top { color: var(--gold); }
+  .brow .n { font-weight: 600; font-size: 14px; flex: 1; }
+  .brow .m { font-size: 12px; color: var(--dim); text-align: right; }
+
+  #toast {
+    position: absolute; left: 50%; transform: translateX(-50%) translateY(20px);
+    bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 40;
+    background: rgba(12,14,20,.94); border: 1px solid var(--line);
+    padding: 10px 18px; border-radius: 999px; font-size: 13px;
+    opacity: 0; pointer-events: none; transition: all .25s ease;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="video"></div>
+
+  <div id="offair">
+    <div class="tv-logo">TRAVONY <span>TV</span></div>
+    <div class="pulse"></div>
+    <div class="sub" id="offairMsg">We're between streams right now. The channel cuts to the best live ride the moment a driver goes live — stay tuned.</div>
+  </div>
+
+  <div id="topbar">
+    <div class="brand">TRAVONY <span>TV</span></div>
+    <span class="badge live" id="liveBadge" style="display:none">LIVE</span>
+    <span class="badge viewers" id="viewerBadge" style="display:none">0 watching</span>
+    <div id="earnPill" title="Watch-to-earn ride credits">
+      <span class="coin">&#9679;</span><span id="earnText">Sign in to earn ride credits</span>
+    </div>
+  </div>
+
+  <button id="soundBtn" class="ctl big" style="display:none" aria-label="Unmute"></button>
+
+  <div id="controls">
+    <button class="ctl" id="muteToggle" style="display:none" aria-label="Toggle sound">&#128266;</button>
+    <button class="ctl" id="boardBtn" aria-label="Weekly leaderboard">&#127942;</button>
+  </div>
+
+  <div id="lowerthird" style="display:none">
+    <div id="driverCard">
+      <div class="who" id="ltWho">Live driver</div>
+      <div class="meta" id="ltMeta"></div>
+      <div class="caption" id="ltCaption" style="display:none"></div>
+      <a class="cta" href="/" target="_blank" rel="noopener">Book a Travony ride</a>
+    </div>
+    <div id="sponsorCard">
+      <div class="tag">Sponsored</div>
+      <div class="row">
+        <img id="spImg" alt="" style="display:none" />
+        <div>
+          <div class="t" id="spTitle"></div>
+          <div class="p" id="spPrice"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="board">
+    <h3>&#127942; This week on Travony TV</h3>
+    <div class="sub">Drivers with the most featured air-time in the last 7 days.</div>
+    <div id="boardRows"><div class="sub">Loading&hellip;</div></div>
+  </div>
+
+  <div id="toast"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var AUTH_KEY = "travonyWebToken";
+  var NOW_POLL_MS = 8000;
+  var HEARTBEAT_MS = 30000;
+
+  function $(id) { return document.getElementById(id); }
+  var toastTimer = null;
+  function toast(msg) {
+    var el = $("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () { el.classList.remove("show"); }, 4000);
+  }
+
+  // ---------- Auth (same localStorage/Bearer pattern as the landing page) ----------
+  function getToken() { try { return localStorage.getItem(AUTH_KEY) || ""; } catch (e) { return ""; } }
+  function setToken(t) { try { if (t) localStorage.setItem(AUTH_KEY, t); else localStorage.removeItem(AUTH_KEY); } catch (e) {} }
+  var currentUser = null;
+
+  // Capture ?gauth=success&token=... after Google redirect, then clean the URL.
+  (function captureToken() {
+    var qp = new URLSearchParams(location.search);
+    if (qp.get("gauth")) {
+      if (qp.get("gauth") === "success" && qp.get("token")) {
+        setToken(qp.get("token"));
+        toast("Signed in — you now earn ride credits while you watch");
+      }
+      qp.delete("gauth"); qp.delete("token"); qp.delete("isNewUser"); qp.delete("message");
+      var qs = qp.toString();
+      history.replaceState(null, "", location.pathname + (qs ? "?" + qs : ""));
+    }
+  })();
+
+  function authedFetch(path, opts) {
+    opts = opts || {};
+    opts.headers = opts.headers || {};
+    var t = getToken();
+    if (t) opts.headers["Authorization"] = "Bearer " + t;
+    return fetch(path, opts);
+  }
+
+  function updateEarnPill() {
+    var el = $("earnText");
+    if (!currentUser) { el.textContent = "Sign in to earn ride credits"; $("earnPill").classList.remove("earning"); return; }
+    var today = earnState.earnedToday.toFixed(2);
+    var bal = earnState.balance.toFixed(2);
+    if (earnState.capReached) el.textContent = "Daily cap reached · AED " + bal + " saved";
+    else el.textContent = "Earning · AED " + today + " today · AED " + bal + " saved";
+    $("earnPill").classList.add("earning");
+  }
+
+  function loadMe() {
+    var t = getToken();
+    if (!t) { currentUser = null; updateEarnPill(); return; }
+    authedFetch("/api/auth/me")
+      .then(function (r) {
+        if (r.status === 401 || r.status === 403) { setToken(""); return null; }
+        return r.ok ? r.json() : null;
+      })
+      .then(function (d) {
+        currentUser = d && d.user ? d.user : null;
+        updateEarnPill();
+        if (currentUser) loadCredits();
+      })
+      .catch(function () {});
+  }
+
+  $("earnPill").addEventListener("click", function () {
+    if (currentUser) {
+      toast("You earn a little ride credit for every minute you watch. It's applied to your next ride automatically.");
+      return;
+    }
+    var back = location.origin + location.pathname;
+    location.href = "/api/auth/google/start?role=customer&redirect_uri=" + encodeURIComponent(back);
+  });
+
+  // ---------- Watch-to-earn ----------
+  var earnState = { balance: 0, earnedToday: 0, capReached: false };
+  function loadCredits() {
+    authedFetch("/api/tv/credits")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        earnState.balance = d.balance || 0;
+        earnState.earnedToday = d.earnedToday || 0;
+        earnState.capReached = (d.earnedToday || 0) >= (d.dailyCap || 1);
+        updateEarnPill();
+      })
+      .catch(function () {});
+  }
+
+  function heartbeat() {
+    if (!currentUser || !state.postId || document.visibilityState !== "visible") return;
+    authedFetch("/api/tv/watch/heartbeat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ postId: state.postId })
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d) return;
+        if (typeof d.balance === "number") earnState.balance = d.balance;
+        if (typeof d.earnedToday === "number") earnState.earnedToday = d.earnedToday;
+        earnState.capReached = !!d.capReached;
+        updateEarnPill();
+      })
+      .catch(function () {});
+  }
+  setInterval(heartbeat, HEARTBEAT_MS);
+
+  // ---------- Agora playback ----------
+  var agoraSdkPromise = null;
+  function loadAgoraSdk() {
+    if (window.AgoraRTC) return Promise.resolve(window.AgoraRTC);
+    if (agoraSdkPromise) return agoraSdkPromise;
+    agoraSdkPromise = new Promise(function (resolve, reject) {
+      var sc = document.createElement("script");
+      sc.src = "https://cdn.jsdelivr.net/npm/agora-rtc-sdk-ng@4.20.2/AgoraRTC_N-production.min.js";
+      sc.onload = function () { window.AgoraRTC ? resolve(window.AgoraRTC) : (agoraSdkPromise = null, reject(new Error("sdk"))); };
+      sc.onerror = function () { agoraSdkPromise = null; reject(new Error("sdk load failed")); };
+      document.head.appendChild(sc);
+    });
+    return agoraSdkPromise;
+  }
+
+  var state = { postId: null, client: null, audioTrack: null, muted: true, joinSeq: 0 };
+
+  function stopPlayback() {
+    if (state.client) {
+      var c = state.client;
+      state.client = null;
+      try { c.removeAllListeners(); } catch (e) {}
+      try { c.leave(); } catch (e) {}
+    }
+    state.audioTrack = null;
+    $("video").innerHTML = "";
+    $("muteToggle").style.display = "none";
+    $("soundBtn").style.display = "none";
+  }
+
+  function applyMute() {
+    if (state.audioTrack) {
+      if (state.muted) { try { state.audioTrack.stop(); } catch (e) {} }
+      else { try { state.audioTrack.play(); } catch (e) {} }
+    }
+    $("muteToggle").innerHTML = state.muted ? "&#128263;" : "&#128266;";
+    $("soundBtn").style.display = state.muted && state.audioTrack ? "" : "none";
+  }
+  $("muteToggle").addEventListener("click", function () { state.muted = !state.muted; applyMute(); });
+  $("soundBtn").addEventListener("click", function () { state.muted = false; applyMute(); });
+
+  function joinStream(postId) {
+    var seq = ++state.joinSeq;
+    stopPlayback();
+    state.postId = postId;
+    Promise.all([
+      loadAgoraSdk(),
+      fetch("/api/agora/web-viewer-token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ postId: postId })
+      }).then(function (r) { if (!r.ok) throw new Error("token"); return r.json(); })
+    ]).then(function (parts) {
+      if (seq !== state.joinSeq) return;
+      var AgoraRTC = parts[0], t = parts[1];
+      try { AgoraRTC.setLogLevel(3); } catch (e) {}
+      var client = AgoraRTC.createClient({ mode: "live", codec: "vp8" });
+      state.client = client;
+      client.setClientRole("audience");
+      client.on("user-published", function (user, mediaType) {
+        client.subscribe(user, mediaType).then(function () {
+          if (seq !== state.joinSeq || state.client !== client) return;
+          if (mediaType === "video" && user.videoTrack) {
+            $("video").innerHTML = "";
+            var v = document.createElement("div");
+            $("video").appendChild(v);
+            user.videoTrack.play(v);
+          }
+          if (mediaType === "audio" && user.audioTrack) {
+            state.audioTrack = user.audioTrack;
+            $("muteToggle").style.display = "";
+            applyMute();
+          }
+        }).catch(function () {});
+      });
+      client.on("user-unpublished", function (user, mediaType) {
+        if (mediaType === "video" && seq === state.joinSeq) $("video").innerHTML = "";
+        if (mediaType === "audio" && seq === state.joinSeq) { state.audioTrack = null; applyMute(); }
+      });
+      return client.join(t.appId, t.channel, t.rtcToken, t.uid);
+    }).catch(function () {
+      if (seq === state.joinSeq) toast("Couldn't connect — the stream may have just switched. Retrying…");
+    });
+  }
+
+  // ---------- Sponsor card ----------
+  var seenImpressions = {};
+  function renderSponsor(sponsor) {
+    var card = $("sponsorCard");
+    if (!sponsor) { card.style.display = "none"; card.dataset.pid = ""; return; }
+    card.style.display = "";
+    card.dataset.pid = sponsor.productId;
+    $("spTitle").textContent = sponsor.title || "";
+    $("spPrice").textContent = sponsor.priceLabel || "";
+    var img = $("spImg");
+    if (sponsor.imageUrl) { img.src = sponsor.imageUrl; img.style.display = ""; }
+    else { img.style.display = "none"; }
+    if (!seenImpressions[sponsor.productId]) {
+      seenImpressions[sponsor.productId] = true;
+      fetch("/api/tv/sponsor/" + encodeURIComponent(sponsor.productId) + "/impression", { method: "POST" }).catch(function () {});
+    }
+  }
+  $("sponsorCard").addEventListener("click", function () {
+    var pid = this.dataset.pid;
+    if (!pid) return;
+    fetch("/api/tv/sponsor/" + encodeURIComponent(pid) + "/tap", { method: "POST" }).catch(function () {});
+    toast(($("spTitle").textContent || "This offer") + " — " + ($("spPrice").textContent || "see the Travony app"));
+  });
+
+  // ---------- Channel state ----------
+  function setOffAir() {
+    if (state.postId !== null) stopPlayback();
+    state.postId = null;
+    $("offair").style.display = "flex";
+    $("lowerthird").style.display = "none";
+    $("liveBadge").style.display = "none";
+    $("viewerBadge").style.display = "none";
+  }
+
+  function pollNow() {
+    fetch("/api/tv/now")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        if (!d || !d.live || !d.featured) { setOffAir(); return; }
+        var f = d.featured;
+        $("offair").style.display = "none";
+        $("lowerthird").style.display = "";
+        $("liveBadge").style.display = "";
+        $("viewerBadge").style.display = "";
+        $("viewerBadge").textContent = (f.viewerCount || 0) + " watching";
+        $("ltWho").textContent = f.driver && f.driver.name ? f.driver.name + " is live" : "Live on Travony";
+        var meta = [];
+        if (f.driver && f.driver.vehicle) meta.push(f.driver.vehicle);
+        if (f.city) meta.push(f.city);
+        $("ltMeta").textContent = meta.join(" · ");
+        if (f.caption) { $("ltCaption").textContent = f.caption; $("ltCaption").style.display = ""; }
+        else { $("ltCaption").style.display = "none"; }
+        renderSponsor(f.sponsor);
+        if (f.postId !== state.postId) {
+          joinStream(f.postId);
+          toast("Now live: " + (f.driver && f.driver.name ? f.driver.name : "a Travony driver") + (f.city ? " in " + f.city : ""));
+        }
+      })
+      .catch(function () {});
+  }
+
+  // ---------- Leaderboard ----------
+  var boardOpen = false;
+  $("boardBtn").addEventListener("click", function () {
+    boardOpen = !boardOpen;
+    $("board").classList.toggle("open", boardOpen);
+    if (boardOpen) loadBoard();
+  });
+  document.addEventListener("click", function (e) {
+    if (boardOpen && !$("board").contains(e.target) && e.target !== $("boardBtn") && !$("boardBtn").contains(e.target)) {
+      boardOpen = false;
+      $("board").classList.remove("open");
+    }
+  });
+  function loadBoard() {
+    fetch("/api/tv/leaderboard")
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var wrap = $("boardRows");
+        wrap.innerHTML = "";
+        if (!d || !d.board || !d.board.length) {
+          wrap.innerHTML = '<div class="sub">No featured streams yet this week. Go live in the driver app to claim the screen.</div>';
+          return;
+        }
+        d.board.forEach(function (row, i) {
+          var el = document.createElement("div");
+          el.className = "brow";
+          el.innerHTML =
+            '<div class="rank' + (i < 3 ? " top" : "") + '">' + (i + 1) + "</div>" +
+            '<div class="n"></div>' +
+            '<div class="m"></div>';
+          el.querySelector(".n").textContent = row.name;
+          el.querySelector(".m").textContent = row.featuredMinutes + " min · peak " + row.peakViewers + " viewers";
+          wrap.appendChild(el);
+        });
+      })
+      .catch(function () {});
+  }
+
+  // ---------- Boot ----------
+  loadMe();
+  pollNow();
+  setInterval(pollNow, NOW_POLL_MS);
+})();
+</script>
+</body>
+</html>

@@ -15,7 +15,7 @@ import {
   prayerRideDispatches,
 } from "@shared/schema";
 import { eq, ne, and, or, desc, gte, inArray, isNull, count, ilike, sql } from "drizzle-orm";
-import { getAgoraViewerCount } from "./agoraStreaming";
+import { getAgoraViewerCount, endAgoraStream } from "./agoraStreaming";
 import { scorePeopleMatches, recordImpressions, type ScoredMatch } from "./matchAgent";
 
 // Social layer: follows between users + rides published or live-streamed to
@@ -505,15 +505,27 @@ socialRouter.post("/api/rides/:id/stream/stop", async (req, res) => {
   try {
     const user = await getWriteUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
-    await db
-      .update(ridePosts)
-      .set({ endedAt: new Date(), isLive: false })
+    const live = await db
+      .select({ id: ridePosts.id, provider: ridePosts.streamProvider })
+      .from(ridePosts)
       .where(and(
         eq(ridePosts.rideId, req.params.id),
         eq(ridePosts.userId, user.id),
         eq(ridePosts.type, "stream"),
         isNull(ridePosts.endedAt),
       ));
+    for (const p of live) {
+      if (p.provider === "agora") {
+        // Route through the authoritative end path so in-memory cleanup,
+        // product clears, end events, and highlight generation all run.
+        await endAgoraStream(p.id, "host_stopped");
+      } else {
+        await db
+          .update(ridePosts)
+          .set({ endedAt: new Date(), isLive: false })
+          .where(eq(ridePosts.id, p.id));
+      }
+    }
     res.json({ stopped: true });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

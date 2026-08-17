@@ -32,7 +32,7 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation, useFocusEffect, useRoute } from "@react-navigation/native";
+import { useNavigation, useFocusEffect, useRoute, useIsFocused } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import Animated, {
   useSharedValue,
@@ -90,6 +90,8 @@ interface DiscoveryDriver {
     photo: string | null;
     type: string | null;
   } | null;
+  vehicleId: string | null;
+  personaName: string | null;
   distanceKm: number;
   etaMinutes: number;
   upfrontFare: number;
@@ -150,6 +152,56 @@ function Avatar({ uri, name, size }: { uri: string | null; name: string; size: n
 // NearbyFollowingTabs — wordmark + animated tab strip + AI button
 // ---------------------------------------------------------------------------
 
+function TravonyTvPill() {
+  const navigation = useNavigation<NativeStackNavigationProp<HomeStackParamList>>();
+  const pulse = useSharedValue(1);
+
+  // Live status only — never invents viewer counts. Polls only while this
+  // screen is actually focused so backgrounded/logged-out sessions stay quiet.
+  const isFocused = useIsFocused();
+  const tvQuery = useQuery<{ live: boolean }>({
+    queryKey: ["/api/tv/now"],
+    staleTime: 30 * 1000,
+    refetchInterval: 60 * 1000,
+    enabled: isFocused,
+  });
+  const isLive = tvQuery.data?.live === true;
+
+  useEffect(() => {
+    if (isLive) {
+      pulse.value = withRepeat(
+        withSequence(withTiming(0.35, { duration: 700 }), withTiming(1, { duration: 700 })),
+        -1,
+        true,
+      );
+    } else {
+      pulse.value = withTiming(1, { duration: 200 });
+    }
+  }, [isLive]);
+
+  const dotStyle = useAnimatedStyle(() => ({ opacity: pulse.value }));
+
+  return (
+    <Pressable
+      onPress={() => navigation.navigate("TravonyTV")}
+      style={tabStyles.tvPill}
+      hitSlop={8}
+      accessibilityRole="button"
+      accessibilityLabel="Open Travony TV"
+    >
+      <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
+      <Text style={tabStyles.tvPillEmoji}>📺</Text>
+      <Text style={tabStyles.tvPillText}>Travony TV</Text>
+      {isLive ? (
+        <View style={tabStyles.tvLiveBadge}>
+          <Animated.View style={[tabStyles.tvLiveDot, dotStyle]} />
+          <Text style={tabStyles.tvLiveText}>LIVE</Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
 function NearbyFollowingTabs({
   activeTab,
   onTabChange,
@@ -200,6 +252,11 @@ function NearbyFollowingTabs({
           <BlurView intensity={40} tint="dark" style={StyleSheet.absoluteFill} />
           <Ionicons name="chatbubble-ellipses-outline" size={21} color="#fff" />
         </Pressable>
+      </View>
+
+      {/* Travony TV entry point */}
+      <View style={tabStyles.tvRow} pointerEvents="box-none">
+        <TravonyTvPill />
       </View>
     </View>
   );
@@ -263,6 +320,50 @@ const tabStyles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.25)",
+  },
+  tvRow: {
+    flexDirection: "row",
+    marginTop: Spacing.xs,
+  },
+  tvPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: BorderRadius.full,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.2)",
+  },
+  tvPillEmoji: { fontSize: 13 },
+  tvPillText: {
+    fontSize: 13,
+    fontWeight: "700",
+    color: "#fff",
+    letterSpacing: 0.2,
+  },
+  tvLiveBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginLeft: 4,
+    paddingVertical: 2,
+    paddingHorizontal: 6,
+    borderRadius: BorderRadius.full,
+    backgroundColor: "#E53935",
+  },
+  tvLiveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: "#fff",
+  },
+  tvLiveText: {
+    fontSize: 10,
+    fontWeight: "800",
+    color: "#fff",
+    letterSpacing: 0.5,
   },
 });
 
@@ -847,6 +948,7 @@ function DiscoveryActionPanel({
   onReviews,
   onShare,
   onDriverProfile,
+  onTalk,
   onGoLive,
   goLiveState,
   goLiveCountdown,
@@ -858,6 +960,7 @@ function DiscoveryActionPanel({
   onReviews: () => void;
   onShare: () => void;
   onDriverProfile: () => void;
+  onTalk?: () => void;
   onGoLive?: () => void;
   goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
   goLiveCountdown?: number;
@@ -897,6 +1000,14 @@ function DiscoveryActionPanel({
         <Ionicons name="chatbubble-outline" size={28} color="#fff" style={panelStyles.iconShadow} />
         <Text style={panelStyles.btnLbl}>Reviews</Text>
       </Pressable>
+
+      {/* Talk — opens the car's public persona profile + chat */}
+      {onTalk ? (
+        <Pressable onPress={onTalk} style={panelStyles.btn} hitSlop={8}>
+          <Ionicons name="sparkles" size={26} color="#fff" style={panelStyles.iconShadow} />
+          <Text style={panelStyles.btnLbl}>Talk</Text>
+        </Pressable>
+      ) : null}
 
       {/* Go Live — animated broadcast request button */}
       {onGoLive !== undefined ? (
@@ -1087,6 +1198,7 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
   onBook,
   onShare,
   onDriverProfile,
+  onTalk,
   onGoLive,
   goLiveState,
   goLiveCountdown,
@@ -1100,6 +1212,7 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
   onBook: (d: DiscoveryDriver) => void;
   onShare: (d: DiscoveryDriver) => void;
   onDriverProfile: (d: DiscoveryDriver) => void;
+  onTalk?: (d: DiscoveryDriver) => void;
   onGoLive?: (d: DiscoveryDriver) => void;
   goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
   goLiveCountdown?: number;
@@ -1217,6 +1330,7 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
         onReviews={() => onReviews(driver)}
         onShare={() => onShare(driver)}
         onDriverProfile={() => onDriverProfile(driver)}
+        onTalk={onTalk && driver.vehicleId ? () => onTalk(driver) : undefined}
         onGoLive={onGoLive ? () => onGoLive(driver) : undefined}
         goLiveState={goLiveState}
         goLiveCountdown={goLiveCountdown}
@@ -1529,6 +1643,16 @@ export default function HookFeedScreen() {
     [navigation],
   );
 
+  // Talk — the car's public persona profile (works for guests; chat itself
+  // gates on auth when the rider sends a message).
+  const handleTalk = useCallback(
+    (driver: DiscoveryDriver) => {
+      if (!driver.vehicleId) return;
+      navigation.navigate("CarProfile", { vehicleId: driver.vehicleId });
+    },
+    [navigation],
+  );
+
   // ── Layout helpers ────────────────────────────────────────────────────────
   const cardBottomInset = insets.bottom + TAB_BAR_H;
 
@@ -1551,6 +1675,7 @@ export default function HookFeedScreen() {
           onBook={handleBook}
           onShare={handleShare}
           onDriverProfile={handleDriverProfile}
+          onTalk={handleTalk}
           onGoLive={handleGoLive}
           goLiveState={isThisDriver ? goLiveStatus : "idle"}
           goLiveCountdown={isThisDriver ? goLiveCountdown : undefined}
@@ -1558,7 +1683,7 @@ export default function HookFeedScreen() {
       );
     },
     [currentIndex, cardBottomInset, isAuthenticated, handleBook, handleShare, handleDriverProfile,
-     handleGoLive, goLiveDriverUserId, goLiveStatus, goLiveCountdown],
+     handleTalk, handleGoLive, goLiveDriverUserId, goLiveStatus, goLiveCountdown],
   );
 
   const getItemLayout = useCallback(

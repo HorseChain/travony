@@ -58,6 +58,10 @@ export default function AgoraStreamViewerScreen() {
   );
 
   const [giftOpen, setGiftOpen] = useState(false);
+  // "Clip that" — marks the current moment for the post-stream highlight
+  // scorer. Cheap, deterministic signal; brief cooldown mirrors the server's.
+  const [clipMarkCooldown, setClipMarkCooldown] = useState(false);
+  const [clipMarkFlash, setClipMarkFlash] = useState(false);
   const [remoteUid, setRemoteUid] = useState<number | null>(null);
   const [engineReady, setEngineReady] = useState(false);
   const [product, setProduct] = useState<ActiveProduct | null>(null);
@@ -303,16 +307,40 @@ export default function AgoraStreamViewerScreen() {
           <ShopTheLookCard product={product} onExpired={() => setProduct(null)} />
         ) : null}
         {!ended && !isSelf ? (
-          <Pressable
-            style={({ pressed }) => [
-              styles.giftButton,
-              { backgroundColor: theme.primary, opacity: pressed ? 0.85 : 1 },
-            ]}
-            onPress={() => setGiftOpen(true)}
-          >
-            <Ionicons name="gift-outline" size={18} color={Colors.light.textOnPrimary} />
-            <ThemedText style={styles.giftButtonText}>Send a gift</ThemedText>
-          </Pressable>
+          <View style={styles.actionRow}>
+            <Pressable
+              style={({ pressed }) => [
+                styles.giftButton,
+                { flex: 1, backgroundColor: theme.primary, opacity: pressed ? 0.85 : 1 },
+              ]}
+              onPress={() => setGiftOpen(true)}
+            >
+              <Ionicons name="gift-outline" size={18} color={Colors.light.textOnPrimary} />
+              <ThemedText style={styles.giftButtonText}>Send a gift</ThemedText>
+            </Pressable>
+            <Pressable
+              style={({ pressed }) => [
+                styles.giftButton,
+                styles.clipButton,
+                { opacity: clipMarkCooldown ? 0.5 : pressed ? 0.85 : 1 },
+              ]}
+              disabled={clipMarkCooldown}
+              onPress={async () => {
+                setClipMarkCooldown(true);
+                setClipMarkFlash(true);
+                setTimeout(() => setClipMarkFlash(false), 1600);
+                setTimeout(() => setClipMarkCooldown(false), 8000);
+                try {
+                  await apiRequest(`/api/agora/streams/${postId}/clip-mark`, { method: "POST" });
+                } catch {} // best-effort signal
+              }}
+            >
+              <Ionicons name="cut-outline" size={18} color="#fff" />
+              <ThemedText style={styles.giftButtonText}>
+                {clipMarkFlash ? "Clipped!" : "Clip that"}
+              </ThemedText>
+            </Pressable>
+          </View>
         ) : null}
         {ended ? (
           <Pressable
@@ -442,6 +470,16 @@ const styles = StyleSheet.create({
     gap: 8,
     height: 46,
     borderRadius: BorderRadius.full,
+  },
+  actionRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  clipButton: {
+    paddingHorizontal: 18,
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
   },
   giftButtonText: {
     ...Typography.bodyBold,

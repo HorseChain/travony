@@ -12,6 +12,7 @@ import { and, desc, eq, gte, sql } from "drizzle-orm";
 import { calculateOptimalPrice } from "./aiEngine";
 import { detectRegionFromCoordinates, getRegionByCode } from "./regionService";
 import { getRiderDestinationSuggestions } from "./intentEngine";
+import { searchPlaces } from "./bookingBrain";
 import { COFFEE_MENU } from "./coffeeService";
 
 const router: RouterType = Router();
@@ -31,7 +32,7 @@ const router: RouterType = Router();
 // ============================================================================
 
 // ---------- session ----------
-async function getSessionUser(req: any) {
+export async function getSessionUser(req: any) {
   const token = req.headers.authorization?.split(" ")[1] || "";
   if (!token) return null;
   const session = await storage.getSession(token);
@@ -164,7 +165,7 @@ function replyIsHonest(reply: string): boolean {
   return true;
 }
 
-type HistoryEntry = { role: "user" | "assistant"; text: string };
+export type HistoryEntry = { role: "user" | "assistant"; text: string };
 
 async function llmParse(text: string, history: HistoryEntry[] = []): Promise<ParsedMessage | null> {
   const client = getOpenAI();
@@ -252,7 +253,7 @@ The user is having a general conversation with you — not booking a ride right 
 }
 
 // ---------- deterministic quote builder ----------
-interface Point {
+export interface Point {
   address: string;
   lat: number;
   lng: number;
@@ -276,7 +277,7 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number): num
 // the client will POST to /api/rides when (and only when) the rider taps
 // Confirm. The rides endpoint re-derives region and fees from pickup coords
 // server-side, so this payload is a convenience, not a trust surface.
-async function buildBookingCard(userId: string, pickup: Point, dropoff: Point) {
+export async function buildBookingCard(userId: string, pickup: Point, dropoff: Point) {
   const regionCode = detectRegionFromCoordinates(pickup.lat, pickup.lng);
   const region = await getRegionByCode(regionCode).catch(() => null);
   const vehicleType = region?.vehicleTypes?.[0]?.type || "economy";
@@ -346,12 +347,13 @@ async function buildBookingCard(userId: string, pickup: Point, dropoff: Point) {
 }
 
 // ---------- destination resolution (saved places → ride history) ----------
-async function resolveDestination(
+export async function resolveDestination(
   userId: string,
   query: string,
   hour: number,
   dow: number,
-  tzOffset: number
+  tzOffset: number,
+  near?: { lat: number; lng: number } | null
 ): Promise<{ resolved: Point | null; options: Array<Point & { label: string; icon: string; reason: string }> }> {
   const q = query.trim().toLowerCase();
   const saved = await storage.getSavedAddresses(userId);
@@ -399,13 +401,43 @@ async function resolveDestination(
     })),
   ].slice(0, 5);
 
+  if (options.length === 0) {
+    // Nothing personal matched — fall back to a real place search so
+    // "take me to Dubai Mall" works for a first-time rider too. Same
+    // deterministic geocoding the booking brain uses everywhere else.
+    try {
+      const places = await searchPlaces(query, near || undefined, 3);
+      if (places.length === 1) {
+        return {
+          resolved: { address: places[0].address, lat: places[0].lat, lng: places[0].lng },
+          options: [],
+        };
+      }
+      if (places.length > 1) {
+        return {
+          resolved: null,
+          options: places.map((p) => ({
+            address: p.address,
+            lat: p.lat,
+            lng: p.lng,
+            label: p.address.split(",")[0].trim(),
+            icon: "location-outline",
+            reason: "Search result",
+          })),
+        };
+      }
+    } catch (err) {
+      console.error("[assistant] place search fallback failed:", err);
+    }
+  }
+
   return { resolved: null, options };
 }
 
 // ---------- card builders for lookups ----------
 const ACTIVE_STATUSES = ["pending", "accepted", "arriving", "in_progress", "started"];
 
-async function findActiveRide(userId: string) {
+export async function findActiveRide(userId: string) {
   const rides = await storage.getRidesByCustomer(userId);
   return rides.find((r) => ACTIVE_STATUSES.includes(r.status)) || null;
 }
@@ -659,65 +691,57 @@ router.get("/api/assistant/home", async (req: any, res) => {
 });
 
 // ============================================================================
-// POST /api/assistant/message — parse intent, run the deterministic executor,
-// reply with text + a structured card. Never creates rides or moves money.
+// runAssistantTurn — parse intent, run the deterministic executor, return
+// text + a structured card. Never creates rides or moves money. Shared by
+// the typed endpoint below AND the voice endpoint (server/voiceAssistant.ts),
+// so voice and text follow exactly the same honesty and card rules.
 // ============================================================================
-router.post("/api/assistant/message", async (req: any, res) => {
-  try {
-    const session = await getSessionUser(req);
-    if (!session) return res.status(401).json({ message: "Authentication required" });
-    const userId = session.userId;
+export interface AssistantTurnInput {
+  text: string;
+  pickup: Point | null;
+  /** Rider tapped a place option in a card — skips text resolution. */
+  explicitDest?: Point | null;
+  history?: HistoryEntry[];
+  hour?: number;
+  dow?: number;
+  tzOffset?: number;
+}
 
-    const text = typeof req.body.text === "string" ? req.body.text.trim().slice(0, 500) : "";
-    if (!text) return res.status(400).json({ message: "Message text is required" });
+export interface AssistantTurnResult {
+  reply: string;
+  card: any;
+  intent: AssistantIntent;
+}
 
-    // Conversation history (last N messages from the client).
-    const rawHistory: any[] = Array.isArray(req.body.history) ? req.body.history : [];
-    const history: HistoryEntry[] = rawHistory
-      .filter((h) => (h.role === "user" || h.role === "assistant") && typeof h.text === "string" && h.text.trim())
-      .slice(-10)
-      .map((h) => ({ role: h.role as "user" | "assistant", text: h.text.trim().slice(0, 400) }));
+export async function runAssistantTurn(
+  userId: string,
+  input: AssistantTurnInput
+): Promise<AssistantTurnResult> {
+  const text = input.text;
+  const pickup = input.pickup;
+  const explicitDest = input.explicitDest || null;
+  const history = input.history || [];
 
-    const pickup: Point | null =
-      req.body.pickup &&
-      Number.isFinite(parseFloat(req.body.pickup.lat)) &&
-      Number.isFinite(parseFloat(req.body.pickup.lng))
-        ? {
-            address: String(req.body.pickup.address || "Current Location").slice(0, 300),
-            lat: parseFloat(req.body.pickup.lat),
-            lng: parseFloat(req.body.pickup.lng),
-          }
-        : null;
+  const now = new Date();
+  const hour = Math.max(
+    0,
+    Math.min(23, Number.isFinite(input.hour as number) ? (input.hour as number) : now.getHours())
+  );
+  const dow = Math.max(
+    0,
+    Math.min(6, Number.isFinite(input.dow as number) ? (input.dow as number) : now.getDay())
+  );
+  const tzOffset = Number.isFinite(input.tzOffset as number)
+    ? (input.tzOffset as number)
+    : -now.getTimezoneOffset();
 
-    // Optional explicit destination (rider tapped a place option in a card) —
-    // skips text resolution and goes straight to a deterministic quote.
-    const explicitDest: Point | null =
-      req.body.destination &&
-      Number.isFinite(parseFloat(req.body.destination.lat)) &&
-      Number.isFinite(parseFloat(req.body.destination.lng))
-        ? {
-            address: String(req.body.destination.address || "Destination").slice(0, 300),
-            lat: parseFloat(req.body.destination.lat),
-            lng: parseFloat(req.body.destination.lng),
-          }
-        : null;
-
-    const now = new Date();
-    const parseIntParam = (v: any, fallback: number) => {
-      const n = parseInt(String(v), 10);
-      return Number.isFinite(n) ? n : fallback;
-    };
-    const hour = Math.max(0, Math.min(23, parseIntParam(req.body.hour, now.getHours())));
-    const dow = Math.max(0, Math.min(6, parseIntParam(req.body.dow, now.getDay())));
-    const tzOffset = parseIntParam(req.body.tzOffset, -now.getTimezoneOffset());
-
-    // 1) Parse: explicit destination beats everything, then keyword fast-path,
-    // then LLM for free text.
-    let parsed: ParsedMessage | null = explicitDest
-      ? { intent: "book_ride", destination: null, reply: null }
-      : keywordParse(text);
-    if (!parsed) parsed = await llmParse(text, history);
-    if (!parsed) parsed = { intent: "help", destination: null, reply: null };
+  // 1) Parse: explicit destination beats everything, then keyword fast-path,
+  // then LLM for free text.
+  let parsed: ParsedMessage | null = explicitDest
+    ? { intent: "book_ride", destination: null, reply: null }
+    : keywordParse(text);
+  if (!parsed) parsed = await llmParse(text, history);
+  if (!parsed) parsed = { intent: "help", destination: null, reply: null };
 
     // 2) Deterministic executor.
     let reply = parsed.reply || "";
@@ -788,7 +812,7 @@ router.post("/api/assistant/message", async (req: any, res) => {
           }
           break;
         }
-        const { resolved, options } = await resolveDestination(userId, parsed.destination, hour, dow, tzOffset);
+        const { resolved, options } = await resolveDestination(userId, parsed.destination, hour, dow, tzOffset, pickup);
         if (resolved) {
           if (!pickup) {
             reply = needPickupReply;
@@ -886,7 +910,51 @@ router.post("/api/assistant/message", async (req: any, res) => {
       dow,
     });
 
-    res.json({ reply, card, intent: parsed.intent });
+  return { reply, card, intent: parsed.intent };
+}
+
+// ============================================================================
+// POST /api/assistant/message — the typed entry point.
+// ============================================================================
+router.post("/api/assistant/message", async (req: any, res) => {
+  try {
+    const session = await getSessionUser(req);
+    if (!session) return res.status(401).json({ message: "Authentication required" });
+
+    const text = typeof req.body.text === "string" ? req.body.text.trim().slice(0, 500) : "";
+    if (!text) return res.status(400).json({ message: "Message text is required" });
+
+    const rawHistory: any[] = Array.isArray(req.body.history) ? req.body.history : [];
+    const history: HistoryEntry[] = rawHistory
+      .filter((h) => (h.role === "user" || h.role === "assistant") && typeof h.text === "string" && h.text.trim())
+      .slice(-10)
+      .map((h) => ({ role: h.role as "user" | "assistant", text: h.text.trim().slice(0, 400) }));
+
+    const parsePoint = (raw: any, fallbackLabel: string): Point | null =>
+      raw && Number.isFinite(parseFloat(raw.lat)) && Number.isFinite(parseFloat(raw.lng))
+        ? {
+            address: String(raw.address || fallbackLabel).slice(0, 300),
+            lat: parseFloat(raw.lat),
+            lng: parseFloat(raw.lng),
+          }
+        : null;
+
+    const parseIntParam = (v: any): number | undefined => {
+      const n = parseInt(String(v), 10);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    const result = await runAssistantTurn(session.userId, {
+      text,
+      pickup: parsePoint(req.body.pickup, "Current Location"),
+      explicitDest: parsePoint(req.body.destination, "Destination"),
+      history,
+      hour: parseIntParam(req.body.hour),
+      dow: parseIntParam(req.body.dow),
+      tzOffset: parseIntParam(req.body.tzOffset),
+    });
+
+    res.json(result);
   } catch (error: any) {
     console.error("[assistant] message failed:", error);
     res.status(500).json({ message: error.message || "Assistant failed" });

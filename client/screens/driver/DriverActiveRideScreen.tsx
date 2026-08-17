@@ -18,6 +18,7 @@ import { ThemedText } from "@/components/ThemedText";
 import { RideChat } from "@/components/RideChat";
 import { useRideMessages } from "@/hooks/useRideMessages";
 import { GoLiveInAppButton } from "@/components/RideSocial";
+import { SafetyBookmarkButton } from "@/components/SafetyBookmarkButton";
 import { useAuth } from "@/hooks/useAuth";
 import { useTheme } from "@/hooks/useTheme";
 import { Colors, Spacing, Typography, BorderRadius } from "@/constants/theme";
@@ -461,6 +462,7 @@ export default function DriverActiveRideScreen() {
         style={[styles.bottomPanel, { backgroundColor: theme.backgroundRoot }]}
         contentContainerStyle={{ paddingBottom: tabBarHeight + Spacing.lg }}
       >
+        <View style={[styles.panelHandle, { backgroundColor: theme.border }]} />
         <StatusProgressStrip status={ride?.status ?? "accepted"} />
 
         <View style={styles.statusHeader}>
@@ -595,6 +597,9 @@ export default function DriverActiveRideScreen() {
 
         <View style={styles.buttonSection}>
           {validRideId ? <GoLiveInAppButton rideId={validRideId} rideStatus={ride?.status} /> : null}
+          {validRideId && ["accepted", "arriving", "started", "in_progress"].includes(ride?.status ?? "") ? (
+            <SafetyBookmarkButton rideId={validRideId} />
+          ) : null}
           <Pressable
             style={[styles.navigateButton, { backgroundColor: Colors.travonyGreen }]}
             onPress={handleNavigate}
@@ -607,11 +612,11 @@ export default function DriverActiveRideScreen() {
 
           {statusInfo.nextStatus ? (
             <Pressable
-              style={[styles.primaryButton, { backgroundColor: theme.backgroundElevated, borderColor: theme.border, borderWidth: 1 }]}
+              style={[styles.primaryButton, { backgroundColor: theme.textPrimary }]}
               onPress={handleStatusUpdate}
               disabled={updateStatusMutation.isPending}
             >
-              <ThemedText style={[styles.primaryButtonText, { color: theme.textPrimary }]}>
+              <ThemedText style={[styles.primaryButtonText, { color: theme.backgroundRoot }]}>
                 {updateStatusMutation.isPending ? "Updating..." : statusInfo.action}
               </ThemedText>
             </Pressable>
@@ -717,7 +722,19 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   statusInfo: { flex: 1 },
-  statusTitle: { ...Typography.h4, marginBottom: 2 },
+  panelHandle: {
+    alignSelf: "center",
+    width: 44,
+    height: 5,
+    borderRadius: 3,
+    marginBottom: Spacing.lg,
+  },
+  statusTitle: {
+    fontSize: 20,
+    fontWeight: "800" as const,
+    letterSpacing: -0.4,
+    marginBottom: 2,
+  },
   statusSubtitle: { ...Typography.body },
   otpBanner: {
     flexDirection: "row",
@@ -920,7 +937,8 @@ const styles = StyleSheet.create({
     }),
   },
   earningsFlashFare: {
-    ...Typography.h2,
+    fontSize: 30,
+    letterSpacing: -0.6,
     color: Colors.light.textOnPrimary,
     fontWeight: "800" as const,
   },

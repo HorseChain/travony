@@ -199,6 +199,38 @@
     .step p { color: rgba(255,255,255,0.64); font-size: 0.92rem; line-height: 1.55; }
 
     /* ---------- Network live dashboard ---------- */
+    /* ---- Voice AI section ---- */
+    .voice {
+      background: radial-gradient(1200px 600px at 50% -10%, rgba(18,185,129,0.16), transparent 60%), #0c0e12;
+      color: #fff; padding: 7rem 2rem; display: flex; flex-direction: column; align-items: center; text-align: center;
+    }
+    .voice .vc-badge {
+      display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.7rem; font-weight: 700;
+      letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); margin-bottom: 1rem;
+    }
+    .voice h2 { font-size: clamp(1.9rem, 4.6vw, 3rem); font-weight: 600; margin: 0 0 0.7rem; }
+    .voice .vc-sub { color: rgba(255,255,255,0.62); font-size: 0.98rem; max-width: 560px; margin: 0 auto 2.6rem; }
+    .vc-chat {
+      width: min(430px, 92vw); margin: 0 auto 2.4rem; text-align: left;
+      display: flex; flex-direction: column; gap: 0.6rem;
+    }
+    .vc-b {
+      max-width: 85%; padding: 0.7rem 1rem; border-radius: 16px; font-size: 0.92rem; line-height: 1.45;
+    }
+    .vc-b.u { align-self: flex-end; background: var(--accent); color: #06251b; border-bottom-right-radius: 4px; }
+    .vc-b.a { align-self: flex-start; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.1); border-bottom-left-radius: 4px; }
+    .vc-b.a b { color: var(--accent); }
+    .vc-mic {
+      width: 54px; height: 54px; border-radius: 50%; margin: 0 auto 2.2rem; display: flex; align-items: center; justify-content: center;
+      background: rgba(18,185,129,0.14); border: 1px solid rgba(18,185,129,0.45); color: var(--accent);
+      animation: netPulse 2.4s ease-in-out infinite;
+    }
+    .vc-mic svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .vc-points { display: flex; gap: 2.2rem; flex-wrap: wrap; justify-content: center; margin-bottom: 2.6rem; }
+    .vc-points div { font-size: 0.85rem; color: rgba(255,255,255,0.72); }
+    .vc-points b { color: #fff; font-weight: 600; display: block; margin-bottom: 0.2rem; }
+    .voice .vc-hint { margin-top: 0.9rem; font-size: 0.8rem; color: rgba(255,255,255,0.45); }
+
     .net {
       background: radial-gradient(1200px 600px at 50% -10%, rgba(18,185,129,0.08), transparent 60%), #05070a;
       color: #fff; min-height: 100vh; min-height: 100svh;
@@ -510,6 +542,7 @@
     <button class="nv hide-m" data-go="mall">Mall</button>
     <button class="nv hide-m" data-go="hotel">Hotel</button>
     <button class="nv hide-m" data-go="prayer">Prayer</button>
+    <button class="nv hide-m" data-go="voice">Voice AI</button>
     <button class="nv hide-m" data-go="trending">Trending</button>
     <button class="nv hide-m" data-go="network">Network</button>
     <button class="nv hide-m" data-go="live">Live</button>
@@ -627,6 +660,30 @@
       <p>At exactly the right minute, a real driver from the network is at your door.</p>
     </div>
   </div>
+</section>
+
+<!-- VOICE AI (talk to Travony) -->
+<section class="voice" id="voice">
+  <div class="vc-badge fx"><span class="live-dot"></span>New &middot; Voice AI</div>
+  <h2 class="fx">Just say where you're going.</h2>
+  <p class="vc-sub fx d1">
+    Talk to Travony in any language — it answers back, quotes your fare and books the ride.
+    Right here in your browser. No app, no forms.
+  </p>
+  <div class="vc-mic fx d1" aria-hidden="true">
+    <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+  </div>
+  <div class="vc-chat fx d1" aria-hidden="true">
+    <div class="vc-b u">&ldquo;Take me to Dubai Mall.&rdquo;</div>
+    <div class="vc-b a">Your fare to <b>Dubai Mall</b> is locked. Say <b>&ldquo;yes&rdquo;</b> and a driver is on the way.</div>
+  </div>
+  <div class="vc-points fx d2">
+    <div><b>Any language</b>Speak naturally — it understands and replies in yours.</div>
+    <div><b>Live cards</b>Fare, driver and trip appear as tappable cards.</div>
+    <div><b>Zero install</b>Works in the browser you already have.</div>
+  </div>
+  <a class="btn btn-light fx d2" href="/ride">Talk to Travony now</a>
+  <div class="vc-hint fx d2">Or type instead — same brain, same booking.</div>
 </section>
 
 <!-- TRENDING NOW (Travony Live) -->
@@ -785,6 +842,7 @@
 
 <footer>
   <div>
+    <a href="/ride">Book by voice or text</a>
     <a href="/drive">Drive with Travony</a>
     <a href="/privacy">Privacy</a>
     <a href="/terms">Terms</a>

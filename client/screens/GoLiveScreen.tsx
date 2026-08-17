@@ -60,15 +60,19 @@ export default function GoLiveScreen() {
   const [frontCamera, setFrontCamera] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
+  const [onTv, setOnTv] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
   const [post, setPost] = useState<any>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   // Distinguishes first connect from a mid-stream drop for the status badge.
   const everPublishedRef = useRef(false);
+  // Highlight-clip frame capture — expo-camera is already the broadcaster's
+  // preview, so we snapshot it periodically for the post-stream clip render.
+  const cameraRef = useRef<any>(null);
 
   // Speed-based distraction-prevention lockout (task #83)
-  const { movingState } = useVehicleSpeed();
+  const { movingState, speedKmhRef } = useVehicleSpeed();
   // Controls are locked when moving OR when speed state is unknown (fail-safe).
   // "unknown" covers: permission denied, GPS unavailable, cold-start timeout.
   const isControlLocked = (movingState === "moving" || movingState === "unknown") && phase === "live";
@@ -142,9 +146,49 @@ export default function GoLiveScreen() {
       apiRequest(`/api/agora/streams/${post.id}/stop`, { method: "POST" }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
-      navigation.goBack();
+      // Hand the driver straight to the highlight review screen — the server
+      // is already turning the stream's best moments into candidate clips.
+      const endedPostId = post?.id;
+      if (endedPostId) {
+        (navigation as any).replace("StreamHighlights", { postId: endedPostId });
+      } else {
+        navigation.goBack();
+      }
     },
   });
+
+  // Highlight-clip frames: while live, quietly snapshot the camera every ~6s
+  // and upload a low-quality JPEG. The server buffers frames only for the
+  // duration of the stream and renders up to 3 highlight clips at the end.
+  // Every failure is silent — frame capture must never disturb broadcasting.
+  useEffect(() => {
+    if (phase !== "live" || !post?.id) return;
+    let stopped = false;
+    let busy = false;
+    const capture = async () => {
+      if (stopped || busy || !cameraRef.current?.takePictureAsync) return;
+      busy = true;
+      try {
+        const pic = await cameraRef.current.takePictureAsync({
+          quality: 0.2,
+          base64: true,
+          skipProcessing: true,
+          shutterSound: false,
+        });
+        if (!stopped && pic?.base64) {
+          await apiRequest(`/api/agora/streams/${post.id}/frame`, {
+            method: "POST",
+            body: JSON.stringify({ frame: pic.base64 }),
+            headers: { "Content-Type": "application/json" },
+          });
+        }
+      } catch {} // silent by design
+      busy = false;
+    };
+    const t = setInterval(capture, 6000);
+    const first = setTimeout(capture, 1500);
+    return () => { stopped = true; clearInterval(t); clearTimeout(first); };
+  }, [phase, post?.id]);
 
   // Token — only fetched after the post is created server-side.
   const tokenQuery = useQuery<StreamTokenBundle>({
@@ -202,12 +246,20 @@ export default function GoLiveScreen() {
     let stopped = false;
     const beat = async () => {
       try {
-        const r = await apiRequest(`/api/agora/streams/${post.id}/heartbeat`, { method: "POST" });
+        // Safety layer: report the latest GPS speed with each heartbeat so the
+        // server can derive deterministic speed-delta flags for the ride report.
+        const speedKmh = speedKmhRef.current;
+        const r = await apiRequest(`/api/agora/streams/${post.id}/heartbeat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(speedKmh !== null ? { speedKmh: Math.round(speedKmh * 10) / 10 } : {}),
+        });
         if (!stopped && r && r.live === false) {
           queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
           navigation.goBack();
         } else if (!stopped && typeof r?.viewerCount === "number") {
           setViewerCount(r.viewerCount);
+          setOnTv(r.onTv === true);
         }
       } catch {} // transient network errors: keep broadcasting, keep trying
     };
@@ -328,6 +380,16 @@ export default function GoLiveScreen() {
     // Only show toast when we have confirmed movement, not on unknown state.
     if (movingState !== "moving" || phase !== "live" || lockoutToastShownRef.current) return;
     lockoutToastShownRef.current = true;
+    // Safety layer: record that the distraction lockout engaged during this
+    // stream (context for the post-ride safety report). Server throttles;
+    // best-effort — never affects the broadcast.
+    if (post?.id) {
+      apiRequest(`/api/agora/streams/${post.id}/safety-event`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "control_lockout" }),
+      }).catch(() => {});
+    }
     setShowLockoutToast(true);
     const t = setTimeout(() => setShowLockoutToast(false), 3500);
     return () => clearTimeout(t);
@@ -443,6 +505,7 @@ export default function GoLiveScreen() {
       {/* Agora joins for audio + attempts camera sharing (Android 9+).      */}
       {/* ------------------------------------------------------------------ */}
       <CameraView
+        ref={cameraRef}
         style={StyleSheet.absoluteFill}
         facing={frontCamera ? "front" : "back"}
       />
@@ -477,6 +540,12 @@ export default function GoLiveScreen() {
         <View style={styles.topLeft}>
           {phase === "live" ? <LiveBadge /> : null}
           {phase === "live" ? <ViewerCountChip count={viewerCount} /> : null}
+          {phase === "live" && onTv ? (
+            <View style={styles.onTvBadge}>
+              <Ionicons name="tv" size={12} color="#04240f" />
+              <ThemedText style={styles.onTvText}>ON TV</ThemedText>
+            </View>
+          ) : null}
         </View>
         {/* Hide camera-flip and close when locked — driver must use End Stream
             in the locked bar instead of navigating away mid-movement. */}
@@ -686,6 +755,19 @@ const styles = StyleSheet.create({
   startingText: {
     ...Typography.small,
     color: Glass.textOnGlassDim,
+  },
+  onTvBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: "#22c55e",
+    borderRadius: BorderRadius.full,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+  },
+  onTvText: {
+    ...Typography.captionBold,
+    color: "#04240f",
   },
   reconnectBadge: {
     position: "absolute",

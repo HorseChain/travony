@@ -10,6 +10,10 @@ import { isAppError } from "./errors";
 import { setupTaxiModeRoutes } from "./taxiModeRoutes";
 
 const app = express();
+// Replit routes all traffic through exactly one trusted reverse proxy;
+// trust that single hop so req.ip reflects the real client address
+// (rate limiters rely on this — never read X-Forwarded-For manually).
+app.set("trust proxy", 1);
 const log = console.log;
 
 declare module "http" {
@@ -24,6 +28,17 @@ function setupCors(app: express.Application) {
 
     if (process.env.REPLIT_DEV_DOMAIN) {
       origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
+      // Expo's web dev server is proxied on a sibling subdomain
+      // (<id>.expo.<zone>) — allow it so the dev web preview can reach the
+      // API. Development ONLY: this must never widen production origins.
+      if (process.env.NODE_ENV === "development") {
+        const dot = process.env.REPLIT_DEV_DOMAIN.indexOf(".");
+        if (dot > 0) {
+          origins.add(
+            `https://${process.env.REPLIT_DEV_DOMAIN.slice(0, dot)}.expo${process.env.REPLIT_DEV_DOMAIN.slice(dot)}`,
+          );
+        }
+      }
     }
 
     if (process.env.REPLIT_DOMAINS) {

@@ -657,7 +657,7 @@ router.get("/api/openclaw/go-here-next", async (req, res) => {
       return res.status(404).json({ error: "Driver profile not found" });
     }
 
-    const result = await getGoHereNext(driver.id, lat, lng);
+    const result = await getGoHereNext(driver.id, lat, lng, { llmReason: true });
     res.json(result);
   } catch (error: any) {
     res.status(500).json({ error: error.message || "Failed to get go-here-next recommendation" });

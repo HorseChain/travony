@@ -469,7 +469,11 @@ export default function HomeScreen() {
                 key={idx}
                 style={({ pressed }) => [
                   styles.chip,
-                  { backgroundColor: theme.card, borderColor: theme.border, opacity: pressed ? 0.8 : 1 },
+                  {
+                    backgroundColor: theme.card,
+                    borderColor: theme.border,
+                    transform: [{ scale: pressed ? 0.95 : 1 }],
+                  },
                 ]}
                 onPress={() => handleChipPress(chip.location)}
               >
@@ -681,9 +685,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.lg,
   },
   greetingCard: {
-    padding: Spacing.md,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.md,
+    padding: Spacing.lg,
+    paddingHorizontal: Spacing.xl,
+    borderRadius: BorderRadius.lg,
     ...Shadows.card,
   },
   greetingRow: {
@@ -692,16 +696,21 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   greeting: {
-    ...Typography.bodyLargeBold,
+    ...Typography.bodyLargeHeavy,
+    letterSpacing: -0.4,
   },
   greetingSubtitle: {
-    ...Typography.small,
+    ...Typography.label,
     marginTop: 2,
   },
   networkStatus: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    backgroundColor: Colors.travonyGreen + "14",
+    paddingHorizontal: Spacing.sm + 2,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.full,
   },
   networkDot: {
     width: 6,
@@ -710,9 +719,10 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.travonyGreen,
   },
   networkText: {
-    ...Typography.caption,
+    ...Typography.captionBold,
     color: Colors.travonyGreen,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
+    textTransform: "uppercase",
   },
   activeRidePill: {
     position: "absolute",
@@ -738,7 +748,8 @@ const styles = StyleSheet.create({
   activeRidePillText: {
     flex: 1,
     color: Colors.light.textOnPrimary,
-    ...Typography.labelBold,
+    ...Typography.labelHeavy,
+    letterSpacing: -0.1,
   },
   overlayArea: {
     position: "absolute",
@@ -758,11 +769,11 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: Spacing.md,
-    paddingVertical: 8,
-    borderRadius: BorderRadius.lg,
+    paddingHorizontal: Spacing.md + 2,
+    paddingVertical: 9,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
-    gap: 7,
+    gap: 8,
     ...Shadows.card,
   },
   chipTextColumn: {
@@ -832,20 +843,22 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     padding: Spacing.md,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.lg,
     borderWidth: 1,
     gap: Spacing.md,
+    ...Shadows.card,
   },
   coffeeButton: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: Spacing.md,
+    paddingHorizontal: Spacing.lg,
     paddingVertical: Spacing.sm,
-    borderRadius: BorderRadius.md,
+    borderRadius: BorderRadius.full,
     borderWidth: 1,
     gap: 6,
     height: 48,
+    ...Shadows.card,
   },
   coffeeButtonText: {
     color: Colors.light.textOnPrimary,

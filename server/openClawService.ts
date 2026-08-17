@@ -2,7 +2,14 @@ import { db } from "./db";
 import { hubs, hotspots, rides, drivers, vehicles, carpoolSuggestions, hubCheckIns, type Hub, type Hotspot } from "@shared/schema";
 import { eq, and, gte, lte, desc, sql, or } from "drizzle-orm";
 import { detectRegionFromCoordinates, getRegionByCode } from "./regionService";
-import { getFlowRecommendation } from "./cityBrain";
+import { getFlowRecommendation, getZoneId } from "./cityBrain";
+import {
+  forecastZonesNear,
+  deterministicForecastReason,
+  llmForecastReason,
+  recordForecastServed,
+  type ZoneForecast,
+} from "./demandForecast";
 
 function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -590,7 +597,7 @@ function demandPhrase(level: string): string {
 // Real per-hour earnings for an area, using only completed rides in the last
 // 6 hours within radiusKm. Returns null when there aren't enough real rides to
 // be honest about a figure (we never invent an earnings number).
-async function computeAreaYieldPerHour(lat: number, lng: number, radiusKm: number): Promise<{ yieldPerHour: number | null; sampleSize: number }> {
+export async function computeAreaYieldPerHour(lat: number, lng: number, radiusKm: number): Promise<{ yieldPerHour: number | null; sampleSize: number }> {
   const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
   const completed = await db.select().from(rides).where(and(
     gte(rides.createdAt, sixHoursAgo),
@@ -614,21 +621,28 @@ async function computeAreaYieldPerHour(lat: number, lng: number, radiusKm: numbe
 // City Brain zone-flow, in that order of confidence. Earnings figures come only
 // from real ride data; when there isn't enough, we omit the /hr number rather
 // than fabricate one.
-export async function getGoHereNext(driverId: string, lat: number, lng: number): Promise<{
-  recommendation: {
-    kind: "hub" | "hotspot" | "zone";
-    hubId: string | null;
-    title: string;
-    lat: number;
-    lng: number;
-    distanceKm: number;
-    etaMinutes: number;
-    yieldPerHour: number | null;
-    currency: string;
-    demandLevel: string;
-    reason: string;
-    confidence: number;
-  } | null;
+type GoHereRec = {
+  kind: "hub" | "hotspot" | "zone" | "forecast";
+  hubId: string | null;
+  title: string;
+  lat: number;
+  lng: number;
+  distanceKm: number;
+  etaMinutes: number;
+  yieldPerHour: number | null;
+  currency: string;
+  demandLevel: string;
+  reason: string;
+  confidence: number;
+};
+
+export async function getGoHereNext(
+  driverId: string,
+  lat: number,
+  lng: number,
+  opts?: { llmReason?: boolean },
+): Promise<{
+  recommendation: GoHereRec | null;
   currency: string;
   emptyReason?: string;
 }> {
@@ -639,74 +653,158 @@ export async function getGoHereNext(driverId: string, lat: number, lng: number):
   // Urban driving estimate ~25 km/h to turn distance into a rough ETA.
   const etaFor = (distKm: number) => Math.max(1, Math.round((distKm / 25) * 60));
 
-  // 1) Best hub recommendation — real yield from nearby completed rides.
+  // Demand forecast (zone × hour-of-week history + event overlays) is the
+  // primary ranking input: hub and hotspot candidates get boosted when the
+  // forecast agrees, and a strong forecast zone can win outright. All math is
+  // deterministic; earnings figures still come only from real completed rides.
+  let zoneForecasts: ZoneForecast[] = [];
+  try {
+    zoneForecasts = await forecastZonesNear(lat, lng, 8);
+  } catch (e) {
+    console.error("[openclaw] forecast unavailable, falling back to reactive ranking:", e);
+  }
+  const forecastByZone = new Map(zoneForecasts.map((z) => [z.zoneId, z]));
+  const currentZone = getZoneId(lat, lng);
+  const forecastBoost = (zLat: number, zLng: number): number => {
+    const fc = forecastByZone.get(getZoneId(zLat, zLng));
+    if (!fc) return 0;
+    return Math.min(0.4, fc.score / 5);
+  };
+
+  const candidates: { rank: number; build: () => Promise<GoHereRec | null> }[] = [];
+
+  // Candidate A: best hub — real yield from nearby completed rides.
   const hubRecs = await getHubRecommendationsForDriver(driverId, lat, lng);
   const topHub = hubRecs.find(
     (h) => h.yieldEstimate > 0 || h.demandLevel === "high" || h.demandLevel === "very_high",
   );
-  if (topHub) {
-    const [hubRow] = await db.select().from(hubs).where(eq(hubs.id, topHub.hubId));
-    if (hubRow) {
-      const distanceKm = Math.round(topHub.distance * 10) / 10;
-      const etaMinutes = etaFor(topHub.distance);
-      const yieldPerHour = topHub.yieldEstimate > 0 ? Math.round(topHub.yieldEstimate) : null;
-      const reason = yieldPerHour
-        ? `${demandPhrase(topHub.demandLevel)} — about ${currency} ${yieldPerHour}/hr, ~${etaMinutes} min away`
-        : `${demandPhrase(topHub.demandLevel)} — ~${etaMinutes} min away, about ${topHub.predictedWaitMinutes} min wait`;
-      return {
-        recommendation: {
+  const [topHubRow] = topHub
+    ? await db.select().from(hubs).where(eq(hubs.id, topHub.hubId))
+    : [undefined];
+  if (topHub && topHubRow) {
+    const hubLat = parseFloat(topHubRow.lat);
+    const hubLng = parseFloat(topHubRow.lng);
+    candidates.push({
+      rank: topHub.score + 0.25 /* live/near-term signal premium */ + forecastBoost(hubLat, hubLng),
+      build: async () => {
+        const distanceKm = Math.round(topHub.distance * 10) / 10;
+        const etaMinutes = etaFor(topHub.distance);
+        // Honesty rule: only show an /hr figure when enough real completed
+        // rides back it (computeAreaYieldPerHour returns null under 3 rides).
+        const area = await computeAreaYieldPerHour(hubLat, hubLng, 1);
+        const yieldPerHour = area.yieldPerHour;
+        const reason = yieldPerHour
+          ? `${demandPhrase(topHub.demandLevel)} — about ${currency} ${yieldPerHour}/hr, ~${etaMinutes} min away`
+          : `${demandPhrase(topHub.demandLevel)} — ~${etaMinutes} min away, about ${topHub.predictedWaitMinutes} min wait`;
+        return {
           kind: "hub",
           hubId: topHub.hubId,
           title: topHub.hubName,
-          lat: parseFloat(hubRow.lat),
-          lng: parseFloat(hubRow.lng),
+          lat: hubLat,
+          lng: hubLng,
           distanceKm,
           etaMinutes,
           yieldPerHour,
           currency,
           demandLevel: topHub.demandLevel,
           reason,
-          confidence: topHub.score,
-        },
-        currency,
-      };
-    }
+          confidence: Math.min(0.95, Math.round((topHub.score + forecastBoost(hubLat, hubLng) * 0.25) * 100) / 100),
+        };
+      },
+    });
   }
 
-  // 2) Live hotspot — a real cluster of recent pickup requests.
+  // Candidate B: live hotspot — a real cluster of recent pickup requests.
   const detected = await detectHotspots();
   const nearHot = detected
     .map((h) => ({ ...h, dist: haversineDistance(lat, lng, h.lat, h.lng) }))
     .filter((h) => h.dist <= 10 && h.demandCount > 0)
     .sort((a, b) => b.demandScore - a.demandScore)[0];
   if (nearHot) {
-    const distanceKm = Math.round(nearHot.dist * 10) / 10;
-    const etaMinutes = etaFor(nearHot.dist);
-    const area = await computeAreaYieldPerHour(nearHot.lat, nearHot.lng, 1);
-    const reqWord = nearHot.demandCount === 1 ? "request" : "requests";
-    const reason = area.yieldPerHour
-      ? `${nearHot.demandCount} recent ${reqWord} here — about ${currency} ${area.yieldPerHour}/hr, ~${etaMinutes} min away`
-      : `${nearHot.demandCount} recent ${reqWord} here — ~${etaMinutes} min away`;
-    return {
-      recommendation: {
-        kind: "hotspot",
-        hubId: null,
-        title: "Busy pickup area",
-        lat: nearHot.lat,
-        lng: nearHot.lng,
-        distanceKm,
-        etaMinutes,
-        yieldPerHour: area.yieldPerHour,
-        currency,
-        demandLevel: nearHot.demandScore >= 8 ? "high" : "medium",
-        reason,
-        confidence: Math.min(1, Math.round((nearHot.demandCount / 8) * 100) / 100),
+    candidates.push({
+      rank: Math.min(1, nearHot.demandCount / 8) + 0.25 + forecastBoost(nearHot.lat, nearHot.lng),
+      build: async () => {
+        const distanceKm = Math.round(nearHot.dist * 10) / 10;
+        const etaMinutes = etaFor(nearHot.dist);
+        const area = await computeAreaYieldPerHour(nearHot.lat, nearHot.lng, 1);
+        const reqWord = nearHot.demandCount === 1 ? "request" : "requests";
+        const reason = area.yieldPerHour
+          ? `${nearHot.demandCount} recent ${reqWord} here — about ${currency} ${area.yieldPerHour}/hr, ~${etaMinutes} min away`
+          : `${nearHot.demandCount} recent ${reqWord} here — ~${etaMinutes} min away`;
+        return {
+          kind: "hotspot",
+          hubId: null,
+          title: "Busy pickup area",
+          lat: nearHot.lat,
+          lng: nearHot.lng,
+          distanceKm,
+          etaMinutes,
+          yieldPerHour: area.yieldPerHour,
+          currency,
+          demandLevel: nearHot.demandScore >= 8 ? "high" : "medium",
+          reason,
+          confidence: Math.min(1, Math.round((nearHot.demandCount / 8) * 100) / 100),
+        };
       },
-      currency,
-    };
+    });
   }
 
-  // 3) City Brain zone-flow — nudge toward a busier adjacent zone.
+  // Candidate C: forecast zone — predicted demand before it materializes.
+  const topForecast = zoneForecasts.find((z) => z.zoneId !== currentZone && z.score >= 0.35) || null;
+  if (topForecast) {
+    candidates.push({
+      rank: Math.min(1.15, 0.3 + topForecast.score / 3),
+      build: async () => {
+        const etaMinutes = etaFor(topForecast.distanceKm);
+        const area = await computeAreaYieldPerHour(topForecast.lat, topForecast.lng, 1.5);
+        const baseReason = opts?.llmReason
+          ? await llmForecastReason(topForecast, etaMinutes)
+          : deterministicForecastReason(topForecast, etaMinutes);
+        // Earnings figure only when real rides back it — same honesty rule.
+        const reason = area.yieldPerHour
+          ? `${baseReason} · about ${currency} ${area.yieldPerHour}/hr here recently`
+          : baseReason;
+        const overlay = topForecast.overlays[0];
+        return {
+          kind: "forecast",
+          hubId: null,
+          title: overlay?.type === "prayer" ? "Prayer-time demand area" : "Predicted busy zone",
+          lat: topForecast.lat,
+          lng: topForecast.lng,
+          distanceKm: topForecast.distanceKm,
+          etaMinutes,
+          yieldPerHour: area.yieldPerHour,
+          currency,
+          demandLevel: topForecast.expectedRidesPerHour >= 3 ? "high" : topForecast.expectedRidesPerHour >= 1.5 ? "medium" : "low",
+          reason,
+          confidence: topForecast.confidence,
+        };
+      },
+    });
+  }
+
+  // Pick the highest-ranked candidate that builds successfully.
+  candidates.sort((a, b) => b.rank - a.rank);
+  for (const candidate of candidates) {
+    const rec = await candidate.build();
+    if (rec) {
+      // Outcome tracking: every served card records whether a ride actually
+      // materializes in that zone within the next hour (deduped per hour).
+      await recordForecastServed({
+        driverId,
+        zoneId: getZoneId(rec.lat, rec.lng),
+        kind: rec.kind,
+        lat: rec.lat,
+        lng: rec.lng,
+        score: candidate.rank,
+        confidence: rec.confidence,
+        reason: rec.reason,
+      });
+      return { recommendation: rec, currency };
+    }
+  }
+
+  // Legacy fallback: City Brain zone-flow — nudge toward a busier adjacent zone.
   const flow = await getFlowRecommendation(lat, lng);
   if (flow.recommendedZone) {
     const dist = haversineDistance(lat, lng, flow.recommendedZone.lat, flow.recommendedZone.lng);
@@ -716,23 +814,31 @@ export async function getGoHereNext(driverId: string, lat: number, lng: number):
     const reason = area.yieldPerHour
       ? `Busier zone nearby — about ${currency} ${area.yieldPerHour}/hr, ~${etaMinutes} min away`
       : `Busier zone nearby — ~${etaMinutes} min away`;
-    return {
-      recommendation: {
-        kind: "zone",
-        hubId: null,
-        title: "Higher-demand zone",
-        lat: flow.recommendedZone.lat,
-        lng: flow.recommendedZone.lng,
-        distanceKm,
-        etaMinutes,
-        yieldPerHour: area.yieldPerHour,
-        currency,
-        demandLevel: "medium",
-        reason,
-        confidence: 0.4,
-      },
+    const rec: GoHereRec = {
+      kind: "zone",
+      hubId: null,
+      title: "Higher-demand zone",
+      lat: flow.recommendedZone.lat,
+      lng: flow.recommendedZone.lng,
+      distanceKm,
+      etaMinutes,
+      yieldPerHour: area.yieldPerHour,
       currency,
+      demandLevel: "medium",
+      reason,
+      confidence: 0.4,
     };
+    await recordForecastServed({
+      driverId,
+      zoneId: getZoneId(rec.lat, rec.lng),
+      kind: rec.kind,
+      lat: rec.lat,
+      lng: rec.lng,
+      score: 0.4,
+      confidence: rec.confidence,
+      reason: rec.reason,
+    });
+    return { recommendation: rec, currency };
   }
 
   return {

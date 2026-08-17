@@ -528,6 +528,15 @@ Join the network: https://play.google.com/store/apps/details?id=com.travony.driv
 }
 
 export async function processTelegramUpdate(update: TelegramUpdate): Promise<void> {
+  // Driver chat onboarding: the "Apply here in chat" button, contact shares
+  // and photos for an active interview are consumed before the rider flow.
+  try {
+    const { tryHandleTelegramOnboarding } = await import("./onboardingAgent");
+    if (await tryHandleTelegramOnboarding(update)) return;
+  } catch (error) {
+    console.error("[Telegram] onboarding handler error:", error);
+  }
+
   try {
     const { tryHandleRiderUpdate } = await import("./telegramRiderBot");
     if (await tryHandleRiderUpdate(update)) return;
@@ -709,6 +718,33 @@ Good luck!`;
   return sendTelegramMessage(driver.users.telegramChatId, message);
 }
 
+/**
+ * Deterministic webhook secret derived from the bot token (no extra secret to
+ * manage). Telegram echoes it back in X-Telegram-Bot-Api-Secret-Token on every
+ * webhook delivery, which lets us reject forged updates.
+ */
+export function getWebhookSecret(): string | null {
+  if (!TELEGRAM_BOT_TOKEN) return null;
+  return webhookCrypto.createHash("sha256").update(`tg-webhook:${TELEGRAM_BOT_TOKEN}`).digest("hex").slice(0, 48);
+}
+import webhookCrypto from "crypto";
+
+// Self-heal: if a webhook delivery arrives without the expected secret (e.g.
+// the webhook was registered before secrets existed), re-register it — but
+// ONLY in production, so a dev server can never steal the bot's webhook.
+let lastWebhookRefresh = 0;
+export function scheduleWebhookSelfHeal(): void {
+  if (process.env.REPLIT_DEPLOYMENT !== "1") return;
+  const now = Date.now();
+  if (now - lastWebhookRefresh < 10 * 60_000) return;
+  lastWebhookRefresh = now;
+  const domain = process.env.REPLIT_DOMAINS?.split(",")[0];
+  if (!domain) return;
+  setWebhook(`https://${domain}/api/webhook/telegram`).catch((err) =>
+    console.error("[Telegram] webhook self-heal error:", err),
+  );
+}
+
 export async function setWebhook(webhookUrl: string): Promise<boolean> {
   if (!TELEGRAM_BOT_TOKEN) {
     console.log("[Telegram] Bot token not configured");
@@ -719,7 +755,7 @@ export async function setWebhook(webhookUrl: string): Promise<boolean> {
     const response = await fetch(`${TELEGRAM_API_URL}/setWebhook`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: webhookUrl }),
+      body: JSON.stringify({ url: webhookUrl, secret_token: getWebhookSecret() }),
     });
     const result = await response.json();
     console.log("[Telegram] Webhook set:", result);

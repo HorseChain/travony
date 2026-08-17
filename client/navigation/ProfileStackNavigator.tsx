@@ -18,6 +18,7 @@ import ActivityCentreScreen from "@/screens/ActivityCentreScreen";
 import RewardsScreen from "@/screens/RewardsScreen";
 import FollowListScreen from "@/screens/FollowListScreen";
 import ClaudeAgentScreen from "@/screens/ClaudeAgentScreen";
+import NotificationsScreen from "@/screens/NotificationsScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type ProfileStackParamList = {
@@ -39,6 +40,7 @@ export type ProfileStackParamList = {
   Rewards: undefined;
   FollowList: { mode: "followers" | "following" };
   TravonyAI: undefined;
+  Notifications: undefined;
 };
 
 const Stack = createNativeStackNavigator<ProfileStackParamList>();
@@ -77,6 +79,11 @@ export default function ProfileStackNavigator() {
         name="Messages"
         component={MessagesScreen}
         options={{ headerTitle: "Messages" }}
+      />
+      <Stack.Screen
+        name="Notifications"
+        component={NotificationsScreen}
+        options={{ headerTitle: "Notifications" }}
       />
       <Stack.Screen
         name="RideTruth"

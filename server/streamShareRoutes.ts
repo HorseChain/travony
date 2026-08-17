@@ -34,11 +34,58 @@ interface ShareTokenData {
 }
 const shareTokenStore = new Map<string, ShareTokenData>();
 
-// Prune expired tokens every 10 minutes
+// ---------------------------------------------------------------------------
+// Per IP+token rate limiting for the public metadata endpoint.
+// Contains the blast radius if a share link is forwarded to a group chat:
+// each viewer (IP) may poll at most SHARE_LINK_MAX_RPM times per minute.
+// The legitimate share page polls every 10 s (~6 req/min), well under the cap.
+// ---------------------------------------------------------------------------
+
+const SHARE_LINK_MAX_RPM = (() => {
+  const parsed = parseInt(process.env.SHARE_LINK_MAX_RPM || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 12;
+})();
+
+interface RateWindow {
+  windowStart: number; // epoch ms of the current fixed 60s window
+  count: number;
+}
+// Keys: "<ip>|<token>" (per-viewer) and "token|<token>" (whole-link ceiling)
+const shareRateStore = new Map<string, RateWindow>();
+
+// Token-wide ceiling: even if client IPs are spoofed or many viewers pile on,
+// the link as a whole cannot be polled more than 5x the per-IP cap per minute.
+const SHARE_LINK_TOKEN_MAX_RPM = SHARE_LINK_MAX_RPM * 5;
+
+function bumpWindow(key: string, limit: number): boolean {
+  const now = Date.now();
+  const win = shareRateStore.get(key);
+  if (!win || now - win.windowStart >= 60_000) {
+    shareRateStore.set(key, { windowStart: now, count: 1 });
+    return true;
+  }
+  win.count += 1;
+  return win.count <= limit;
+}
+
+/** Returns true if the request is allowed, false if over the per-minute cap. */
+function checkShareRateLimit(req: any, token: string): boolean {
+  // req.ip is proxy-validated via `app.set("trust proxy", 1)` in server/index.ts.
+  // Never read X-Forwarded-For directly — it is client-forgeable.
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const perIpOk = bumpWindow(`${ip}|${token}`, SHARE_LINK_MAX_RPM);
+  const perTokenOk = bumpWindow(`token|${token}`, SHARE_LINK_TOKEN_MAX_RPM);
+  return perIpOk && perTokenOk;
+}
+
+// Prune expired tokens + stale rate-limit windows every 10 minutes
 setInterval(() => {
   const now = Date.now();
   for (const [tok, data] of shareTokenStore.entries()) {
     if (data.expiresAt.getTime() < now) shareTokenStore.delete(tok);
+  }
+  for (const [key, win] of shareRateStore.entries()) {
+    if (now - win.windowStart >= 2 * 60_000) shareRateStore.delete(key);
   }
 }, 10 * 60 * 1000);
 
@@ -178,6 +225,13 @@ streamShareRouter.get("/api/stream-share/:token", async (req, res) => {
     const data = shareTokenStore.get(req.params.token);
     if (!data || data.expiresAt.getTime() < Date.now()) {
       return res.status(404).json({ error: "This share link has expired or is invalid" });
+    }
+
+    // Rate-limit only after token validation so unknown tokens never allocate
+    // limiter state (prevents unauthenticated memory exhaustion via random paths).
+    if (!checkShareRateLimit(req, req.params.token)) {
+      res.setHeader("Retry-After", "60");
+      return res.status(429).json({ error: "Too many requests — please slow down" });
     }
 
     const ride = await storage.getRide(data.rideId);

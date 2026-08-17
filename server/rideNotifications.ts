@@ -413,7 +413,17 @@ export async function notifyOnlineDriversOfNewRide(rideId: string): Promise<void
       if (driverUser.id === ride.customerId) continue;
 
       if (driverUser.telegramChatId) {
-        await sendTelegramMessage(driverUser.telegramChatId, tgBody).catch((e) =>
+        let tgText = tgBody;
+        try {
+          const { buildRideAcceptUrl } = await import("./onboardingAgent");
+          tgText =
+            tgBody.replace(/\n\nOpen your T Driver app to accept\.$/, "") +
+            `\n\nAccept now (no app needed): ${buildRideAcceptUrl(ride.id, driver.id)}\n` +
+            `Or open your T Driver app.`;
+        } catch (e) {
+          console.error("[RideNotifications] accept link build error:", e);
+        }
+        await sendTelegramMessage(driverUser.telegramChatId, tgText).catch((e) =>
           console.error("[RideNotifications] broadcast Telegram error:", e),
         );
       }
@@ -421,7 +431,21 @@ export async function notifyOnlineDriversOfNewRide(rideId: string): Promise<void
         await sendSmsMessage(driverUser.phone!, smsBody).catch((e) =>
           console.error("[RideNotifications] broadcast SMS error:", e),
         );
-        await sendWhatsAppMessage(driverUser.phone!, smsBody).catch((e) =>
+        // WhatsApp gets a per-driver secure Accept link so a chat-onboarded
+        // driver can take the job with no app installed. The link only proves
+        // identity — the accept itself goes through the normal PATCH route
+        // (atomic claim + approved/vehicle/offer gates).
+        let waBody = smsBody;
+        try {
+          const { buildRideAcceptUrl } = await import("./onboardingAgent");
+          waBody =
+            smsBody.replace(/\nOpen your T Driver app to accept\.$/, "") +
+            `\nAccept now (no app needed): ${buildRideAcceptUrl(ride.id, driver.id)}\n` +
+            `Or open your T Driver app.`;
+        } catch (e) {
+          console.error("[RideNotifications] accept link build error:", e);
+        }
+        await sendWhatsAppMessage(driverUser.phone!, waBody).catch((e) =>
           console.error("[RideNotifications] broadcast WhatsApp error:", e),
         );
       }

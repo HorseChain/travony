@@ -36,6 +36,125 @@ interface Ride {
   actualFare: string | null;
 }
 
+interface SafetyReportResponse {
+  report: {
+    status: "calm" | "flagged";
+    flagCount: number;
+    bookmarkCount: number;
+    summary: string;
+  } | null;
+  // True while a streamed ride's report is still being generated.
+  pending?: boolean;
+  events: { kind: string; severity: string; streamOffsetSec: number | null }[];
+}
+
+/** Post-ride safety card — shown only when the ride was streamed (the server
+ * returns report: null otherwise). The summary is AI-written from
+ * deterministic flags; nothing renders until the report exists. */
+function SafetyReportCard({ rideId }: { rideId: string }) {
+  const { theme } = useTheme();
+  const { data } = useQuery<SafetyReportResponse>({
+    queryKey: [`/api/rides/${rideId}/safety-report`],
+    // The report is generated a few seconds after completion — keep polling
+    // only while the server says one is coming (streamed ride, still settling).
+    refetchInterval: (query) => {
+      const d = query.state.data;
+      if (!d) return 4000; // first load
+      return !d.report && d.pending ? 4000 : false;
+    },
+    refetchIntervalInBackground: false,
+  });
+
+  const report = data?.report;
+  if (!report) return null;
+
+  const flagged = report.status === "flagged";
+  const accent = flagged ? theme.warning : Colors.travonyGreen;
+
+  return (
+    <View
+      style={[
+        safetyStyles.card,
+        { backgroundColor: theme.backgroundDefault, borderColor: accent + "40" },
+      ]}
+    >
+      <View style={safetyStyles.headerRow}>
+        <View style={[safetyStyles.iconCircle, { backgroundColor: accent + "20" }]}>
+          <Ionicons
+            name={flagged ? "alert-circle-outline" : "shield-checkmark-outline"}
+            size={18}
+            color={accent}
+          />
+        </View>
+        <ThemedText style={safetyStyles.title}>Ride safety report</ThemedText>
+        <View style={[safetyStyles.badge, { backgroundColor: accent + "20" }]}>
+          <ThemedText style={[safetyStyles.badgeText, { color: accent }]}>
+            {flagged ? "Flagged" : "Calm"}
+          </ThemedText>
+        </View>
+      </View>
+      <ThemedText style={[safetyStyles.summary, { color: theme.textSecondary }]}>
+        {report.summary}
+      </ThemedText>
+      {report.bookmarkCount > 0 ? (
+        <View style={safetyStyles.metaRow}>
+          <Ionicons name="bookmark-outline" size={13} color={theme.textMuted} />
+          <ThemedText style={[safetyStyles.metaText, { color: theme.textMuted }]}>
+            {report.bookmarkCount} moment{report.bookmarkCount > 1 ? "s" : ""} bookmarked during the ride
+          </ThemedText>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+const safetyStyles = StyleSheet.create({
+  card: {
+    borderRadius: BorderRadius.lg,
+    borderWidth: 1,
+    padding: Spacing.lg,
+    marginBottom: Spacing.xl,
+  },
+  headerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  iconCircle: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  title: {
+    ...Typography.smallBold,
+    flex: 1,
+  },
+  badge: {
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 3,
+    borderRadius: BorderRadius.xl,
+  },
+  badgeText: {
+    ...Typography.captionBold,
+  },
+  summary: {
+    ...Typography.small,
+    lineHeight: 19,
+  },
+  metaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    marginTop: Spacing.sm,
+  },
+  metaText: {
+    ...Typography.caption,
+  },
+});
+
 function ArrivedScreen({ ride }: { ride: Ride | undefined }) {
   const { theme } = useTheme();
   const scaleAnim = useRef(new Animated.Value(0)).current;
@@ -185,6 +304,8 @@ export default function RatingScreen() {
             How was your experience with {driverName}?
           </ThemedText>
         </View>
+
+        <SafetyReportCard rideId={rideId} />
 
         <View style={styles.starsContainer}>
           {[1, 2, 3, 4, 5].map((star) => (

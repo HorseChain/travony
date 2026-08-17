@@ -59,6 +59,7 @@ Keys carry granular scopes (\`resource:action\`): \`fleet:read\`, \`fleet:write\
     },
   ],
   tags: [
+    { name: "Agent Gateway", description: "Let ChatGPT, Alexa and other AI agents book Travony rides. Five tools (list_service_types, get_quote, book_ride, get_ride_status, cancel_ride) over REST and MCP (POST /mcp). Idempotent bookings, per-key spend caps, signed webhooks, Ed25519-signed receipts. Focused OpenAPI manifest: /api/partner/v1/agent/openapi.json" },
     { name: "Taxi Mode (Partners)", description: "The simplest API: onboard a car, flip taxi mode on/off, check status. Built for EV brands and fleets. Uses your X-API-Key." },
     { name: "Partner Data API", description: "Metered, scope-gated read access to hubs, pricing, rides and EV demand. Authenticate with X-API-Key. Counts against your plan quota." },
     { name: "Partner Usage & Billing", description: "Inspect your API consumption and manage your plan (Free/Starter/Growth) via Stripe." },
@@ -385,6 +386,68 @@ Keys carry granular scopes (\`resource:action\`): \`fleet:read\`, \`fleet:write\
         responses: {
           "200": { description: "Car status", content: { "application/json": { schema: { $ref: "#/components/schemas/Car" } } } },
           "404": { description: "Car not found under your API key" },
+        },
+      },
+    },
+    "/partner/v1/agent/quote": {
+      post: {
+        tags: ["Agent Gateway"],
+        summary: "Live fare quote for a route (AI agents)",
+        description:
+          "Engine-computed fares for pickup→dropoff across every service type, cheapest first. Scope: pricing:read. Full agent surface (booking, status, cancel, receipts, webhooks, MCP) is documented in the focused manifest at /api/partner/v1/agent/openapi.json.",
+        security: [{ ApiKeyAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["pickup", "dropoff"],
+                properties: {
+                  pickup: { type: "object", properties: { lat: { type: "number" }, lng: { type: "number" }, address: { type: "string" } } },
+                  dropoff: { type: "object", properties: { lat: { type: "number" }, lng: { type: "number" }, address: { type: "string" } } },
+                },
+              },
+            },
+          },
+        },
+        responses: { "200": { description: "Currency, distance and per-type fares" } },
+      },
+    },
+    "/partner/v1/agent/rides": {
+      post: {
+        tags: ["Agent Gateway"],
+        summary: "Book a ride as an AI agent (idempotent)",
+        description:
+          "Books a real ride for a rider identified by phone. Requires Idempotency-Key header — retries replay the original booking instead of double-booking. Identify the acting agent with X-Agent-Id. Fare is server-computed; per-key daily spend caps apply. Scope: rides:write. Returns rideId, fare, pickup OTP and a live tracking URL (also texted to the rider). Status/cancel/receipt/webhooks: see /api/partner/v1/agent/openapi.json. MCP endpoint with the same tools: POST /mcp.",
+        security: [{ ApiKeyAuth: [] }],
+        parameters: [
+          { name: "Idempotency-Key", in: "header", required: true, schema: { type: "string" } },
+          { name: "X-Agent-Id", in: "header", required: false, schema: { type: "string" } },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["pickup", "dropoff", "riderPhone"],
+                properties: {
+                  pickup: { type: "object" },
+                  dropoff: { type: "object" },
+                  riderPhone: { type: "string", example: "+971501234567" },
+                  riderName: { type: "string" },
+                  serviceTypeId: { type: "string" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Ride booked" },
+          "200": { description: "Idempotent replay (replayed: true)" },
+          "409": { description: "Rider already has an active ride" },
+          "429": { description: "Spend cap or rate limit exceeded" },
         },
       },
     },

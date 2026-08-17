@@ -6,6 +6,7 @@ import MemoriesScreen from "@/screens/MemoriesScreen";
 import PostCommentsScreen from "@/screens/PostCommentsScreen";
 import DiscoverScreen from "@/screens/DiscoverScreen";
 import HubDetailScreen from "@/screens/HubDetailScreen";
+import ClipPlayerScreen from "@/screens/ClipPlayerScreen";
 import { useScreenOptions } from "@/hooks/useScreenOptions";
 
 export type SocialStackParamList = {
@@ -15,6 +16,7 @@ export type SocialStackParamList = {
   PostComments: { postId: string };
   Discover: { initialQuery?: string } | undefined;
   HubDetail: { hubId: string; hubName: string };
+  ClipPlayer: { clipId?: string; feedPostId?: string; title?: string; previewToken?: string };
 };
 
 const Stack = createNativeStackNavigator<SocialStackParamList>();
@@ -53,6 +55,11 @@ export default function SocialStackNavigator() {
         name="HubDetail"
         component={HubDetailScreen}
         options={({ route }) => ({ headerTitle: route.params.hubName })}
+      />
+      <Stack.Screen
+        name="ClipPlayer"
+        component={ClipPlayerScreen}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );
