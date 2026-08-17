@@ -266,13 +266,17 @@
                         reason: document.getElementById('reason').value
                     })
                 });
-                document.getElementById('successMessage').style.display = 'block';
-                this.reset();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                if (resp.ok) {
+                    document.getElementById('successMessage').style.display = 'block';
+                    this.reset();
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                } else {
+                    var data = {};
+                    try { data = await resp.json(); } catch (e) {}
+                    alert(data.error || 'Something went wrong submitting your request. Please try again or email privacy@travony.com.');
+                }
             } catch (err) {
-                document.getElementById('successMessage').style.display = 'block';
-                this.reset();
-                window.scrollTo({ top: 0, behavior: 'smooth' });
+                alert('Could not reach the server. Please check your connection and try again, or email privacy@travony.com.');
             }
             btn.disabled = false;
             btn.textContent = 'Submit Deletion Request';

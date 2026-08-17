@@ -11,6 +11,7 @@ import { Card } from "@/components/Card";
 import { LiteModeSetting } from "@/components/LiteModeSetting";
 import { useTheme } from "@/hooks/useTheme";
 import { useAuth } from "@/hooks/useAuth";
+import { apiRequest } from "@/lib/query-client";
 import { Spacing, Typography } from "@/constants/theme";
 import type { ProfileStackParamList } from "@/navigation/ProfileStackNavigator";
 
@@ -79,6 +80,47 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleDeleteAccount = () => {
+    const doDelete = async () => {
+      try {
+        await apiRequest("/api/account/delete", { method: "POST" });
+        await logout();
+        navigation.popToTop();
+      } catch (error: any) {
+        const msg = error?.message || "Failed to delete account. Please try again.";
+        if (Platform.OS === "web") {
+          window.alert(msg);
+        } else {
+          Alert.alert("Couldn't Delete Account", msg);
+        }
+      }
+    };
+    const warning =
+      "This permanently deletes your account. Your personal information is removed immediately and cannot be recovered. Ride and payment records are anonymized.";
+    if (Platform.OS === "web") {
+      if (window.confirm(`Delete your account?\n\n${warning}`)) {
+        doDelete();
+      }
+    } else {
+      Alert.alert("Delete Account", warning, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Forever",
+          style: "destructive",
+          onPress: () =>
+            Alert.alert(
+              "Are you absolutely sure?",
+              "Your account and personal data will be permanently deleted.",
+              [
+                { text: "Keep My Account", style: "cancel" },
+                { text: "Yes, Delete", style: "destructive", onPress: doDelete },
+              ]
+            ),
+        },
+      ]);
+    }
+  };
+
   return (
     <ScrollView
       style={[styles.container, { backgroundColor: theme.backgroundRoot }]}
@@ -107,6 +149,14 @@ export default function SettingsScreen() {
           icon="people-outline"
           title="Emergency Contacts"
           onPress={() => navigation.navigate("EmergencyContacts")}
+        />
+        <View style={[styles.menuDivider, { backgroundColor: theme.border }]} />
+        <MenuItem
+          icon="trash-outline"
+          title="Delete Account"
+          onPress={handleDeleteAccount}
+          showArrow={false}
+          danger
         />
       </Card>
 
@@ -174,7 +224,7 @@ export default function SettingsScreen() {
         />
       </Card>
 
-      <ThemedText style={[styles.version, { color: theme.textMuted }]}>Travony v5.6.0</ThemedText>
+      <ThemedText style={[styles.version, { color: theme.textMuted }]}>Travony v6.6.6</ThemedText>
     </ScrollView>
   );
 }

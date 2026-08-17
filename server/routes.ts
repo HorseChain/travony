@@ -25,6 +25,7 @@ import {
 import { sendWeeklyFeedbackEmail } from "./email";
 import { notifyOnlineDriversOfNewRide, notifyDriverOfNewRide, sendRideCompletionEmails, sendRideStatusEmails } from "./rideNotifications";
 import { getSystemHealth } from "./healthService";
+import { recordDeletionRequest, deleteAccount, deletionRequestRateLimited } from "./accountDeletion";
 import { nowPaymentsService } from "./nowpayments";
 import { createRideInvoices, sendRideInvoiceEmails } from "./invoiceService";
 import { 
@@ -282,10 +283,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!email || !phone) {
         return res.status(400).json({ error: "Email and phone are required" });
       }
-      console.log(`[ACCOUNT-DELETE] Request received: email=${email}, phone=${phone}, type=${userType}, reason=${reason || 'none'}`);
+      if (deletionRequestRateLimited(req.ip || req.socket?.remoteAddress || "")) {
+        return res.status(429).json({ error: "Too many requests. Please try again later." });
+      }
+      await recordDeletionRequest({ email, phone, userType, reason, source: "web" });
+      console.log(`[ACCOUNT-DELETE] Web deletion request recorded for ${String(email).slice(0, 100)}`);
       res.json({ success: true, message: "Your account deletion request has been received. We will process it within 30 days." });
     } catch (error: any) {
+      console.error("[ACCOUNT-DELETE] Failed to record web deletion request:", error?.message);
       res.status(500).json({ error: "Failed to process deletion request" });
+    }
+  });
+
+  // In-app account deletion (Google Play User Data policy). Immediately
+  // anonymizes the account, revokes all sessions, and records an audit entry.
+  app.post("/api/account/delete", requireAuth, async (req: any, res) => {
+    try {
+      const result = await deleteAccount(req.userId);
+      if (!result.ok) {
+        return res.status(result.code).json({ message: result.message });
+      }
+      res.json({ success: true, message: "Your account has been deleted." });
+    } catch (error: any) {
+      console.error("[ACCOUNT-DELETE] In-app deletion failed:", error?.message);
+      res.status(500).json({ message: "Failed to delete account. Please try again or contact support." });
     }
   });
 

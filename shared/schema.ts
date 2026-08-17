@@ -68,9 +68,30 @@ export const users = pgTable("users", {
   // Short public bio shown on the TikTok-style profile (max 80 chars, enforced server-side).
   bio: text("bio"),
   ethWalletAddress: text("eth_wallet_address"),
+  // Set when the user deletes their account (Google Play account-deletion
+  // requirement). PII fields are scrubbed at the same time; the row is kept
+  // so ride/payment history stays referentially intact but anonymized.
+  deletedAt: timestamp("deleted_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
+
+// Audit trail for account-deletion requests (web form + in-app button).
+// Required by Google Play's User Data / Account Deletion policy.
+export const accountDeletionRequests = pgTable("account_deletion_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").references(() => users.id),
+  email: text("email").notNull(),
+  phone: text("phone"),
+  userType: text("user_type"),
+  reason: text("reason"),
+  source: text("source").default("web").notNull(), // "web" | "in_app"
+  status: text("status").default("pending").notNull(), // "pending" | "completed"
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  processedAt: timestamp("processed_at"),
+});
+
+export type AccountDeletionRequest = typeof accountDeletionRequests.$inferSelect;
 
 export const drivers = pgTable("drivers", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

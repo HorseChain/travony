@@ -31,7 +31,7 @@ export default function DriverAppSettingsScreen() {
   const tabBarInset = useTabBarInset();
   const headerHeight = useHeaderHeight();
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
 
   const [pushNotifications, setPushNotifications] = useState(true);
   const [rideAlerts, setRideAlerts] = useState(true);
@@ -164,6 +164,46 @@ export default function DriverAppSettingsScreen() {
     const roundedRating = Math.round(rating * 10) / 10;
     if (ratingFilterEnabled) {
       updateRatingFilter.mutate({ enabled: true, minRating: roundedRating });
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    const doDelete = async () => {
+      try {
+        await apiRequest("/api/account/delete", { method: "POST" });
+        await logout();
+      } catch (error: any) {
+        const msg = error?.message || "Failed to delete account. Please try again.";
+        if (Platform.OS === "web") {
+          window.alert(msg);
+        } else {
+          Alert.alert("Couldn't Delete Account", msg);
+        }
+      }
+    };
+    const warning =
+      "This permanently deletes your account. Your personal information and driver documents are removed immediately and cannot be recovered. Ride and payout records are anonymized.";
+    if (Platform.OS === "web") {
+      if (window.confirm(`Delete your account?\n\n${warning}`)) {
+        doDelete();
+      }
+    } else {
+      Alert.alert("Delete Account", warning, [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete Forever",
+          style: "destructive",
+          onPress: () =>
+            Alert.alert(
+              "Are you absolutely sure?",
+              "Your account and personal data will be permanently deleted.",
+              [
+                { text: "Keep My Account", style: "cancel" },
+                { text: "Yes, Delete", style: "destructive", onPress: doDelete },
+              ]
+            ),
+        },
+      ]);
     }
   };
 
@@ -485,6 +525,28 @@ export default function DriverAppSettingsScreen() {
             {generalSettings.map((item, index) =>
               renderSettingItem(item, index, index === generalSettings.length - 1)
             )}
+          </View>
+        </View>
+
+        <View style={styles.section}>
+          <ThemedText style={[styles.sectionHeader, { color: theme.textSecondary }]}>
+            ACCOUNT
+          </ThemedText>
+          <View style={[styles.settingsCard, { backgroundColor: theme.backgroundElevated }]}>
+            <Pressable style={styles.settingItem} onPress={handleDeleteAccount}>
+              <View style={[styles.settingIcon, { backgroundColor: theme.error + "20" }]}>
+                <Ionicons name="trash-outline" size={20} color={theme.error} />
+              </View>
+              <View style={styles.settingContent}>
+                <ThemedText style={[styles.settingLabel, { color: theme.error }]}>
+                  Delete Account
+                </ThemedText>
+                <ThemedText style={[styles.settingSubtitle, { color: theme.textSecondary }]}>
+                  Permanently delete your account and personal data
+                </ThemedText>
+              </View>
+              <Ionicons name="chevron-forward-outline" size={20} color={theme.textMuted} />
+            </Pressable>
           </View>
         </View>
 
