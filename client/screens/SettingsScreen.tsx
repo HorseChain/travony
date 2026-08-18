@@ -224,7 +224,7 @@ export default function SettingsScreen() {
         />
       </Card>
 
-      <ThemedText style={[styles.version, { color: theme.textMuted }]}>Travony v6.6.6</ThemedText>
+      <ThemedText style={[styles.version, { color: theme.textMuted }]}>Travony v6.6.7</ThemedText>
     </ScrollView>
   );
 }
