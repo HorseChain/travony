@@ -66,6 +66,16 @@ jobs:
         uses: android-actions/setup-android@v3
         continue-on-error: true
 
+      - name: Ensure Android SDK paths
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
+          for d in "$SDK/cmdline-tools/latest/bin" "$SDK/cmdline-tools/11.0/bin" "$SDK/cmdline-tools/bin" "$SDK/platform-tools"; do
+            [ -d "$d" ] && echo "$d" >> $GITHUB_PATH
+          done
+          which sdkmanager && echo "sdkmanager found" || echo "WARNING: sdkmanager not in PATH"
+
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
@@ -74,7 +84,7 @@ jobs:
           sdkmanager \
             "platforms;android-${{ env.COMPILE_SDK_VERSION }}" \
             "platforms;android-${{ env.TARGET_SDK_VERSION }}" \
-            "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+            "build-tools;${{ env.BUILD_TOOLS_VERSION }}" || true
 
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
@@ -324,6 +334,16 @@ jobs:
         uses: android-actions/setup-android@v3
         continue-on-error: true
 
+      - name: Ensure Android SDK paths
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$SDK" >> $GITHUB_ENV
+          for d in "$SDK/cmdline-tools/latest/bin" "$SDK/cmdline-tools/11.0/bin" "$SDK/cmdline-tools/bin" "$SDK/platform-tools"; do
+            [ -d "$d" ] && echo "$d" >> $GITHUB_PATH
+          done
+          which sdkmanager && echo "sdkmanager found" || echo "WARNING: sdkmanager not in PATH"
+
       - name: Accept Android SDK licenses
         run: yes | sdkmanager --licenses || true
 
@@ -332,7 +352,7 @@ jobs:
           sdkmanager \
             "platforms;android-${{ env.COMPILE_SDK_VERSION }}" \
             "platforms;android-${{ env.TARGET_SDK_VERSION }}" \
-            "build-tools;${{ env.BUILD_TOOLS_VERSION }}"
+            "build-tools;${{ env.BUILD_TOOLS_VERSION }}" || true
 
       - name: Install npm dependencies
         run: npm install --legacy-peer-deps
