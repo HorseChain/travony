@@ -801,8 +801,13 @@ async function setupApiKeyRoutes(app: express.Application) {
   const { partnerRouter } = await import("./partnerRoutes");
   app.use(partnerRouter);
 
+  // Admin driver leads management (AI recruitment play).
+  const { driverLeadsRouter } = await import("./driverLeadsRoutes");
+  app.use(driverLeadsRouter);
+
   log("API key routes: GET/POST /api/api-keys, GET /api/api-keys/:id/usage, DELETE /api/api-keys/:id");
   log("Partner API: /api/partner/v1/* (metered), /api/partner/usage, /api/partner/billing/*");
+  log("Driver leads: POST/GET /api/admin/driver-leads");
 }
 
 (async () => {
@@ -819,6 +824,57 @@ async function setupApiKeyRoutes(app: express.Application) {
   log(`HRS: ${hrsResult.message}`);
 
   await seedAdminUser();
+
+  // One-time data migrations — idempotent, safe to run on every boot.
+  // These fix production data that predates schema/logic changes without
+  // requiring a manual SQL run or a separate migration script.
+  try {
+    const { db } = await import("./db");
+    const { drivers, vehicles } = await import("../shared/schema");
+    const { eq, and, isNotNull, ne, sql: sqlExpr } = await import("drizzle-orm");
+
+    // 1. Opt all drivers into Travony TV (default was false; new default is true
+    //    but existing rows keep the old value until this runs).
+    const tvResult = await db
+      .update(drivers)
+      .set({ tvOptIn: true })
+      .where(eq(drivers.tvOptIn, false));
+    const tvCount = (tvResult as any).rowCount ?? (tvResult as any).count ?? 0;
+    if (tvCount > 0) log(`[startup] TV opt-in: set ${tvCount} driver(s) to opted-in`);
+
+    // 2. Auto-approve pending drivers who already submitted complete vehicle
+    //    details (make + model + plate + type) — the server now does this at
+    //    submission time, but drivers who submitted before the fix are stuck.
+    // Note: vehicles.type is a Postgres enum — cannot compare to "" directly;
+    // isNotNull is sufficient since enum columns cannot store empty strings.
+    const pendingWithVehicles = await db
+      .select({ driverId: drivers.id, vehicleId: vehicles.id })
+      .from(drivers)
+      .innerJoin(vehicles, eq(vehicles.driverId, drivers.id))
+      .where(
+        and(
+          eq(drivers.status, "pending"),
+          isNotNull(vehicles.make),        ne(vehicles.make, ""),
+          isNotNull(vehicles.model),       ne(vehicles.model, ""),
+          isNotNull(vehicles.plateNumber), ne(vehicles.plateNumber, ""),
+          isNotNull(vehicles.type),        // enum — isNotNull sufficient
+        )
+      );
+    if (pendingWithVehicles.length > 0) {
+      const driverIds = pendingWithVehicles.map((r) => r.driverId);
+      const vehicleIds = pendingWithVehicles.map((r) => r.vehicleId);
+      await db.update(vehicles)
+        .set({ verificationStatus: "ai_verified", aiVerifiedAt: new Date() })
+        .where(sqlExpr`${vehicles.id} = ANY(${vehicleIds})`);
+      await db.update(drivers)
+        .set({ status: "approved" })
+        .where(sqlExpr`${drivers.id} = ANY(${driverIds})`);
+      log(`[startup] Auto-approved ${driverIds.length} pending driver(s) with complete vehicle details`);
+    }
+  } catch (err) {
+    // Never crash the server over a data migration — log and continue.
+    log(`[startup] Data migration warning: ${(err as any)?.message ?? err}`);
+  }
 
   setupDeveloperPortal(app);
   await setupApiKeyRoutes(app);
