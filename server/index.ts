@@ -831,7 +831,7 @@ async function setupApiKeyRoutes(app: express.Application) {
   try {
     const { db } = await import("./db");
     const { drivers, vehicles } = await import("../shared/schema");
-    const { eq, and, isNotNull, ne, sql: sqlExpr } = await import("drizzle-orm");
+    const { eq, and, isNotNull, ne, inArray } = await import("drizzle-orm");
 
     // 1. Opt all drivers into Travony TV (default was false; new default is true
     //    but existing rows keep the old value until this runs).
@@ -865,10 +865,10 @@ async function setupApiKeyRoutes(app: express.Application) {
       const vehicleIds = pendingWithVehicles.map((r) => r.vehicleId);
       await db.update(vehicles)
         .set({ verificationStatus: "ai_verified", aiVerifiedAt: new Date() })
-        .where(sqlExpr`${vehicles.id} = ANY(${vehicleIds})`);
+        .where(inArray(vehicles.id, vehicleIds));
       await db.update(drivers)
         .set({ status: "approved" })
-        .where(sqlExpr`${drivers.id} = ANY(${driverIds})`);
+        .where(inArray(drivers.id, driverIds));
       log(`[startup] Auto-approved ${driverIds.length} pending driver(s) with complete vehicle details`);
     }
   } catch (err) {
