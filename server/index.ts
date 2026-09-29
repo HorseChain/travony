@@ -871,6 +871,31 @@ async function setupApiKeyRoutes(app: express.Application) {
         .where(inArray(drivers.id, driverIds));
       log(`[startup] Auto-approved ${driverIds.length} pending driver(s) with complete vehicle details`);
     }
+
+    // 3. Fix pending VEHICLES for already-approved drivers — covers drivers who
+    //    were manually approved before the auto-approval code shipped, or whose
+    //    vehicle was submitted with an old server that didn't auto-verify.
+    const approvedDriversPendingVehicles = await db
+      .select({ vehicleId: vehicles.id })
+      .from(vehicles)
+      .innerJoin(drivers, eq(drivers.id, vehicles.driverId))
+      .where(
+        and(
+          eq(drivers.status, "approved"),
+          eq(vehicles.verificationStatus, "pending"),
+          isNotNull(vehicles.make),        ne(vehicles.make, ""),
+          isNotNull(vehicles.model),       ne(vehicles.model, ""),
+          isNotNull(vehicles.plateNumber), ne(vehicles.plateNumber, ""),
+          isNotNull(vehicles.type),        // enum — isNotNull sufficient
+        )
+      );
+    if (approvedDriversPendingVehicles.length > 0) {
+      const vids = approvedDriversPendingVehicles.map((r) => r.vehicleId);
+      await db.update(vehicles)
+        .set({ verificationStatus: "ai_verified", aiVerifiedAt: new Date() })
+        .where(inArray(vehicles.id, vids));
+      log(`[startup] Verified ${vids.length} pending vehicle(s) for already-approved driver(s)`);
+    }
   } catch (err) {
     // Never crash the server over a data migration — log and continue.
     log(`[startup] Data migration warning: ${(err as any)?.message ?? err}`);
