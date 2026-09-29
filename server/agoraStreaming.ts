@@ -2,12 +2,22 @@ import { Router } from "express";
 import { randomBytes } from "crypto";
 import { db } from "./db";
 import { storage } from "./storage";
-import { ridePosts, streamProducts, streamAdBusinesses, rides, users, drivers, tvFeatureEvents } from "@shared/schema";
+import {
+  ridePosts,
+  streamProducts,
+  streamAdBusinesses,
+  rides,
+  users,
+  drivers,
+  tvFeatureEvents,
+  userFollows,
+} from "@shared/schema";
 import type { StreamAdBusiness } from "@shared/schema";
 import { eq, and, isNull, sql } from "drizzle-orm";
 import agoraToken from "agora-token";
 import { recordStreamSignal, scheduleHighlightGeneration } from "./streamHighlights";
 import { recordSafetyPulse, recordStreamDropIfMoving, clearSafetyMotionState } from "./rideSafety";
+import { notifyUser } from "./notificationService";
 
 const { RtcTokenBuilder, RtcRole, RtmTokenBuilder } = agoraToken;
 
@@ -231,19 +241,16 @@ agoraRouter.post("/api/agora/token", async (req, res) => {
     if (!post || post.type !== "stream" || post.streamProvider !== "agora") {
       return res.status(404).json({ error: "Stream not found" });
     }
+    if (post.endedAt) {
+      return res.status(410).json({ error: "This stream has ended" });
+    }
 
-    // Publisher role for ride participants (normal streams) or the stream
-    // owner when rideId is null (Telegram-originated streams). Everyone else
-    // is always subscriber — the client never chooses.
-    let role: "publisher" | "subscriber" = "subscriber";
-    if (post.rideId) {
-      const ride = await storage.getRide(post.rideId);
-      if (ride) {
-        const { customerId, driverUserId } = await getRideParticipants(ride);
-        if (user.id === customerId || user.id === driverUserId) role = "publisher";
-      }
-    } else if (user.id === post.userId) {
-      role = "publisher";
+    // Only the post owner is the broadcaster. Other ride participants are
+    // viewers and must never receive camera/microphone publish rights.
+    const role: "publisher" | "subscriber" =
+      user.id === post.userId ? "publisher" : "subscriber";
+    if (role === "subscriber" && !post.isLive) {
+      return res.status(409).json({ error: "The host is still connecting" });
     }
 
     const { appId, appCertificate } = agoraConfig();
@@ -286,6 +293,116 @@ agoraRouter.post("/api/agora/token", async (req, res) => {
 // ---------------------------------------------------------------------------
 
 const WEB_VIEWER_TTL_SECONDS = 15 * 60;
+
+// Returns the canonical base URL for share links.
+// Mirrors getTravonyBaseUrl() in telegramStreaming.ts: production domain first,
+// dev workspace second, hard-coded fallback last. Never use REPLIT_DEV_DOMAIN
+// when REPLIT_DOMAINS is set — in deployments both are present but the dev
+// domain may not be accessible to external viewers.
+function getAppBaseUrl(): string {
+  if (process.env.REPLIT_DOMAINS) {
+    return `https://${process.env.REPLIT_DOMAINS.split(",")[0].trim()}`;
+  }
+  if (process.env.APP_URL) return process.env.APP_URL;
+  if (process.env.REPLIT_DEV_DOMAIN) return `https://${process.env.REPLIT_DEV_DOMAIN}`;
+  return "https://travony.app";
+}
+
+// Fire-and-forget: notify every follower of hostUserId that they just went live.
+async function notifyFollowersLive(
+  hostUserId: string,
+  postId: string,
+  hostName: string,
+): Promise<void> {
+  const watchUrl = `${getAppBaseUrl()}/live/${postId}`;
+  const followers = await db
+    .select({ followerId: userFollows.followerId })
+    .from(userFollows)
+    .where(eq(userFollows.followingId, hostUserId));
+  for (const { followerId } of followers) {
+    try {
+      await notifyUser({
+        userId: followerId,
+        kind: "social.live_started",
+        title: `${hostName} is live 🔴`,
+        body: `Tune in now — ${watchUrl}`,
+        urgency: "normal",
+        dedupeKey: `live-started:${postId}`,
+        dedupeWindowHours: 2,
+        data: { postId, watchUrl },
+      });
+    } catch {}
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public stream metadata — unauthenticated. Used by /live/:postId watch page
+// and any external integration that wants to check live status.
+// ---------------------------------------------------------------------------
+agoraRouter.get("/api/agora/streams/public/:postId", async (req, res) => {
+  try {
+    const [post] = await db
+      .select({
+        id: ridePosts.id,
+        userId: ridePosts.userId,
+        isLive: ridePosts.isLive,
+        endedAt: ridePosts.endedAt,
+        createdAt: ridePosts.createdAt,
+      })
+      .from(ridePosts)
+      .where(and(eq(ridePosts.id, req.params.postId), eq(ridePosts.type, "stream")));
+    if (!post) return res.status(404).json({ error: "Stream not found" });
+
+    const [host] = await db
+      .select({ name: users.name, avatar: users.avatar })
+      .from(users)
+      .where(eq(users.id, post.userId));
+
+    // Look up the driver record so viewers can book directly from the watch page.
+    const [driverRow] = await db
+      .select({ id: drivers.id, rating: drivers.rating })
+      .from(drivers)
+      .where(eq(drivers.userId, post.userId))
+      .limit(1);
+
+    res.json({
+      postId: post.id,
+      isLive: post.isLive && !post.endedAt,
+      hostName: host?.name ?? "Driver",
+      hostAvatar: host?.avatar ?? null,
+      driverId: driverRow?.id ?? null,
+      driverRating: driverRow?.rating ? parseFloat(String(driverRow.rating)) : null,
+      viewerCount: getAgoraViewerCount(post.id),
+      createdAt: post.createdAt,
+      endedAt: post.endedAt ?? null,
+    });
+  } catch (error: any) {
+    console.error("[Agora] public metadata error:", error?.message || error);
+    res.status(500).json({ error: "Could not load stream" });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Share link — returns the public /live/:postId URL for a stream the caller
+// owns. Used by the driver app to copy and share while broadcasting.
+// ---------------------------------------------------------------------------
+agoraRouter.get("/api/agora/streams/:postId/share-link", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const [post] = await db
+      .select({ id: ridePosts.id, userId: ridePosts.userId, type: ridePosts.type })
+      .from(ridePosts)
+      .where(eq(ridePosts.id, req.params.postId));
+    if (!post || post.type !== "stream") {
+      return res.status(404).json({ error: "Stream not found" });
+    }
+    if (post.userId !== user.id) return res.status(403).json({ error: "Not your stream" });
+    res.json({ url: `${getAppBaseUrl()}/live/${post.id}` });
+  } catch (error: any) {
+    res.status(500).json({ error: "Could not generate share link" });
+  }
+});
 
 agoraRouter.post("/api/agora/web-viewer-token", async (req, res) => {
   try {
@@ -355,40 +472,56 @@ agoraRouter.post("/api/agora/streams/standalone/start", async (req, res) => {
       return res.status(503).json({ error: "In-app streaming is not configured yet" });
     }
 
-    // Idempotent: return existing live standalone post if one exists
-    const [existing] = await db
-      .select()
-      .from(ridePosts)
-      .where(and(
-        eq(ridePosts.userId, user.id),
-        eq(ridePosts.type, "stream"),
-        eq(ridePosts.streamProvider, "agora"),
-        eq(ridePosts.isLive, true),
-        isNull(ridePosts.rideId),
-        isNull(ridePosts.endedAt),
-      ));
-    if (existing) {
-      hostLastSeen.set(existing.id, Date.now());
-      return res.json({ post: existing });
+    // Idempotent: guarantee at most one unended standalone post per user.
+    // The advisory lock on hashtext(userId) serialises concurrent retries so
+    // the select+insert below is never raced — mirrors the booking brain pattern.
+    let post: any;
+    let alreadyExisted = false;
+
+    await db.transaction(async (tx) => {
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext(${user.id}))`);
+
+      const [existing] = await tx
+        .select()
+        .from(ridePosts)
+        .where(and(
+          eq(ridePosts.userId, user.id),
+          eq(ridePosts.type, "stream"),
+          eq(ridePosts.streamProvider, "agora"),
+          isNull(ridePosts.rideId),
+          isNull(ridePosts.endedAt),
+        ));
+
+      if (existing) {
+        post = existing;
+        alreadyExisted = true;
+        return;
+      }
+
+      const [created] = await tx
+        .insert(ridePosts)
+        .values({
+          rideId: null,
+          userId: user.id,
+          type: "stream",
+          streamProvider: "agora",
+          twitchChannel: (null as any),
+          cityName: null,
+          distanceKm: null,
+          // A post is not publicly live until the native Agora publisher has
+          // actually joined and calls /ready. This prevents blank/ghost cards.
+          isLive: false,
+          hostLastSeenAt: null,
+        })
+        .returning();
+
+      post = created;
+    });
+
+    if (alreadyExisted) {
+      hostLastSeen.set(post.id, Date.now());
     }
 
-    const [post] = await db
-      .insert(ridePosts)
-      .values({
-        rideId: null,
-        userId: user.id,
-        type: "stream",
-        streamProvider: "agora",
-        twitchChannel: (null as any),
-        cityName: null,
-        distanceKm: null,
-        isLive: true,
-        hostLastSeenAt: new Date(),
-      })
-      .returning();
-
-    hostLastSeen.set(post.id, Date.now());
-    publishStreamEvent(post.id, "stream.state", { state: "live", hostName: user.name });
     res.json({ post });
   } catch (error: any) {
     console.error("[Agora] standalone stream start error:", error);
@@ -438,18 +571,55 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
         twitchChannel: (null as any),
         cityName: null,
         distanceKm: ride.distance ?? null,
-        isLive: true,
-        hostLastSeenAt: new Date(),
+        // Created privately first; /ready flips it public only after Agora
+        // confirms the publisher joined the channel.
+        isLive: false,
+        hostLastSeenAt: null,
       })
       .returning();
 
-    hostLastSeen.set(post.id, Date.now());
-    // Post-commit, fire-and-forget.
-    publishStreamEvent(post.id, "stream.state", { state: "live", hostName: user.name });
     res.json({ post });
   } catch (error: any) {
     console.error("[Agora] stream start error:", error);
     res.status(500).json({ error: "Could not start the stream" });
+  }
+});
+
+// Publisher readiness handshake. Stream rows and go-live requests may exist
+// while the native client is acquiring camera/mic and joining Agora, but they
+// must not surface publicly until this endpoint succeeds.
+agoraRouter.post("/api/agora/streams/:postId/ready", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const [post] = await db
+      .select()
+      .from(ridePosts)
+      .where(eq(ridePosts.id, req.params.postId));
+    if (!post || post.type !== "stream" || post.streamProvider !== "agora") {
+      return res.status(404).json({ error: "Stream not found" });
+    }
+    if (post.userId !== user.id) return res.status(403).json({ error: "Not your stream" });
+    if (post.endedAt) return res.status(410).json({ error: "This stream has ended" });
+
+    const now = new Date();
+    const [ready] = await db
+      .update(ridePosts)
+      .set({ isLive: true, hostLastSeenAt: now })
+      .where(and(eq(ridePosts.id, post.id), isNull(ridePosts.endedAt)))
+      .returning({ id: ridePosts.id });
+    if (!ready) return res.status(409).json({ error: "Stream could not be made live" });
+
+    hostLastSeen.set(post.id, now.getTime());
+    if (!post.isLive) {
+      publishStreamEvent(post.id, "stream.state", { state: "live", hostName: user.name });
+      // Notify every follower that this creator just went live (fire-and-forget).
+      notifyFollowersLive(user.id, post.id, user.name ?? "Driver").catch(() => {});
+    }
+    res.json({ live: true });
+  } catch (error: any) {
+    console.error("[Agora] ready error:", error?.message || error);
+    res.status(500).json({ error: "Could not make the stream live" });
   }
 });
 
@@ -465,14 +635,23 @@ agoraRouter.post("/api/agora/streams/:postId/heartbeat", async (req, res) => {
     const user = await getWriteUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
     const [post] = await db
-      .select({ id: ridePosts.id, userId: ridePosts.userId, type: ridePosts.type, provider: ridePosts.streamProvider, endedAt: ridePosts.endedAt, rideId: ridePosts.rideId, createdAt: ridePosts.createdAt })
+      .select({
+        id: ridePosts.id,
+        userId: ridePosts.userId,
+        type: ridePosts.type,
+        provider: ridePosts.streamProvider,
+        isLive: ridePosts.isLive,
+        endedAt: ridePosts.endedAt,
+        rideId: ridePosts.rideId,
+        createdAt: ridePosts.createdAt,
+      })
       .from(ridePosts)
       .where(eq(ridePosts.id, req.params.postId));
     if (!post || post.type !== "stream" || post.provider !== "agora") {
       return res.status(404).json({ error: "Stream not found" });
     }
     if (post.userId !== user.id) return res.status(403).json({ error: "Not your stream" });
-    if (post.endedAt) return res.json({ live: false });
+    if (post.endedAt || !post.isLive) return res.json({ live: false });
     hostLastSeen.set(post.id, Date.now());
     // Safety layer: the broadcaster reports its GPS speed with each heartbeat;
     // the server derives deltas + motion state. Fire-and-forget.
@@ -617,12 +796,12 @@ agoraRouter.get("/api/agora/streams/:postId", async (req, res) => {
       .from(streamProducts)
       .where(and(eq(streamProducts.postId, post.id), isNull(streamProducts.clearedAt)));
     // Snapshot polls double as viewer presence when REST presence is off.
-    if (!post.endedAt && session.userId !== post.userId) {
+    if (post.isLive && !post.endedAt && session.userId !== post.userId) {
       recordViewerPresence(post.id, session.userId);
     }
     res.json({
       id: post.id,
-      isLive: !post.endedAt,
+      isLive: post.isLive && !post.endedAt,
       hostId: post.userId,
       hostName: host?.name || null,
       hostAvatar: host?.avatar || null,
@@ -925,7 +1104,14 @@ export function getPeakViewerCount(postId: string): number {
   return peakViewerCount.get(postId) ?? 0;
 }
 
-async function channelUsers(channel: string): Promise<string[] | null> {
+interface ChannelPresence {
+  /** Agora numeric UIDs of broadcasters currently in the channel. */
+  broadcasterUids: string[];
+  /** Number of audience members (excludes broadcasters). */
+  audienceCount: number;
+}
+
+async function channelUsers(channel: string): Promise<ChannelPresence | null> {
   if (!restEnabled()) return null;
   const { appId } = agoraConfig();
   const url = `https://api.agora.io/dev/v1/channel/user/${encodeURIComponent(appId)}/${encodeURIComponent(channel)}`;
@@ -935,12 +1121,15 @@ async function channelUsers(channel: string): Promise<string[] | null> {
     const body: any = await r.json().catch(() => null);
     const data = body?.data;
     if (!data) return null;
-    // Broadcast-mode channels report hosts (broadcasters) and audience_total.
-    const broadcasters: string[] = Array.isArray(data.broadcasters) ? data.broadcasters.map(String) : [];
-    const audienceTotal = Number(data.audience_total ?? (Array.isArray(data.users) ? data.users.length : 0)) || 0;
-    // Encode as [host uids..., synthetic audience markers] — callers only need
-    // host presence + a total.
-    return broadcasters.concat(new Array(audienceTotal).fill("audience"));
+    // Broadcast-mode channels report hosts (numeric UIDs) and audience_total
+    // separately. We keep them separate so the viewer count never accidentally
+    // includes the host (whose Agora numeric UID ≠ their database UUID string).
+    const broadcasterUids: string[] = Array.isArray(data.broadcasters)
+      ? data.broadcasters.map(String)
+      : [];
+    const audienceCount =
+      Number(data.audience_total ?? (Array.isArray(data.users) ? data.users.length : 0)) || 0;
+    return { broadcasterUids, audienceCount };
   } catch {
     return null;
   }
@@ -954,6 +1143,7 @@ async function viewerLoopTick() {
         userId: ridePosts.userId,
         createdAt: ridePosts.createdAt,
         rideId: ridePosts.rideId,
+        isLive: ridePosts.isLive,
         hostLastSeenAt: ridePosts.hostLastSeenAt,
       })
       .from(ridePosts)
@@ -970,29 +1160,37 @@ async function viewerLoopTick() {
       const now = Date.now();
 
       if (members !== null) {
-        const hostPresent = members.includes(post.userId);
-        if (hostPresent) hostLastSeen.set(post.id, now);
+        // Host is present if ANY broadcaster UID is in the channel. We cannot
+        // match by post.userId (UUID) because Agora REST returns numeric UIDs.
+        const hostPresent = members.broadcasterUids.length > 0;
+        if (post.isLive && hostPresent) hostLastSeen.set(post.id, now);
+        // Viewer count = audience only. Never include the broadcaster's UID —
+        // that was the source of the always-shows-1 bug.
         const count = Math.max(
           0,
-          members.filter((m) => m !== post.userId).length,
+          members.audienceCount,
           presenceViewerCount(post.id),
         );
 
-        const lastAt = lastViewerPublish.get(post.id) ?? 0;
-        const lastCount = lastViewerCount.get(post.id);
-        const prevPeak = peakViewerCount.get(post.id) ?? 0;
-        if (count > prevPeak) peakViewerCount.set(post.id, count);
-        if (count !== lastCount && now - lastAt >= VIEWER_PUBLISH_MIN_MS) {
-          lastViewerCount.set(post.id, count);
-          lastViewerPublish.set(post.id, now);
-          publishStreamEvent(post.id, "viewer.count", { count });
+        if (post.isLive) {
+          const lastAt = lastViewerPublish.get(post.id) ?? 0;
+          const lastCount = lastViewerCount.get(post.id);
+          const prevPeak = peakViewerCount.get(post.id) ?? 0;
+          if (count > prevPeak) peakViewerCount.set(post.id, count);
+          if (count !== lastCount && now - lastAt >= VIEWER_PUBLISH_MIN_MS) {
+            lastViewerCount.set(post.id, count);
+            lastViewerPublish.set(post.id, now);
+            publishStreamEvent(post.id, "viewer.count", { count });
+          }
         }
       }
 
       // Highlight scorer timeline — works with or without REST presence
       // (getAgoraViewerCount falls back to snapshot-poll presence). Throttled
       // and deduped inside recordStreamSignal.
-      recordStreamSignal(post.id, "viewer", getAgoraViewerCount(post.id));
+      if (post.isLive) {
+        recordStreamSignal(post.id, "viewer", getAgoraViewerCount(post.id));
+      }
 
       // Grace timeout. Liveness = freshest of (in-memory sighting, durable
       // DB heartbeat). Brand-new streams and post-restart streams get a full
@@ -1015,7 +1213,7 @@ async function viewerLoopTick() {
       }
 
       // Geo-ad auto-pin: fire-and-forget so it never blocks the viewer loop.
-      if (post.rideId) {
+      if (post.isLive && post.rideId) {
         autoUpdateStreamAd(post.id, post.rideId).catch((err: any) => {
           console.error("[Agora] geo-ad auto-pin error:", err?.message || err);
         });
