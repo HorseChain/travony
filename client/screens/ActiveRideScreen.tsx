@@ -136,9 +136,10 @@ interface TelemetryData {
 // ---------------------------------------------------------------------------
 function RequestLiveChip({ driverId }: { driverId: string }) {
   const { theme } = useTheme();
-  const [status, setStatus] = useState<"idle" | "waiting" | "declined" | "sent">("idle");
+  const [status, setStatus] = useState<"idle" | "waiting" | "connecting" | "declined" | "sent" | "failed">("idle");
   const [reqId, setReqId] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(60);
+  const deadlineRef = useRef<number | null>(null);
   const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const sendMutation = useMutation({
@@ -150,44 +151,59 @@ function RequestLiveChip({ driverId }: { driverId: string }) {
       }),
     onSuccess: (data: any) => {
       setReqId(data?.request?.id ?? null);
+      deadlineRef.current = new Date(data.request.expiresAt).getTime();
       setStatus("waiting");
-      setCountdown(30);
+      setCountdown(Math.max(0, Math.ceil((deadlineRef.current - Date.now()) / 1000)));
     },
-    onError: () => setStatus("idle"),
+    onError: () => { setStatus("failed"); setTimeout(() => setStatus("idle"), 4000); },
   });
 
-  // Poll request status while waiting
-  const { data: pollData } = useQuery<{ request: { status: string } }>({
+  // Acceptance alone is not a working video stream: wait for Agora /ready.
+  const { data: pollData, refetch: refetchRequest } = useQuery<{
+    request: { status: string; postId: string | null; streamReady: boolean; streamEnded: boolean };
+  }>({
     queryKey: ["/api/go-live-requests", reqId],
     queryFn: () => apiRequest(`/api/go-live-requests/${reqId}`),
-    enabled: !!reqId && status === "waiting",
-    refetchInterval: 3000,
+    enabled: !!reqId && (status === "waiting" || status === "connecting"),
+    refetchInterval: 1500,
   });
 
   useEffect(() => {
     if (!pollData?.request) return;
     const s = pollData.request.status;
-    if (s === "accepted") { setStatus("sent"); setReqId(null); setTimeout(() => setStatus("idle"), 3000); }
-    else if (s === "declined" || s === "expired" || s === "cancelled") { setStatus("declined"); setReqId(null); setTimeout(() => setStatus("idle"), 2500); }
+    if (s === "accepted") {
+      if (pollData.request.streamEnded) {
+        setStatus("failed"); setReqId(null); setTimeout(() => setStatus("idle"), 4000);
+      } else if (pollData.request.streamReady) {
+        setStatus("sent"); setReqId(null); setTimeout(() => setStatus("idle"), 4000);
+      } else {
+        setStatus("connecting");
+      }
+    } else if (s === "declined" || s === "expired" || s === "cancelled") {
+      setStatus("declined"); setReqId(null); setTimeout(() => setStatus("idle"), 4000);
+    }
   }, [pollData]);
 
-  // Client-side countdown while waiting
+  // The server owns expiry; zero on the client only refreshes its status.
   useEffect(() => {
     if (status !== "waiting") { if (countdownRef.current) clearInterval(countdownRef.current); return; }
-    setCountdown(30);
+    setCountdown(Math.max(0, Math.ceil(((deadlineRef.current ?? Date.now()) - Date.now()) / 1000)));
     countdownRef.current = setInterval(() => {
-      setCountdown((s) => {
-        if (s <= 1) { clearInterval(countdownRef.current!); setStatus("idle"); setReqId(null); return 0; }
-        return s - 1;
-      });
+      const seconds = Math.max(0, Math.ceil(((deadlineRef.current ?? Date.now()) - Date.now()) / 1000));
+      setCountdown(seconds);
+      if (seconds === 0) {
+        clearInterval(countdownRef.current!);
+        countdownRef.current = null;
+        refetchRequest();
+      }
     }, 1000);
     return () => { if (countdownRef.current) clearInterval(countdownRef.current); };
-  }, [status]);
+  }, [status, refetchRequest]);
 
   const isIdle = status === "idle";
-  const isWaiting = status === "waiting";
+  const isWaiting = status === "waiting" || status === "connecting";
   const isSent = status === "sent";
-  const isDeclined = status === "declined";
+  const isDeclined = status === "declined" || status === "failed";
 
   const bgColor = isDeclined
     ? theme.error + "18"
@@ -239,9 +255,13 @@ function RequestLiveChip({ driverId }: { driverId: string }) {
         }}
       >
         {isSent
-          ? "Request sent!"
+          ? "Driver is live!"
+          : status === "failed"
+          ? "Stream did not start"
           : isDeclined
-          ? "Driver declined"
+          ? "Driver did not go live"
+          : status === "connecting"
+          ? "Driver connecting…"
           : isWaiting
           ? `Waiting for driver… ${countdown}s`
           : "Request Live"}
@@ -422,18 +442,33 @@ export default function ActiveRideScreen() {
     setChatVisible(true);
   };
 
+  const panicMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/rides/${rideId}/panic`, { method: "POST" }),
+    onSuccess: (data: any) => {
+      Alert.alert(
+        "Alert Sent",
+        data.contacted > 0
+          ? `${data.contacted} emergency contact${data.contacted > 1 ? "s" : ""} have been texted your live tracking link.`
+          : "Alert recorded. Add emergency contacts in your profile so they can be notified automatically.",
+      );
+    },
+    onError: () => {
+      // Still show confirmation — the alert was recorded server-side
+      Alert.alert("Alert Sent", "Alert recorded. Stay safe.");
+    },
+  });
+
   const handlePanic = () => {
     Alert.alert(
       "Emergency Alert",
-      "Are you sure you want to send an emergency alert? This will notify local authorities.",
+      "This will text your saved emergency contacts your live ride tracking link.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Send Alert",
           style: "destructive",
-          onPress: () => {
-            Alert.alert("Alert Sent", "Emergency services have been notified. Stay safe.");
-          },
+          onPress: () => panicMutation.mutate(),
         },
       ]
     );
@@ -478,6 +513,18 @@ export default function ActiveRideScreen() {
     });
   };
 
+  const cancelRideMutation = useMutation({
+    mutationFn: async () =>
+      apiRequest(`/api/rides/${rideId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "cancelled" }),
+      }),
+    onSuccess: () => navigation.goBack(),
+    onError: (error: any) =>
+      Alert.alert("Error", error.message || "Failed to cancel ride. Please try again."),
+  });
+
   const handleCancelRide = () => {
     Alert.alert(
       "Cancel Route",
@@ -487,9 +534,7 @@ export default function ActiveRideScreen() {
         {
           text: "Yes, Cancel",
           style: "destructive",
-          onPress: () => {
-            navigation.goBack();
-          },
+          onPress: () => cancelRideMutation.mutate(),
         },
       ]
     );

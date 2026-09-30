@@ -595,7 +595,7 @@ agoraRouter.post("/api/agora/streams/:postId/diagnostic", async (req, res) => {
     const [post] = await db.select({ userId: ridePosts.userId })
       .from(ridePosts).where(eq(ridePosts.id, req.params.postId));
     if (!post || post.userId !== user.id) return res.status(404).json({ error: "Stream not found" });
-    const allowed = ["joining", "joined", "join_rejected", "rtc_error", "connection_failed", "init_failed", "ready_failed"];
+    const allowed = ["joining", "joined", "join_rejected", "rtc_error", "connection_failed", "camera_error", "init_failed", "ready_failed"];
     const stage = String(req.body?.stage ?? "");
     if (!allowed.includes(stage)) return res.status(400).json({ error: "Invalid stage" });
     const code = Number(req.body?.code);

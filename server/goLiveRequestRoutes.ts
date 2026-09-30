@@ -10,7 +10,7 @@
  */
 
 import { Router } from "express";
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt, isNull, lt } from "drizzle-orm";
 import { db } from "./db";
 import { goLiveRequests, ridePosts, users, drivers } from "@shared/schema";
 import { getWriteUser } from "./agoraStreaming";
@@ -18,7 +18,7 @@ import { notifyUser } from "./notificationService";
 
 export const goLiveRequestRouter = Router();
 
-const REQUEST_TTL_MS = 30_000; // 30 seconds
+const REQUEST_TTL_MS = 60_000; // allow time for polling and a human response
 
 // ---------------------------------------------------------------------------
 // POST /api/go-live-requests  — rider sends a request to a driver
@@ -81,7 +81,7 @@ goLiveRequestRouter.post("/api/go-live-requests", async (req, res) => {
     // High urgency also tries the driver's enabled Telegram/SMS channels and
     // queues email as a fallback. Never block creating the request on delivery.
     const riderName = user.name || "A rider";
-    const notifMsg = `${riderName} wants you to go live — you have 30 seconds to accept. Open your T Driver app now.`;
+    const notifMsg = `${riderName} wants you to go live — you have 60 seconds to accept. Open your T Driver app now.`;
     notifyUser({
       userId: driverUserId,
       kind: "go_live_request",
@@ -185,12 +185,30 @@ goLiveRequestRouter.get("/api/go-live-requests/:id", async (req, res) => {
     let streamReady = false;
     let streamEnded = false;
     if (request.postId) {
-      const [post] = await db
-        .select({ isLive: ridePosts.isLive, endedAt: ridePosts.endedAt })
+      let [post] = await db
+        .select({ isLive: ridePosts.isLive, endedAt: ridePosts.endedAt, createdAt: ridePosts.createdAt })
         .from(ridePosts)
         .where(eq(ridePosts.id, request.postId));
+      // An accepted request can outlive its driver app (including a back
+      // gesture while waiting for a token). Don't show "Connecting" forever.
+      // The conditional write cannot end a post that won the /ready race.
+      const cutoff = new Date(Date.now() - 45_000);
+      if (request.status === "accepted" && post && !post.isLive && !post.endedAt && post.createdAt < cutoff) {
+        await db.update(ridePosts)
+          .set({ isLive: false, endedAt: now })
+          .where(and(
+            eq(ridePosts.id, request.postId),
+            eq(ridePosts.isLive, false),
+            isNull(ridePosts.endedAt),
+            lt(ridePosts.createdAt, cutoff),
+          ));
+        [post] = await db
+          .select({ isLive: ridePosts.isLive, endedAt: ridePosts.endedAt, createdAt: ridePosts.createdAt })
+          .from(ridePosts)
+          .where(eq(ridePosts.id, request.postId));
+      }
       streamReady = post?.isLive === true && !post.endedAt;
-      streamEnded = !!post?.endedAt;
+      streamEnded = !post || !!post.endedAt;
     }
 
     return res.json({ request: { ...request, streamReady, streamEnded } });

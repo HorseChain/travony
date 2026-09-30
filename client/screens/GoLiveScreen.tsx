@@ -58,6 +58,7 @@ export default function GoLiveScreen() {
 
   const [engine, setEngine] = useState<any>(null);
   const [phase, setPhase] = useState<Phase>("preview");
+  const [cameraReleased, setCameraReleased] = useState(false);
   const [frontCamera, setFrontCamera] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -104,23 +105,31 @@ export default function GoLiveScreen() {
   // the camera hardware is released, so Agora can open it cleanly.
   // ---------------------------------------------------------------------------
   const engineRef = useRef<any>(null);
+  const abortedPostsRef = useRef<Set<string>>(new Set());
+  const postRef = useRef<any>(null);
+  const screenMountedRef = useRef(true);
 
   useEffect(() => {
+    screenMountedRef.current = true;
     return () => {
+      screenMountedRef.current = false;
       try {
         engineRef.current?.leaveChannel?.();
         engineRef.current?.release?.();
       } catch {}
       engineRef.current = null;
+      // Android back/swipe navigation can bypass the on-screen close button.
+      // Never leave a private accepted post or a public stream orphaned.
+      const id = postRef.current?.id;
+      if (id) apiRequest(`/api/agora/streams/${id}/stop`, { method: "POST" }).catch(() => {});
     };
   }, []);
 
   // When the driver accepted a go-live request the server pre-created the
-  // stream post. Jump straight to "starting" without calling /start.
+  // stream post. Keep the camera visible while we fetch the token and app ID.
   useEffect(() => {
     if (preStartedPostId && phase === "preview") {
       setPost({ id: preStartedPostId });
-      setPhase("starting");
       queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -143,10 +152,9 @@ export default function GoLiveScreen() {
       apiRequest(rideId ? `/api/agora/streams/${rideId}/start` : `/api/agora/streams/standalone/start`, { method: "POST" }),
     onSuccess: (data) => {
       setPost(data.post);
-      setPhase("starting");
       queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
     },
-    onError: () => setPhase("preview"),
+    onError: () => setLiveError("Could not create the broadcast. Please check your connection and try again."),
   });
 
   const stopMutation = useMutation({
@@ -185,7 +193,8 @@ export default function GoLiveScreen() {
   // the backstop if this request itself fails.
   const abortStartedPost = useCallback((postId?: string) => {
     const id = postId ?? postRef.current?.id;
-    if (!id) return;
+    if (!id || abortedPostsRef.current.has(id)) return;
+    abortedPostsRef.current.add(id);
     try { engineRef.current?.leaveChannel?.(); } catch {}
     try { engineRef.current?.stopPreview?.(); } catch {}
     try { engineRef.current?.release?.(); } catch {}
@@ -196,28 +205,47 @@ export default function GoLiveScreen() {
     setPost(null);
     queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
   }, [queryClient]);
-  const postRef = useRef<any>(null);
   useEffect(() => { postRef.current = post; }, [post]);
 
-  // If the token query errors out, bounce back to preview so we're not stuck.
+  // Only switch camera ownership once the post, token and app ID are ready.
+  // Otherwise the first tap used to remove CameraView immediately and show a
+  // blank screen while the network was still starting the stream.
   useEffect(() => {
-    if (tokenQuery.isError && phase === "starting") {
+    if (phase === "preview" && post?.id && tokens && agoraAppId && !liveError) {
+      setPhase("starting");
+    }
+  }, [phase, post?.id, tokens, agoraAppId, liveError]);
+
+  useEffect(() => {
+    if (phase !== "starting") {
+      setCameraReleased(false);
+      return;
+    }
+    // CameraView unmounts on the first starting render. Give the native
+    // camera session time to close before Agora asks Android for the camera.
+    const timer = setTimeout(() => setCameraReleased(true), 400);
+    return () => clearTimeout(timer);
+  }, [phase]);
+
+  // If the token query errors out, keep the camera preview and explain why.
+  useEffect(() => {
+    if (tokenQuery.isError && post?.id && phase !== "live") {
       setLiveError("Couldn't get a stream token — check your connection and try again.");
       setPhase("preview");
       abortStartedPost();
     }
-  }, [tokenQuery.isError, phase, abortStartedPost]);
+  }, [tokenQuery.isError, post?.id, phase, abortStartedPost]);
 
   // Safety timeout: if still "starting" after 25s, something silently failed.
   useEffect(() => {
-    if (phase !== "starting") return;
+    if (!post?.id || phase === "live") return;
     const t = setTimeout(() => {
       setLiveError("Stream took too long to start. Please try again.");
       setPhase("preview");
       abortStartedPost();
     }, 25000);
     return () => clearTimeout(t);
-  }, [phase, abortStartedPost]);
+  }, [post?.id, phase, abortStartedPost]);
 
   // Host heartbeat — the server's authoritative "still broadcasting" signal.
   // Keeps the stream alive through the host-grace loop and detects the server
@@ -254,16 +282,22 @@ export default function GoLiveScreen() {
   // The server post becomes public only after onJoinChannelSuccess and /ready.
   useEffect(() => {
     if (!rtc || !tokens || !agoraAppId) return;
-    if (phase !== "starting") return;
+    if (phase !== "starting" || !cameraReleased) return;
+    // A token refresh must not create a second native engine for the same post.
+    if (engineRef.current) return;
 
     if (tokens.role !== "publisher") {
       setLiveError("You are not a participant on this ride.");
       setPhase("preview");
+      abortStartedPost();
       return;
     }
 
     let localEngine: any = null;
     let terminal = false;
+    let joined = false;
+    let firstFrameEncoded = false;
+    let readyInFlight = false;
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     const report = (stage: string, code?: number) => {
       const id = postRef.current?.id;
@@ -292,30 +326,51 @@ export default function GoLiveScreen() {
         const id = postRef.current?.id;
         setTimeout(() => abortStartedPost(id), 0);
       };
+      const markReadyWhenVideoWorks = () => {
+        if (!joined || !firstFrameEncoded || terminal || readyInFlight) return;
+        const id = postRef.current?.id;
+        if (!id || abortedPostsRef.current.has(id)) return;
+        readyInFlight = true;
+        // Joining audio alone can succeed even while Android cannot open the
+        // camera. A real encoded video frame is required before inviting riders
+        // or making this stream eligible for Travony TV.
+        apiRequest(`/api/agora/streams/${id}/ready`, { method: "POST" })
+          .then(() => {
+            if (terminal || !screenMountedRef.current || abortedPostsRef.current.has(id)) return;
+            everPublishedRef.current = true;
+            setPublishing(true);
+            setPhase("live");
+            queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
+          })
+          .catch(() => {
+            report("ready_failed");
+            bail("Connected to video, but couldn't publish the stream. Please try again.");
+          });
+      };
       localEngine.registerEventHandler({
         onJoinChannelSuccess: () => {
           if (terminal) return;
           report("joined");
-          // Agora joining is necessary but not sufficient: acknowledge it to
-          // our server before exposing the post to riders or showing LIVE.
-          apiRequest(`/api/agora/streams/${postRef.current?.id}/ready`, { method: "POST" })
-            .then(() => {
-              if (terminal) return;
-              everPublishedRef.current = true;
-              setPublishing(true);
-              setPhase("live");
-              queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
-            })
-            .catch(() => {
-              report("ready_failed");
-              bail("Connected to video, but couldn't publish the stream. Please try again.");
-            });
+          joined = true;
+          markReadyWhenVideoWorks();
         },
         onError: (err: number, msg: string) => {
           console.log("[GoLive] RTC error", err, msg);
           if (!everPublishedRef.current) {
             report("rtc_error", err);
             bail(`Camera connection failed (${err}). Please try again.`);
+          }
+        },
+        onLocalVideoStateChanged: (_source: number, state: number, reason: number) => {
+          // A successful channel join without a working camera is not a usable
+          // broadcast. Capture errors are especially useful for Android
+          // camera-ownership failures that happen before /ready.
+          if (state === 3 && !terminal) {
+            report("camera_error", reason);
+            bail(`Camera could not start (${reason}). Please try again.`);
+          } else if (state === 2 && !terminal) {
+            firstFrameEncoded = true;
+            markReadyWhenVideoWorks();
           }
         },
         onConnectionStateChanged: (_conn: any, state: number, reason: number) => {
@@ -353,7 +408,6 @@ export default function GoLiveScreen() {
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
       if (!frontCamera) localEngine.switchCamera?.();
-      localEngine.startPreview?.();
 
       // Dual-stream: viewers on slow connections automatically receive the
       // low-quality simulcast layer (set in AgoraStreamViewerScreen).
@@ -409,7 +463,7 @@ export default function GoLiveScreen() {
         try { localEngine?.release?.(); } catch {}
       }
     }
-  }, [rtc, tokens, phase, agoraAppId]);
+  }, [rtc, tokens, phase, agoraAppId, cameraReleased]);
 
   // Show a one-time toast the first time the lockout activates this session.
   useEffect(() => {
@@ -436,7 +490,9 @@ export default function GoLiveScreen() {
     enabled: !!post?.id,
   });
 
-  const { subscribe } = useStreamChannel(post?.id ?? null, tokens);
+  // RTM is for live gifts/viewer events; it need not claim another native SDK
+  // while the video engine is still trying to acquire the camera.
+  const { subscribe } = useStreamChannel(phase === "live" ? post?.id ?? null : null, tokens);
   const { current: currentGift, onGiftEvent } = useGiftAnimations();
 
   useEffect(() => {
@@ -625,7 +681,7 @@ export default function GoLiveScreen() {
                 if (phase === "live" && post?.id) {
                   stopMutation.mutate();
                 } else {
-                  if (phase === "starting") abortStartedPost();
+                   if (post?.id) abortStartedPost(post.id);
                   navigation.goBack();
                 }
               }}
@@ -671,17 +727,21 @@ export default function GoLiveScreen() {
             style={styles.goLiveButton}
             onPress={() => {
               setLiveError(null);
-              setPhase("starting");
               startMutation.mutate();
             }}
-            disabled={startMutation.isPending || !agoraAppId}
+            disabled={startMutation.isPending || !!post?.id || !agoraAppId}
           >
-            {startMutation.isPending ? (
+            {startMutation.isPending || !!post?.id ? (
               <ActivityIndicator color="#fff" size="small" />
             ) : (
               <ThemedText style={styles.primaryButtonText}>Go Live</ThemedText>
             )}
           </Pressable>
+          {post?.id ? (
+            <ThemedText style={styles.preLiveBody}>
+              Securing your channel… Your camera preview will stay on until we can connect.
+            </ThemedText>
+          ) : null}
           {liveError ? (
             <ThemedText style={[styles.preLiveBody, { color: Colors.liveRed }]}>
               {liveError}

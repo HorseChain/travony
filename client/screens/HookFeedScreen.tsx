@@ -1531,7 +1531,8 @@ export default function HookFeedScreen() {
   const [goLiveReqId, setGoLiveReqId] = useState<string | null>(null);
   const [goLiveDriverUserId, setGoLiveDriverUserId] = useState<string | null>(null);
   const [goLiveStatus, setGoLiveStatus] = useState<GoLiveRequestState>("idle");
-  const [goLiveCountdown, setGoLiveCountdown] = useState(30);
+  const [goLiveCountdown, setGoLiveCountdown] = useState(60);
+  const goLiveDeadlineRef = useRef<number | null>(null);
   const [goLiveToast, setGoLiveToast] = useState<string | null>(null);
   const goLiveCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1539,7 +1540,8 @@ export default function HookFeedScreen() {
     setGoLiveStatus("idle");
     setGoLiveReqId(null);
     setGoLiveDriverUserId(null);
-    setGoLiveCountdown(30);
+    setGoLiveCountdown(60);
+    goLiveDeadlineRef.current = null;
     if (goLiveCountdownRef.current) {
       clearInterval(goLiveCountdownRef.current);
       goLiveCountdownRef.current = null;
@@ -1555,8 +1557,9 @@ export default function HookFeedScreen() {
       }),
     onSuccess: (data: any) => {
       setGoLiveReqId(data.request.id);
+      goLiveDeadlineRef.current = new Date(data.request.expiresAt).getTime();
       setGoLiveStatus("waiting");
-      setGoLiveCountdown(30);
+      setGoLiveCountdown(Math.max(0, Math.ceil((goLiveDeadlineRef.current - Date.now()) / 1000)));
     },
     onError: () => {
       resetGoLiveState();
@@ -1610,7 +1613,7 @@ export default function HookFeedScreen() {
     }
   }, [goLiveStatusData, navigation, resetGoLiveState]);
 
-  // 30-second client-side countdown while the request is still pending. At zero
+  // Countdown to the server's deadline while the request is still pending. At zero
   // refetch status instead of PATCH-cancelling: a driver may have accepted on
   // the server just before this client observed it, and cancelling that handoff
   // would strand the rider while the driver connects.
@@ -1622,21 +1625,17 @@ export default function HookFeedScreen() {
       }
       return;
     }
-    setGoLiveCountdown(30);
+    setGoLiveCountdown(Math.max(0, Math.ceil(((goLiveDeadlineRef.current ?? Date.now()) - Date.now()) / 1000)));
     if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
     const capturedReqId = goLiveReqId;
     goLiveCountdownRef.current = setInterval(() => {
-      setGoLiveCountdown((s) => {
-        if (s <= 1) {
-          clearInterval(goLiveCountdownRef.current!);
-          goLiveCountdownRef.current = null;
-          if (capturedReqId) {
-            qc.invalidateQueries({ queryKey: ["/api/go-live-requests", capturedReqId] });
-          }
-          return 0;
-        }
-        return s - 1;
-      });
+      const seconds = Math.max(0, Math.ceil(((goLiveDeadlineRef.current ?? Date.now()) - Date.now()) / 1000));
+      setGoLiveCountdown(seconds);
+      if (seconds === 0) {
+        clearInterval(goLiveCountdownRef.current!);
+        goLiveCountdownRef.current = null;
+        if (capturedReqId) qc.invalidateQueries({ queryKey: ["/api/go-live-requests", capturedReqId] });
+      }
     }, 1000);
     return () => { if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
