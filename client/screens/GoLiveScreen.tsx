@@ -7,6 +7,7 @@ import {
   ScrollView,
   Platform,
   Linking,
+  Share,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFocusEffect, useNavigation, useRoute } from "@react-navigation/native";
@@ -63,14 +64,12 @@ export default function GoLiveScreen() {
   const [onTv, setOnTv] = useState(false);
   const [shopOpen, setShopOpen] = useState(false);
   const [featuredKey, setFeaturedKey] = useState<string | null>(null);
+  // Public share URL for standalone (no-ride) streams — fetched once the post is created.
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [post, setPost] = useState<any>(null);
   const [liveError, setLiveError] = useState<string | null>(null);
   // Distinguishes first connect from a mid-stream drop for the status badge.
   const everPublishedRef = useRef(false);
-  // Highlight-clip frame capture — expo-camera is already the broadcaster's
-  // preview, so we snapshot it periodically for the post-stream clip render.
-  const cameraRef = useRef<any>(null);
-
   // Speed-based distraction-prevention lockout (task #83)
   const { movingState, speedKmhRef } = useVehicleSpeed();
   // Controls are locked when moving OR when speed state is unknown (fail-safe).
@@ -127,6 +126,15 @@ export default function GoLiveScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preStartedPostId]);
 
+  // Fetch the public share link for standalone (no-ride) streams so the driver
+  // can copy and share it while broadcasting.
+  useEffect(() => {
+    if (!post?.id || rideId) return;
+    apiRequest(`/api/agora/streams/${post.id}/share-link`, { method: "GET" })
+      .then((data: any) => { if (data?.url) setShareUrl(data.url); })
+      .catch(() => {});
+  }, [post?.id, rideId]);
+
   // ---------------------------------------------------------------------------
   // Go Live flow
   // ---------------------------------------------------------------------------
@@ -157,39 +165,6 @@ export default function GoLiveScreen() {
     },
   });
 
-  // Highlight-clip frames: while live, quietly snapshot the camera every ~6s
-  // and upload a low-quality JPEG. The server buffers frames only for the
-  // duration of the stream and renders up to 3 highlight clips at the end.
-  // Every failure is silent — frame capture must never disturb broadcasting.
-  useEffect(() => {
-    if (phase !== "live" || !post?.id) return;
-    let stopped = false;
-    let busy = false;
-    const capture = async () => {
-      if (stopped || busy || !cameraRef.current?.takePictureAsync) return;
-      busy = true;
-      try {
-        const pic = await cameraRef.current.takePictureAsync({
-          quality: 0.2,
-          base64: true,
-          skipProcessing: true,
-          shutterSound: false,
-        });
-        if (!stopped && pic?.base64) {
-          await apiRequest(`/api/agora/streams/${post.id}/frame`, {
-            method: "POST",
-            body: JSON.stringify({ frame: pic.base64 }),
-            headers: { "Content-Type": "application/json" },
-          });
-        }
-      } catch {} // silent by design
-      busy = false;
-    };
-    const t = setInterval(capture, 6000);
-    const first = setTimeout(capture, 1500);
-    return () => { stopped = true; clearInterval(t); clearTimeout(first); };
-  }, [phase, post?.id]);
-
   // Token — only fetched after the post is created server-side.
   const tokenQuery = useQuery<StreamTokenBundle>({
     queryKey: ["/api/agora/token", post?.id],
@@ -211,6 +186,12 @@ export default function GoLiveScreen() {
   const abortStartedPost = useCallback((postId?: string) => {
     const id = postId ?? postRef.current?.id;
     if (!id) return;
+    try { engineRef.current?.leaveChannel?.(); } catch {}
+    try { engineRef.current?.stopPreview?.(); } catch {}
+    try { engineRef.current?.release?.(); } catch {}
+    engineRef.current = null;
+    setEngine(null);
+    setPublishing(false);
     apiRequest(`/api/agora/streams/${id}/stop`, { method: "POST" }).catch(() => {});
     setPost(null);
     queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
@@ -268,10 +249,9 @@ export default function GoLiveScreen() {
     return () => { stopped = true; clearInterval(t); };
   }, [phase, post?.id]);
 
-  // Initialize Agora and join the channel once the token arrives.
-  // CameraView stays mounted throughout — expo-camera is the broadcaster's
-  // view at all times. Agora streams audio and attempts camera (device-dependent
-  // camera sharing); if camera sharing isn't supported, audio still works.
+  // Initialize Agora and join the channel once the token arrives. CameraView is
+  // unmounted in "starting", giving Agora sole ownership of camera + microphone.
+  // The server post becomes public only after onJoinChannelSuccess and /ready.
   useEffect(() => {
     if (!rtc || !tokens || !agoraAppId) return;
     if (phase !== "starting") return;
@@ -283,6 +263,17 @@ export default function GoLiveScreen() {
     }
 
     let localEngine: any = null;
+    let terminal = false;
+    let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    const report = (stage: string, code?: number) => {
+      const id = postRef.current?.id;
+      if (!id) return;
+      apiRequest(`/api/agora/streams/${id}/diagnostic`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ stage, code }),
+      }).catch(() => {});
+    };
     try {
       const { createAgoraRtcEngine, ChannelProfileType, ClientRoleType } = rtc;
       localEngine = createAgoraRtcEngine();
@@ -291,33 +282,68 @@ export default function GoLiveScreen() {
         channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
       });
       const bail = (msg: string) => {
+        if (terminal) return;
+        terminal = true;
         setLiveError(msg);
         setPhase("preview");
-        abortStartedPost();
-        try { localEngine?.leaveChannel?.(); } catch {}
-        try { localEngine?.release?.(); } catch {}
+        // Never release the native engine inside an Agora event callback. That
+        // can re-enter native code while its callback is still on the stack.
+        // abortStartedPost owns the single leave/release path.
+        const id = postRef.current?.id;
+        setTimeout(() => abortStartedPost(id), 0);
       };
       localEngine.registerEventHandler({
-        // onJoinChannelSuccess confirms the server-side connection —
-        // we go LIVE immediately after calling join (same as original code),
-        // and use this callback only to light up the wifi icon.
-        onJoinChannelSuccess: () => { everPublishedRef.current = true; setPublishing(true); },
-        onError: (err: number, msg: string) =>
-          console.log("[GoLive] RTC error", err, msg),
+        onJoinChannelSuccess: () => {
+          if (terminal) return;
+          report("joined");
+          // Agora joining is necessary but not sufficient: acknowledge it to
+          // our server before exposing the post to riders or showing LIVE.
+          apiRequest(`/api/agora/streams/${postRef.current?.id}/ready`, { method: "POST" })
+            .then(() => {
+              if (terminal) return;
+              everPublishedRef.current = true;
+              setPublishing(true);
+              setPhase("live");
+              queryClient.invalidateQueries({ queryKey: ["/api/social/live"] });
+            })
+            .catch(() => {
+              report("ready_failed");
+              bail("Connected to video, but couldn't publish the stream. Please try again.");
+            });
+        },
+        onError: (err: number, msg: string) => {
+          console.log("[GoLive] RTC error", err, msg);
+          if (!everPublishedRef.current) {
+            report("rtc_error", err);
+            bail(`Camera connection failed (${err}). Please try again.`);
+          }
+        },
         onConnectionStateChanged: (_conn: any, state: number, reason: number) => {
           console.log("[GoLive] connection state", state, "reason", reason);
           // Agora ConnectionStateType: 1 DISCONNECTED, 2 CONNECTING,
           // 3 CONNECTED, 4 RECONNECTING, 5 FAILED.
-          if (state === 5) {
-            // Terminal failure — Agora gave up reconnecting. End honestly:
-            // stop the server post so viewers aren't stranded on a dead card.
-            setPublishing(false);
-            setLiveError("Stream connection failed. Please try again.");
-            setPhase("preview");
-            abortStartedPost();
-          } else if (state === 3) {
-            everPublishedRef.current = true;
-            setPublishing(true);  // connected → go-live indicator on
+          if (state === 3) {
+            // Recovered — cancel any pending recovery timer and go back live.
+            if (recoveryTimer) { clearTimeout(recoveryTimer); recoveryTimer = null; }
+            if (everPublishedRef.current) setPublishing(true);
+          } else if (state === 5) {
+            if (!everPublishedRef.current) {
+              // Never successfully published — fail cleanly.
+              report("connection_failed", reason);
+              bail(`Stream connection failed (${reason}). Please try again.`);
+            } else {
+              // Already live — show reconnecting badge and give 45 s for
+              // the network to recover before ending the broadcast.
+              // The heartbeat useEffect keeps running (phase is still "live"),
+              // so the server-side stream stays alive during this window.
+              setPublishing(false);
+              if (!recoveryTimer) {
+                recoveryTimer = setTimeout(() => {
+                  recoveryTimer = null;
+                  if (!terminal) bail("Stream lost. Your broadcast has ended.");
+                }, 45000);
+              }
+            }
           } else if (state === 1 || state === 4) {
             setPublishing(false); // dropped → "reconnecting" badge
           }
@@ -326,9 +352,8 @@ export default function GoLiveScreen() {
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
       localEngine.enableVideo();
-      // Do NOT call startPreview() — expo-camera already owns the camera.
-      // Agora will attempt camera sharing (works on Android 9+); if the
-      // device doesn't support it, audio-only streaming continues safely.
+      if (!frontCamera) localEngine.switchCamera?.();
+      localEngine.startPreview?.();
 
       // Dual-stream: viewers on slow connections automatically receive the
       // low-quality simulcast layer (set in AgoraStreamViewerScreen).
@@ -351,7 +376,11 @@ export default function GoLiveScreen() {
       // CHATROOM scenario — voice-optimised noise suppression, echo-cancelled.
       // Keeps audio crisp for local guide commentary without wasting data.
       localEngine.setAudioProfile?.(1, 5); // MUSIC_STANDARD, AUDIO_SCENARIO_CHATROOM
-      localEngine.joinChannelWithUserAccount(
+      // Agora may synchronously report a failed join: the engine must already
+      // be owned by our cleanup path before that callback can run.
+      engineRef.current = localEngine;
+      report("joining");
+      const joinResult = localEngine.joinChannelWithUserAccount(
         tokens.rtcToken,
         tokens.channel,
         tokens.uid,
@@ -361,17 +390,24 @@ export default function GoLiveScreen() {
           publishMicrophoneTrack: true,
         }
       );
-      engineRef.current = localEngine;
+      // Agora can reject the join synchronously without firing onError or
+      // onJoinChannelSuccess. Don't leave the driver waiting for the timeout.
+      if (typeof joinResult === "number" && joinResult < 0) {
+        report("join_rejected", joinResult);
+        bail(`Stream could not connect (${joinResult}). Please try again.`);
+        return;
+      }
       setEngine(localEngine);
-      // Go live immediately — same pattern as working builds 77-80.
-      // onJoinChannelSuccess above only lights the wifi icon.
-      setPhase("live");
     } catch (err) {
       console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
-      setLiveError("Failed to start stream. Please try again.");
+      report("init_failed");
+      setLiveError("Camera couldn't start the broadcast. Please try again.");
       setPhase("preview");
+      const ownedByRef = engineRef.current === localEngine;
       abortStartedPost();
-      try { localEngine?.release?.(); } catch {}
+      if (!ownedByRef) {
+        try { localEngine?.release?.(); } catch {}
+      }
     }
   }, [rtc, tokens, phase, agoraAppId]);
 
@@ -492,6 +528,7 @@ export default function GoLiveScreen() {
   }
 
   const products = catalogQuery.data?.products ?? [];
+  const AgoraLocalView = rtc?.RtcTextureView ?? rtc?.RtcSurfaceView;
   const BOTTOM_OFFSET = insets.bottom + Spacing["2xl"];
   const SHOP_BOTTOM = BOTTOM_OFFSET + 48 + Spacing.lg;
 
@@ -499,16 +536,24 @@ export default function GoLiveScreen() {
     <View style={styles.root}>
 
       {/* ------------------------------------------------------------------ */}
-      {/* Camera background — stays mounted for every phase.                 */}
-      {/* Agora's RtcSurfaceView is definitively broken on this device;      */}
-      {/* expo-camera is the broadcaster's preview at all times.             */}
-      {/* Agora joins for audio + attempts camera sharing (Android 9+).      */}
+      {/* Camera background. expo-camera is preview-only; it unmounts before */}
+      {/* Agora starts so two native camera owners never fight each other.   */}
       {/* ------------------------------------------------------------------ */}
-      <CameraView
-        ref={cameraRef}
-        style={StyleSheet.absoluteFill}
-        facing={frontCamera ? "front" : "back"}
-      />
+      {phase === "preview" ? (
+        <CameraView
+          style={StyleSheet.absoluteFill}
+          facing={frontCamera ? "front" : "back"}
+        />
+      ) : engine && AgoraLocalView ? (
+        <AgoraLocalView
+          style={StyleSheet.absoluteFill}
+          canvas={{ uid: 0, renderMode: 1 }}
+        />
+      ) : (
+        <View style={[StyleSheet.absoluteFill, styles.liveBg]}>
+          <Ionicons name="videocam-outline" size={40} color="rgba(255,255,255,0.45)" />
+        </View>
+      )}
 
       {/* Spinner overlay — only shown while joining (starting phase) */}
       {phase === "starting" ? (
@@ -560,6 +605,17 @@ export default function GoLiveScreen() {
             >
               <Ionicons name="camera-reverse-outline" size={20} color="#fff" />
             </Pressable>
+            {/* Share button — only for standalone streams where viewers need the link */}
+            {!rideId && shareUrl && phase === "live" ? (
+              <Pressable
+                style={styles.roundButton}
+                onPress={() => {
+                  Share.share({ message: `Watch me live on Travony! ${shareUrl}`, url: shareUrl });
+                }}
+              >
+                <Ionicons name="share-outline" size={20} color="#fff" />
+              </Pressable>
+            ) : null}
             <Pressable
               style={styles.roundButton}
               onPress={() => {

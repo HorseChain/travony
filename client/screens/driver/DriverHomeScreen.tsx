@@ -604,14 +604,6 @@ export default function DriverHomeScreen() {
   const counteredRideIds = useRef<Set<string>>(new Set());
   const [checkInPrestige, setCheckInPrestige] = useState<number | null>(null);
 
-  // Go Live Request — a rider asked this driver to start a public stream
-  const [incomingGoLiveReq, setIncomingGoLiveReq] = useState<{
-    id: string; riderId: string; riderName: string; riderAvatar: string | null; expiresAt: string;
-  } | null>(null);
-  const [goLiveReqCountdown, setGoLiveReqCountdown] = useState(30);
-  const goLiveCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const handledGoLiveReqIds = useRef<Set<string>>(new Set());
-
   const hubSlideIn = useSharedValue(-100);
   const hubOpacity = useSharedValue(0);
   const hubSwipeX = useSharedValue(0);
@@ -728,15 +720,6 @@ export default function DriverHomeScreen() {
   const forecastZones = forecastData?.zones ?? [];
   const topForecast = forecastZones[0] ?? null;
 
-  // Poll for rider go-live requests while online and no ride request is showing
-  const { data: goLiveIncomingData } = useQuery<{
-    requests: Array<{ id: string; riderId: string; riderName: string; riderAvatar: string | null; expiresAt: string }>;
-  }>({
-    queryKey: ["/api/go-live-requests/incoming"],
-    refetchInterval: 5000,
-    enabled: isOnline && !incomingRequest,
-  });
-
   const toggleOnlineMutation = useMutation({
     mutationFn: async ({ online, evReady: ready }: { online: boolean; evReady?: boolean }) => {
       const body: { isOnline: boolean; evReady?: boolean; lat?: number; lng?: number } = { isOnline: online };
@@ -768,25 +751,6 @@ export default function DriverHomeScreen() {
       queryClient.invalidateQueries({ queryKey: ["/api/drivers/pending-rides"] });
     },
     onError: () => {},
-  });
-
-  const acceptGoLiveMutation = useMutation({
-    mutationFn: async (reqId: string) =>
-      apiRequest(`/api/go-live-requests/${reqId}/accept`, { method: "PATCH" }),
-    onSuccess: (data: any) => {
-      const postId = data?.postId;
-      setIncomingGoLiveReq(null);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      if (postId) navigation.navigate("GoLive", { postId });
-    },
-    onError: () => setIncomingGoLiveReq(null),
-  });
-
-  const declineGoLiveMutation = useMutation({
-    mutationFn: async (reqId: string) =>
-      apiRequest(`/api/go-live-requests/${reqId}/decline`, { method: "PATCH" }),
-    onSuccess: () => setIncomingGoLiveReq(null),
-    onError: () => setIncomingGoLiveReq(null),
   });
 
   const checkInMutation = useMutation({
@@ -840,41 +804,6 @@ export default function DriverHomeScreen() {
       }
     }
   }, [pendingRides, isOnline]);
-
-  // Surface the first non-handled go-live request
-  useEffect(() => {
-    const first = goLiveIncomingData?.requests?.[0];
-    if (!first || handledGoLiveReqIds.current.has(first.id)) return;
-    if (!incomingGoLiveReq || incomingGoLiveReq.id !== first.id) {
-      setIncomingGoLiveReq(first);
-      setGoLiveReqCountdown(30);
-    }
-  }, [goLiveIncomingData]);
-
-  // Countdown timer for go-live request (auto-dismiss after 30s)
-  useEffect(() => {
-    if (!incomingGoLiveReq) {
-      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
-      return;
-    }
-    setGoLiveReqCountdown(30);
-    if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
-    const reqId = incomingGoLiveReq.id;
-    goLiveCountdownRef.current = setInterval(() => {
-      setGoLiveReqCountdown((s) => {
-        if (s <= 1) {
-          clearInterval(goLiveCountdownRef.current!);
-          setIncomingGoLiveReq(null);
-          handledGoLiveReqIds.current.add(reqId);
-          return 0;
-        }
-        return s - 1;
-      });
-    }, 1000);
-    return () => {
-      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
-    };
-  }, [incomingGoLiveReq?.id]);
 
   // Name Your Fare: after countering, poll my-bids — when the rider accepts
   // this driver's counter, jump straight into the active ride.
@@ -1531,30 +1460,20 @@ export default function DriverHomeScreen() {
           ) : null}
           <View style={[styles.searchingCard, { backgroundColor: theme.backgroundRoot }]}>
             <PulsingDot />
-            <ThemedText style={styles.searchingText}>Scanning for route requests...</ThemedText>
+            <ThemedText style={[styles.searchingText, { flex: 1 }]}>Scanning for route requests...</ThemedText>
+            <Pressable
+              style={({ pressed }) => [
+                styles.goLiveChip,
+                { opacity: pressed ? 0.75 : 1 },
+              ]}
+              onPress={() => navigation.navigate("GoLive", {})}
+              hitSlop={6}
+            >
+              <View style={styles.goLiveChipDot} />
+              <ThemedText style={styles.goLiveChipText}>Go Live</ThemedText>
+            </Pressable>
           </View>
         </View>
-      ) : null}
-
-      {/* ── Go Live Request card — rider asked this driver to broadcast ── */}
-      {incomingGoLiveReq && !incomingRequest ? (
-        <GoLiveRequestCard
-          req={incomingGoLiveReq}
-          countdown={goLiveReqCountdown}
-          bottom={tabBarHeight + Spacing.lg}
-          accepting={acceptGoLiveMutation.isPending}
-          onAccept={() => {
-            const reqId = incomingGoLiveReq.id;
-            handledGoLiveReqIds.current.add(reqId);
-            setIncomingGoLiveReq(null);
-            acceptGoLiveMutation.mutate(reqId);
-          }}
-          onDecline={() => {
-            handledGoLiveReqIds.current.add(incomingGoLiveReq.id);
-            setIncomingGoLiveReq(null);
-            declineGoLiveMutation.mutate(incomingGoLiveReq.id);
-          }}
-        />
       ) : null}
 
       {incomingRequest ? (
@@ -2328,6 +2247,28 @@ const styles = StyleSheet.create({
   goLiveNudgeBtnText: {
     ...Typography.small,
     color: "#FFFFFF",
+    fontWeight: "700",
+  },
+  goLiveChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: Colors.liveRed + "18",
+    borderWidth: 1,
+    borderColor: Colors.liveRed + "40",
+    paddingHorizontal: Spacing.md,
+    paddingVertical: 5,
+    borderRadius: BorderRadius.full,
+  },
+  goLiveChipDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: Colors.liveRed,
+  },
+  goLiveChipText: {
+    ...Typography.small,
+    color: Colors.liveRed,
     fontWeight: "700",
   },
   requestCard: {

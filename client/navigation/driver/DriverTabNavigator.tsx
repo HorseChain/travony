@@ -1,4 +1,5 @@
 import React, { useEffect } from "react";
+import { useNavigation } from "@react-navigation/native";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { Platform, StyleSheet, View } from "react-native";
@@ -23,6 +24,7 @@ import DriverEarningsStackNavigator from "./DriverEarningsStackNavigator";
 import DriverHistoryStackNavigator from "./DriverHistoryStackNavigator";
 import SocialStackNavigator from "@/navigation/SocialStackNavigator";
 import DriverProfileStackNavigator from "./DriverProfileStackNavigator";
+import DriverGoLiveRequests from "@/components/driver/DriverGoLiveRequests";
 
 export type DriverTabParamList = {
   DriverHomeTab: undefined;
@@ -96,6 +98,7 @@ const tabStyles = StyleSheet.create({
 });
 
 export default function DriverTabNavigator() {
+  const navigation = useNavigation<any>();
   const { theme, isDark } = useTheme();
   const { isAuthenticated } = useAuth();
   const { openLoginSheet } = useAuthGate();
@@ -132,6 +135,7 @@ export default function DriverTabNavigator() {
     );
 
   return (
+    <>
     <Tab.Navigator
       initialRouteName="DriverHomeTab"
       screenListeners={({ route }) => ({
@@ -240,5 +244,10 @@ export default function DriverTabNavigator() {
         }}
       />
     </Tab.Navigator>
+    <DriverGoLiveRequests
+      enabled={isAuthenticated}
+      onAccepted={(postId) => navigation.navigate("DriverHomeTab", { screen: "GoLive", params: { postId } })}
+    />
+    </>
   );
 }

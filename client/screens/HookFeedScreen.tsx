@@ -849,21 +849,32 @@ const reviewStyles = StyleSheet.create({
 // GoLiveButton — animated pulsing broadcast button for the action panel
 // ---------------------------------------------------------------------------
 
+type GoLiveRequestState =
+  | "idle"
+  | "waiting"
+  | "connecting"
+  | "declined"
+  | "expired"
+  | "cancelled";
+
 function GoLiveButton({
   onPress,
-  isWaiting,
+  state,
   countdown,
 }: {
   onPress?: () => void;
-  isWaiting: boolean;
+  state: GoLiveRequestState;
   countdown?: number;
 }) {
+  const isWaiting = state === "waiting";
+  const isConnecting = state === "connecting";
+  const isBusy = isWaiting || isConnecting;
   const pulseScale = useSharedValue(1);
   const pulseOpacity = useSharedValue(0.55);
   const btnScale = useSharedValue(1);
 
   useEffect(() => {
-    if (!isWaiting) {
+    if (!isBusy) {
       // Outer ring pulses outward and fades — classic live-broadcast halo
       pulseScale.value = withRepeat(
         withSequence(withTiming(2.2, { duration: 900 }), withTiming(1, { duration: 0 })),
@@ -879,7 +890,7 @@ function GoLiveButton({
       pulseScale.value = withTiming(1, { duration: 250 });
       pulseOpacity.value = withTiming(0, { duration: 250 });
     }
-  }, [isWaiting]);
+  }, [isBusy]);
 
   const ringStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
@@ -899,7 +910,7 @@ function GoLiveButton({
 
   return (
     <Pressable
-      onPress={isWaiting ? undefined : onPress}
+      onPress={isBusy ? undefined : onPress}
       onPressIn={handlePressIn}
       onPressOut={handlePressOut}
       style={panelStyles.btn}
@@ -907,18 +918,18 @@ function GoLiveButton({
     >
       <View style={panelStyles.goLiveWrap}>
         {/* Pulsing halo ring — only when not waiting */}
-        {!isWaiting && (
+        {!isBusy && (
           <Animated.View style={[panelStyles.goLivePulse, ringStyle]} />
         )}
         {/* Core button */}
         <Animated.View
           style={[
             panelStyles.goLiveCircle,
-            isWaiting && panelStyles.goLiveCircleWaiting,
+            isBusy && panelStyles.goLiveCircleWaiting,
             btnStyle,
           ]}
         >
-          {isWaiting ? (
+          {isBusy ? (
             <ActivityIndicator size="small" color="rgba(255,255,255,0.85)" />
           ) : (
             <Ionicons name="radio" size={19} color="#fff" />
@@ -928,8 +939,8 @@ function GoLiveButton({
       {isWaiting && countdown !== undefined ? (
         <Text style={panelStyles.goLiveCountdownLbl}>{countdown}s</Text>
       ) : (
-        <Text style={[panelStyles.btnLbl, isWaiting && { color: "rgba(255,255,255,0.45)" }]}>
-          {isWaiting ? "Waiting…" : "Go Live"}
+        <Text style={[panelStyles.btnLbl, isBusy && { color: "rgba(255,255,255,0.45)" }]}>
+          {isConnecting ? "Connecting…" : "Go Live"}
         </Text>
       )}
     </Pressable>
@@ -962,7 +973,7 @@ function DiscoveryActionPanel({
   onDriverProfile: () => void;
   onTalk?: () => void;
   onGoLive?: () => void;
-  goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
+  goLiveState?: GoLiveRequestState;
   goLiveCountdown?: number;
 }) {
   const rating = driver.rating ? parseFloat(driver.rating) : null;
@@ -1013,7 +1024,7 @@ function DiscoveryActionPanel({
       {onGoLive !== undefined ? (
         <GoLiveButton
           onPress={onGoLive}
-          isWaiting={isWaiting}
+          state={goLiveState ?? "idle"}
           countdown={isWaiting ? goLiveCountdown : undefined}
         />
       ) : null}
@@ -1214,7 +1225,7 @@ const DriverDiscoveryCard = memo(function DriverDiscoveryCard({
   onDriverProfile: (d: DiscoveryDriver) => void;
   onTalk?: (d: DiscoveryDriver) => void;
   onGoLive?: (d: DiscoveryDriver) => void;
-  goLiveState?: "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled";
+  goLiveState?: GoLiveRequestState;
   goLiveCountdown?: number;
 }) {
   const [mapExpanded, setMapExpanded] = useState(false);
@@ -1519,9 +1530,7 @@ export default function HookFeedScreen() {
   // ── Go Live Request state ─────────────────────────────────────────────────
   const [goLiveReqId, setGoLiveReqId] = useState<string | null>(null);
   const [goLiveDriverUserId, setGoLiveDriverUserId] = useState<string | null>(null);
-  const [goLiveStatus, setGoLiveStatus] = useState<
-    "idle" | "waiting" | "accepted" | "declined" | "expired" | "cancelled"
-  >("idle");
+  const [goLiveStatus, setGoLiveStatus] = useState<GoLiveRequestState>("idle");
   const [goLiveCountdown, setGoLiveCountdown] = useState(30);
   const [goLiveToast, setGoLiveToast] = useState<string | null>(null);
   const goLiveCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -1531,7 +1540,10 @@ export default function HookFeedScreen() {
     setGoLiveReqId(null);
     setGoLiveDriverUserId(null);
     setGoLiveCountdown(30);
-    if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+    if (goLiveCountdownRef.current) {
+      clearInterval(goLiveCountdownRef.current);
+      goLiveCountdownRef.current = null;
+    }
   }, []);
 
   const sendGoLiveMutation = useMutation({
@@ -1546,45 +1558,68 @@ export default function HookFeedScreen() {
       setGoLiveStatus("waiting");
       setGoLiveCountdown(30);
     },
-    onError: () => resetGoLiveState(),
+    onError: () => {
+      resetGoLiveState();
+      setGoLiveToast("Couldn't reach the driver. Please try again.");
+    },
   });
 
-  const cancelGoLiveMutation = useMutation({
-    mutationFn: async (reqId: string) =>
-      apiRequest(`/api/go-live-requests/${reqId}/cancel`, { method: "PATCH" }),
-    onSettled: () => resetGoLiveState(),
-  });
-
-  // Poll for request status while waiting
-  const { data: goLiveStatusData } = useQuery<{ request: { status: string; postId: string | null } }>({
+  // Keep polling after acceptance while the native broadcaster joins Agora.
+  // "accepted" means the driver tapped yes; streamReady is the point at which a
+  // subscriber can safely enter without landing in a dead viewer.
+  const { data: goLiveStatusData } = useQuery<{
+    request: {
+      status: string;
+      postId: string | null;
+      streamReady?: boolean;
+      streamEnded?: boolean;
+    };
+  }>({
     queryKey: ["/api/go-live-requests", goLiveReqId],
     queryFn: () => apiRequest(`/api/go-live-requests/${goLiveReqId}`),
-    enabled: !!goLiveReqId && goLiveStatus === "waiting",
-    refetchInterval: 3000,
+    enabled: !!goLiveReqId && (goLiveStatus === "waiting" || goLiveStatus === "connecting"),
+    refetchInterval: 1500,
   });
 
   useEffect(() => {
     if (!goLiveStatusData?.request) return;
-    const { status, postId } = goLiveStatusData.request;
+    const { status, postId, streamReady, streamEnded } = goLiveStatusData.request;
     if (status === "accepted" && postId) {
-      setGoLiveStatus("accepted");
-      resetGoLiveState();
-      // Open the live stream in the Social tab's AgoraStreamViewer
-      const parent = navigation.getParent<any>();
-      parent?.navigate("SocialTab", { screen: "AgoraStreamViewer", params: { postId } });
+      if (streamEnded) {
+        setGoLiveToast("The stream ended before it connected");
+        resetGoLiveState();
+        setTimeout(() => setGoLiveToast(null), 3000);
+      } else if (streamReady) {
+        resetGoLiveState();
+        // Open only after the native host joined and the server marked it ready.
+        const parent = navigation.getParent<any>();
+        parent?.navigate("SocialTab", { screen: "AgoraStreamViewer", params: { postId } });
+      } else {
+        setGoLiveStatus("connecting");
+      }
     } else if (status === "declined") {
       setGoLiveToast("Driver declined the request");
       resetGoLiveState();
       setTimeout(() => setGoLiveToast(null), 3000);
     } else if (status === "expired" || status === "cancelled") {
+      setGoLiveToast(status === "expired"
+        ? "Driver didn't respond. No broadcast started."
+        : "Live request cancelled. No broadcast started.");
       resetGoLiveState();
+      setTimeout(() => setGoLiveToast(null), 5000);
     }
-  }, [goLiveStatusData]);
+  }, [goLiveStatusData, navigation, resetGoLiveState]);
 
-  // 30-second client-side countdown while waiting
+  // 30-second client-side countdown while the request is still pending. At zero
+  // refetch status instead of PATCH-cancelling: a driver may have accepted on
+  // the server just before this client observed it, and cancelling that handoff
+  // would strand the rider while the driver connects.
   useEffect(() => {
     if (goLiveStatus !== "waiting") {
-      if (goLiveCountdownRef.current) clearInterval(goLiveCountdownRef.current);
+      if (goLiveCountdownRef.current) {
+        clearInterval(goLiveCountdownRef.current);
+        goLiveCountdownRef.current = null;
+      }
       return;
     }
     setGoLiveCountdown(30);
@@ -1594,7 +1629,10 @@ export default function HookFeedScreen() {
       setGoLiveCountdown((s) => {
         if (s <= 1) {
           clearInterval(goLiveCountdownRef.current!);
-          if (capturedReqId) cancelGoLiveMutation.mutate(capturedReqId);
+          goLiveCountdownRef.current = null;
+          if (capturedReqId) {
+            qc.invalidateQueries({ queryKey: ["/api/go-live-requests", capturedReqId] });
+          }
           return 0;
         }
         return s - 1;
@@ -1607,7 +1645,7 @@ export default function HookFeedScreen() {
   const handleGoLive = useCallback(
     (driver: DiscoveryDriver) => {
       if (!isAuthenticated) { openLoginSheet(); return; }
-      if (goLiveStatus === "waiting") return;
+      if (goLiveStatus !== "idle") return;
       setGoLiveDriverUserId(driver.userId);
       sendGoLiveMutation.mutate({ driverUserId: driver.userId });
     },

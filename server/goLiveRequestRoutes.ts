@@ -13,30 +13,12 @@ import { Router } from "express";
 import { and, eq, gt, lt } from "drizzle-orm";
 import { db } from "./db";
 import { goLiveRequests, ridePosts, users, drivers } from "@shared/schema";
-import { getWriteUser, hostLastSeen, publishStreamEvent } from "./agoraStreaming";
-import { sendTelegramMessage } from "./telegramBot";
-import { sendSmsMessage } from "./twilioService";
+import { getWriteUser } from "./agoraStreaming";
+import { notifyUser } from "./notificationService";
 
 export const goLiveRequestRouter = Router();
 
 const REQUEST_TTL_MS = 30_000; // 30 seconds
-
-// ---------------------------------------------------------------------------
-// Helper — mark a request expired if its expiresAt has passed
-// ---------------------------------------------------------------------------
-async function expireIfStale(reqId: string) {
-  const now = new Date();
-  await db
-    .update(goLiveRequests)
-    .set({ status: "expired" })
-    .where(
-      and(
-        eq(goLiveRequests.id, reqId),
-        eq(goLiveRequests.status, "pending"),
-        // expiresAt < now — handled by checking returned row below
-      )
-    );
-}
 
 // ---------------------------------------------------------------------------
 // POST /api/go-live-requests  — rider sends a request to a driver
@@ -65,7 +47,7 @@ goLiveRequestRouter.post("/api/go-live-requests", async (req, res) => {
 
     // Verify target user exists — fetch contact fields needed for notification
     const [targetUser] = await db
-      .select({ id: users.id, name: users.name, telegramChatId: users.telegramChatId, phone: users.phone })
+      .select({ id: users.id, name: users.name })
       .from(users)
       .where(eq(users.id, driverUserId));
     if (!targetUser) return res.status(404).json({ error: "Driver not found" });
@@ -95,19 +77,20 @@ goLiveRequestRouter.post("/api/go-live-requests", async (req, res) => {
       })
       .returning();
 
-    // Notify the driver immediately — Telegram first, SMS as fallback.
-    // Fire-and-forget: never let notification errors block the API response.
+    // Store an in-app notification even when an external gateway is unavailable.
+    // High urgency also tries the driver's enabled Telegram/SMS channels and
+    // queues email as a fallback. Never block creating the request on delivery.
     const riderName = user.name || "A rider";
     const notifMsg = `${riderName} wants you to go live — you have 30 seconds to accept. Open your T Driver app now.`;
-    if (targetUser.telegramChatId) {
-      sendTelegramMessage(targetUser.telegramChatId, notifMsg).catch((e) =>
-        console.error("[GoLiveRequest] Telegram notify error:", e),
-      );
-    } else if (targetUser.phone && /^\+?\d{7,15}$/.test(targetUser.phone.trim().replace(/[\s-]/g, ""))) {
-      sendSmsMessage(targetUser.phone, `Travony: ${notifMsg}`).catch((e) =>
-        console.error("[GoLiveRequest] SMS notify error:", e),
-      );
-    }
+    notifyUser({
+      userId: driverUserId,
+      kind: "go_live_request",
+      title: "Go Live Request",
+      body: notifMsg,
+      urgency: "high",
+      data: { requestId: created.id },
+      dedupeKey: `go-live-request-${created.id}`,
+    }).catch((e) => console.error("[GoLiveRequest] notify error:", e));
 
     return res.json({ request: created });
   } catch (err: any) {
@@ -199,7 +182,18 @@ goLiveRequestRouter.get("/api/go-live-requests/:id", async (req, res) => {
       return res.json({ request: { ...request, status: "expired" } });
     }
 
-    return res.json({ request });
+    let streamReady = false;
+    let streamEnded = false;
+    if (request.postId) {
+      const [post] = await db
+        .select({ isLive: ridePosts.isLive, endedAt: ridePosts.endedAt })
+        .from(ridePosts)
+        .where(eq(ridePosts.id, request.postId));
+      streamReady = post?.isLive === true && !post.endedAt;
+      streamEnded = !!post?.endedAt;
+    }
+
+    return res.json({ request: { ...request, streamReady, streamEnded } });
   } catch (err: any) {
     console.error("[GoLiveRequest] GET error:", err);
     return res.status(500).json({ error: "Could not fetch request" });
@@ -214,48 +208,64 @@ goLiveRequestRouter.patch("/api/go-live-requests/:id/accept", async (req, res) =
     const user = await getWriteUser(req);
     if (!user) return res.status(401).json({ error: "Unauthorized" });
 
-    const [request] = await db
-      .select()
-      .from(goLiveRequests)
-      .where(eq(goLiveRequests.id, req.params.id));
-    if (!request) return res.status(404).json({ error: "Request not found" });
-    if (request.driverUserId !== user.id) return res.status(403).json({ error: "Not your request" });
-
     const now = new Date();
-    if (request.status !== "pending") {
-      return res.status(400).json({ error: `Request already ${request.status}` });
+    const result = await db.transaction(async (tx) => {
+      // Atomically claim a still-pending, still-valid request. Two accept taps
+      // can no longer create two stream posts.
+      const [claimed] = await tx
+        .update(goLiveRequests)
+        .set({ status: "accepted" })
+        .where(and(
+          eq(goLiveRequests.id, req.params.id),
+          eq(goLiveRequests.driverUserId, user.id),
+          eq(goLiveRequests.status, "pending"),
+          gt(goLiveRequests.expiresAt, now),
+        ))
+        .returning();
+      if (!claimed) return null;
+
+      // The post remains private until the native broadcaster joins Agora and
+      // calls /ready. Riders may see "driver connecting" but never a blank live
+      // viewer caused by accepting before camera/token initialization.
+      const [post] = await tx
+        .insert(ridePosts)
+        .values({
+          rideId: claimed.rideId ?? null,
+          userId: user.id,
+          type: "stream",
+          streamProvider: "agora",
+          twitchChannel: (null as any),
+          cityName: null,
+          distanceKm: null,
+          isLive: false,
+          hostLastSeenAt: null,
+        })
+        .returning();
+
+      await tx
+        .update(goLiveRequests)
+        .set({ postId: post.id })
+        .where(eq(goLiveRequests.id, claimed.id));
+      return post;
+    });
+    if (!result) {
+      const [request] = await db
+        .select()
+        .from(goLiveRequests)
+        .where(eq(goLiveRequests.id, req.params.id));
+      if (!request) return res.status(404).json({ error: "Request not found" });
+      if (request.driverUserId !== user.id) return res.status(403).json({ error: "Not your request" });
+      if (request.expiresAt <= now) {
+        await db
+          .update(goLiveRequests)
+          .set({ status: "expired" })
+          .where(and(eq(goLiveRequests.id, request.id), eq(goLiveRequests.status, "pending")));
+        return res.status(400).json({ error: "Request has expired" });
+      }
+      return res.status(409).json({ error: `Request already ${request.status}` });
     }
-    if (request.expiresAt < now) {
-      await db.update(goLiveRequests).set({ status: "expired" }).where(eq(goLiveRequests.id, request.id));
-      return res.status(400).json({ error: "Request has expired" });
-    }
 
-    // Create a standalone stream post (no rideId required)
-    const [post] = await db
-      .insert(ridePosts)
-      .values({
-        rideId: request.rideId ?? null,
-        userId: user.id,
-        type: "stream",
-        streamProvider: "agora",
-        twitchChannel: (null as any),
-        cityName: null,
-        distanceKm: null,
-        isLive: true,
-        hostLastSeenAt: new Date(),
-      })
-      .returning();
-
-    hostLastSeen.set(post.id, Date.now());
-    publishStreamEvent(post.id, "stream.state", { state: "live", hostName: user.name });
-
-    // Update request with accepted status + postId
-    await db
-      .update(goLiveRequests)
-      .set({ status: "accepted", postId: post.id })
-      .where(eq(goLiveRequests.id, request.id));
-
-    return res.json({ post, postId: post.id });
+    return res.json({ post: result, postId: result.id });
   } catch (err: any) {
     console.error("[GoLiveRequest] accept error:", err);
     return res.status(500).json({ error: "Could not accept request" });

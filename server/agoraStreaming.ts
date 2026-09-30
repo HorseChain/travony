@@ -588,6 +588,25 @@ agoraRouter.post("/api/agora/streams/:rideId/start", async (req, res) => {
 // Publisher readiness handshake. Stream rows and go-live requests may exist
 // while the native client is acquiring camera/mic and joining Agora, but they
 // must not surface publicly until this endpoint succeeds.
+agoraRouter.post("/api/agora/streams/:postId/diagnostic", async (req, res) => {
+  try {
+    const user = await getWriteUser(req);
+    if (!user) return res.status(401).json({ error: "Unauthorized" });
+    const [post] = await db.select({ userId: ridePosts.userId })
+      .from(ridePosts).where(eq(ridePosts.id, req.params.postId));
+    if (!post || post.userId !== user.id) return res.status(404).json({ error: "Stream not found" });
+    const allowed = ["joining", "joined", "join_rejected", "rtc_error", "connection_failed", "init_failed", "ready_failed"];
+    const stage = String(req.body?.stage ?? "");
+    if (!allowed.includes(stage)) return res.status(400).json({ error: "Invalid stage" });
+    const code = Number(req.body?.code);
+    console.info(`[Agora] host diagnostic post=${req.params.postId} stage=${stage} code=${Number.isInteger(code) && code >= -10000 && code <= 10000 ? code : "none"}`);
+    return res.json({ ok: true });
+  } catch (error: any) {
+    console.error("[Agora] diagnostic error:", error?.message || error);
+    return res.status(500).json({ error: "Diagnostic failed" });
+  }
+});
+
 agoraRouter.post("/api/agora/streams/:postId/ready", async (req, res) => {
   try {
     const user = await getWriteUser(req);
