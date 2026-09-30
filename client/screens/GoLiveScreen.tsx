@@ -59,6 +59,12 @@ export default function GoLiveScreen() {
   const [engine, setEngine] = useState<any>(null);
   const [phase, setPhase] = useState<Phase>("preview");
   const [cameraReleased, setCameraReleased] = useState(false);
+  const [connectionStep, setConnectionStep] = useState("Opening camera…");
+  const connectionStepRef = useRef("Opening camera…");
+  const showConnectionStep = (step: string) => {
+    connectionStepRef.current = step;
+    setConnectionStep(step);
+  };
   const [frontCamera, setFrontCamera] = useState(true);
   const [publishing, setPublishing] = useState(false);
   const [viewerCount, setViewerCount] = useState(0);
@@ -240,7 +246,7 @@ export default function GoLiveScreen() {
   useEffect(() => {
     if (!post?.id || phase === "live") return;
     const t = setTimeout(() => {
-      setLiveError("Stream took too long to start. Please try again.");
+      setLiveError(`Stream took too long to start (${connectionStepRef.current}). Please try again.`);
       setPhase("preview");
       abortStartedPost();
     }, 25000);
@@ -298,6 +304,8 @@ export default function GoLiveScreen() {
     let joined = false;
     let firstFrameEncoded = false;
     let readyInFlight = false;
+    let nativeFailureCode: number | undefined;
+    let nativeFailureStage = "init_failed";
     let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
     const report = (stage: string, code?: number) => {
       const id = postRef.current?.id;
@@ -311,10 +319,14 @@ export default function GoLiveScreen() {
     try {
       const { createAgoraRtcEngine, ChannelProfileType, ClientRoleType } = rtc;
       localEngine = createAgoraRtcEngine();
-      localEngine.initialize({
+      const initResult = localEngine.initialize({
         appId: agoraAppId,
         channelProfile: ChannelProfileType.ChannelProfileLiveBroadcasting,
       });
+      if (typeof initResult === "number" && initResult < 0) {
+        nativeFailureCode = initResult;
+        throw new Error(`Agora initialize returned ${initResult}`);
+      }
       const bail = (msg: string) => {
         if (terminal) return;
         terminal = true;
@@ -331,6 +343,7 @@ export default function GoLiveScreen() {
         const id = postRef.current?.id;
         if (!id || abortedPostsRef.current.has(id)) return;
         readyInFlight = true;
+        showConnectionStep("Publishing video…");
         // Joining audio alone can succeed even while Android cannot open the
         // camera. A real encoded video frame is required before inviting riders
         // or making this stream eligible for Travony TV.
@@ -352,6 +365,7 @@ export default function GoLiveScreen() {
           if (terminal) return;
           report("joined");
           joined = true;
+          if (!firstFrameEncoded) showConnectionStep("Waiting for camera video…");
           markReadyWhenVideoWorks();
         },
         onError: (err: number, msg: string) => {
@@ -370,6 +384,7 @@ export default function GoLiveScreen() {
             bail(`Camera could not start (${reason}). Please try again.`);
           } else if (state === 2 && !terminal) {
             firstFrameEncoded = true;
+            if (joined) showConnectionStep("Publishing video…");
             markReadyWhenVideoWorks();
           }
         },
@@ -406,7 +421,12 @@ export default function GoLiveScreen() {
         },
       });
       localEngine.setClientRole?.(ClientRoleType?.ClientRoleBroadcaster ?? 1);
-      localEngine.enableVideo();
+      const videoResult = localEngine.enableVideo();
+      if (typeof videoResult === "number" && videoResult < 0) {
+        nativeFailureCode = videoResult;
+        nativeFailureStage = "camera_error";
+        throw new Error(`Agora enableVideo returned ${videoResult}`);
+      }
       if (!frontCamera) localEngine.switchCamera?.();
 
       // Dual-stream: viewers on slow connections automatically receive the
@@ -434,6 +454,7 @@ export default function GoLiveScreen() {
       // be owned by our cleanup path before that callback can run.
       engineRef.current = localEngine;
       report("joining");
+      showConnectionStep("Joining video channel…");
       const joinResult = localEngine.joinChannelWithUserAccount(
         tokens.rtcToken,
         tokens.channel,
@@ -454,8 +475,8 @@ export default function GoLiveScreen() {
       setEngine(localEngine);
     } catch (err) {
       console.log("[GoLive] RTC init/join failed:", (err as any)?.message ?? err);
-      report("init_failed");
-      setLiveError("Camera couldn't start the broadcast. Please try again.");
+      report(nativeFailureStage, nativeFailureCode);
+      setLiveError(`Camera couldn't start the broadcast${nativeFailureCode === undefined ? "" : ` (${nativeFailureCode})`}. Please try again.`);
       setPhase("preview");
       const ownedByRef = engineRef.current === localEngine;
       abortStartedPost();
@@ -620,7 +641,7 @@ export default function GoLiveScreen() {
               ? "Starting your stream…"
               : !tokens
                 ? "Securing your channel…"
-                : "Connecting…"}
+                : connectionStep}
           </ThemedText>
         </View>
       ) : null}

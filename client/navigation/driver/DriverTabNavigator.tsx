@@ -246,7 +246,13 @@ export default function DriverTabNavigator() {
     </Tab.Navigator>
     <DriverGoLiveRequests
       enabled={isAuthenticated}
-      onAccepted={(postId) => navigation.navigate("DriverHomeTab", { screen: "GoLive", params: { postId } })}
+      // useNavigation here belongs to the root stack's DriverMain screen,
+      // not to this tab navigator. Route through DriverMain before addressing
+      // the home tab and its nested GoLive screen.
+      onAccepted={(postId) => navigation.navigate("DriverMain", {
+        screen: "DriverHomeTab",
+        params: { screen: "GoLive", params: { postId } },
+      })}
     />
     </>
   );
